@@ -324,6 +324,7 @@ window.RC = window.RC || {};
     started = false;
     if (RC.online) { RC.NetClient.close(); RC.online = false; }
     document.getElementById('lobby').classList.add('hidden');
+    document.getElementById('browser').classList.add('hidden');
     overlay.classList.add('hidden');
     buildStartScreen();
     applyGameMode(selGameMode);
@@ -338,31 +339,70 @@ window.RC = window.RC || {};
   const btnMenu = document.getElementById('btn-menu');
   if (btnMenu) btnMenu.addEventListener('click', openMenu);
 
-  // ── Online (LAN) ──────────────────────────────────
+  // ── Online (internet — public & private rooms) ──────────
   const lobbyEl = document.getElementById('lobby');
+  const browserEl = document.getElementById('browser');
   const N = RC.NetClient;
   let myId = null, isHost = false, lobbyData = null, myRace = 'forge', myTeam = null, firstSnap = false;
+  let roomCode = '', roomPublic = true;
 
-  function showLobby() { ss.classList.add('hidden'); overlay.classList.add('hidden'); lobbyEl.classList.remove('hidden'); }
+  function showBrowser() { ss.classList.add('hidden'); overlay.classList.add('hidden'); lobbyEl.classList.add('hidden'); browserEl.classList.remove('hidden'); }
+  function showLobby() { ss.classList.add('hidden'); overlay.classList.add('hidden'); browserEl.classList.add('hidden'); lobbyEl.classList.remove('hidden'); }
   function setStatus(msg) { document.getElementById('lobby-status').textContent = msg; }
+  function setBrowserStatus(msg) { document.getElementById('browser-status').textContent = msg; }
+  function roomName() { return (document.getElementById('room-name').value || '').trim(); }
+
+  function renderRooms(list) {
+    const rl = document.getElementById('room-list');
+    rl.innerHTML = '';
+    if (!list || !list.length) { rl.innerHTML = '<div id="room-empty">No public games right now — create one above!</div>'; return; }
+    list.forEach(r => {
+      const modeName = (RC.MODES[r.modeId] || {}).name || r.modeId;
+      const mapName = (RC.getMap(r.mapId) || {}).name || r.mapId;
+      const cap = r.cap || 4, full = r.players >= cap;
+      const row = document.createElement('div');
+      row.className = 'roomrow' + (full ? ' full' : '');
+      row.innerHTML = `<div><div class="rr-name">${r.name}</div><div class="rr-sub">${mapName} · ${modeName} · ${r.players}/${cap} players</div></div>`;
+      const btn = document.createElement('button');
+      btn.textContent = full ? 'Full' : 'Join';
+      if (!full) btn.addEventListener('click', () => N.send({ t: 'join', roomId: r.id }));
+      row.appendChild(btn);
+      rl.appendChild(row);
+    });
+  }
 
   document.getElementById('ss-online').addEventListener('click', () => {
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
-    showLobby(); setStatus('Connecting to ' + location.host + ' …');
+    showBrowser(); setBrowserStatus('Connecting…');
+    RC.online = false;
     N.connect(url);
   });
-  document.getElementById('btn-menu2').addEventListener('click', () => {
+  document.getElementById('create-public').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: true }));
+  document.getElementById('create-private').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: false }));
+  document.getElementById('refresh-rooms').addEventListener('click', () => N.send({ t: 'list' }));
+  document.getElementById('join-code-btn').addEventListener('click', () => {
+    const code = (document.getElementById('join-code').value || '').trim().toUpperCase();
+    if (code.length >= 3) { setBrowserStatus('Joining ' + code + '…'); N.send({ t: 'join', code }); }
+  });
+  document.getElementById('browser-back').addEventListener('click', () => {
     N.close(); RC.online = false; started = false;
-    lobbyEl.classList.add('hidden'); openMenu();
+    browserEl.classList.add('hidden'); openMenu();
+  });
+  document.getElementById('btn-menu2').addEventListener('click', () => {
+    N.send({ t: 'leave' });
+    lobbyEl.classList.add('hidden'); showBrowser(); setBrowserStatus('Pick or create a game.');
   });
   document.getElementById('lobby-start').addEventListener('click', () => N.send({ t: 'start' }));
 
-  N.on('__open', () => setStatus('Connected. Waiting in lobby…'));
-  N.on('__error', () => setStatus('Could not connect. Is the server running on this address?'));
-  N.on('__close', () => { if (!started) setStatus('Disconnected from server.'); });
+  N.on('__open', () => { setBrowserStatus('Connected. Create or join a game below.'); N.send({ t: 'list' }); });
+  N.on('__error', () => setBrowserStatus('Could not connect — the server may be waking up. Wait ~30s, then press Back and Online again.'));
+  N.on('__close', () => { if (!started) setBrowserStatus('Disconnected. Press Back, then Online to reconnect.'); });
 
-  N.on('welcome', m => { myId = m.id; isHost = m.host; lobbyData = lobbyData || {}; renderLobby(); });
-  N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); renderLobby(); });
+  N.on('welcome', m => { myId = m.id; });
+  N.on('rooms', m => renderRooms(m.rooms));
+  N.on('joined', m => { roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null; showLobby(); });
+  N.on('joinError', m => setBrowserStatus(m.msg || 'Could not join that game.'));
+  N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); if (m.code) roomCode = m.code; roomPublic = m.public; renderLobby(); });
   N.on('toLobby', () => { started = false; game.over = null; overlayShown = false; overlay.classList.add('hidden'); showLobby(); });
 
   N.on('start', m => startOnline(m));
@@ -379,6 +419,8 @@ window.RC = window.RC || {};
 
   function renderLobby() {
     if (!lobbyData) return;
+    const codeEl = document.getElementById('lobby-code');
+    if (codeEl) codeEl.textContent = roomPublic ? '🌐 Public game' : ('🔒 Private — share code: ' + (roomCode || ''));
     // players
     const pw = document.getElementById('lobby-players');
     pw.innerHTML = '';

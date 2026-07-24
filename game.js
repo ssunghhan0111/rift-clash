@@ -83,6 +83,7 @@ window.RC = window.RC || {};
       this.survivalWave = 0;
       this.survivalKills = 0;
       this.heroOf = {};
+      this._ai = {};              // per-game AI memory (see ai.js) — reset with the game
       if (this.survival) this._buildSurvivalMap();
       else this.buildMap();
     }

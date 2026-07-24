@@ -4,13 +4,16 @@ window.RC = window.RC || {};
 
 RC.AI = (function () {
   const K = RC.CFG;
-  let state = {};   // owner -> { think, waveTimer, waveNum }
 
-  function reset() { state = {}; }
+  // Per-game AI memory lives on game._ai so multiple concurrent games (server rooms)
+  // never share owner state. It is cleared in game.reset(). reset() is kept for the
+  // offline caller but is a harmless no-op now.
+  function reset() { }
 
-  function st(own) {
-    if (!state[own]) state[own] = { think: 0, waveTimer: K.AI_FIRST_WAVE, waveNum: 0 };
-    return state[own];
+  function st(g, own) {
+    if (!g._ai) g._ai = {};
+    if (!g._ai[own]) g._ai[own] = { think: 0, waveTimer: K.AI_FIRST_WAVE, waveNum: 0 };
+    return g._ai[own];
   }
 
   function myUnits(g, own, type) {
@@ -69,7 +72,7 @@ RC.AI = (function () {
   }
 
   function think(dt, g, own) {
-    const s = st(own);
+    const s = st(g, own);
     s.think -= dt;
     s.waveTimer -= dt;
     if (s.think > 0) return;
