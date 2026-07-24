@@ -339,9 +339,21 @@ RC.UI = (function () {
 
   function showOverlay(kind) {
     if (g.survival) {
-      const dn = (RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(g.survivalDiff) : '';
+      const diff = g.survivalDiff || 'medium';
+      const dn = (RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(diff) : diff;
+      const waves = g.survivalWave || 0, kills = g.survivalKills || 0;
+      const score = waves * 100 + kills * 5;
+      let best = 0, isNew = false;
+      try {
+        const key = 'riftclash_hiscore_' + diff;
+        best = parseInt(window.localStorage.getItem(key) || '0', 10) || 0;
+        if (score > best) { best = score; isNew = true; window.localStorage.setItem(key, String(best)); }
+      } catch (e) { /* localStorage unavailable (e.g. file://) — skip persistence */ }
       el.overlayText.innerHTML =
-        `<b class="lose">CRYSTAL SHATTERED</b><span>You held out for ${g.survivalWave || 0} waves${dn ? ' on ' + dn : ''}.</span>`;
+        `<b class="lose">CRYSTAL SHATTERED</b>` +
+        `<span>${dn} — reached <b style="color:var(--cyan)">Wave ${waves}</b> · ${kills} enemies slain</span>` +
+        `<span style="font-size:26px;font-weight:700;color:var(--good)">Score ${score}${isNew ? '  🏆 NEW BEST!' : ''}</span>` +
+        `<span style="color:var(--dim)">Best on ${dn}: ${best}</span>`;
     } else {
       el.overlayText.innerHTML = kind === 'win'
         ? '<b class="win">VICTORY</b><span>Enemy core destroyed.</span>'

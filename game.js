@@ -81,6 +81,7 @@ window.RC = window.RC || {};
 
       this.crystal = null;
       this.survivalWave = 0;
+      this.survivalKills = 0;
       this.heroOf = {};
       if (this.survival) this._buildSurvivalMap();
       else this.buildMap();
@@ -688,6 +689,7 @@ window.RC = window.RC || {};
         if (!u.dead || u._processedDeath) continue;
         u._processedDeath = true;
         this._awardKillXp(u);
+        if (this.survival && !u.def.hero && this.areEnemies(u.owner, this.playerOwner)) this.survivalKills++;
         if (u.def.hero) this._downHero(u);
       }
 

@@ -137,10 +137,13 @@ RC.SURVIVAL = {
     { x: 2430, y: 800, r: 300, color: '#123038' },
     { x: 1500, y: 800, r: 220, color: '#1a2630' },
   ],
-  // rock walls forming a central choke to funnel the horde
+  // Rock walls only near the top/bottom edges — they frame a wide, always-clear
+  // central lane (y ~400–1200) so the horde has an unobstructed straight path to the
+  // crystal. (Units walk in straight lines, so nothing may block the lane itself.)
   obstacles: [
-    { x: 1480, y: 340, w: 150, h: 520 },
-    { x: 1480, y: 1260, w: 150, h: 520 },
-    { x: 1960, y: 800, w: 120, h: 120 },
+    { x: 1480, y: 200, w: 150, h: 380 },
+    { x: 1480, y: 1400, w: 150, h: 380 },
+    { x: 900, y: 210, w: 130, h: 340 },
+    { x: 900, y: 1390, w: 130, h: 340 },
   ],
 };
