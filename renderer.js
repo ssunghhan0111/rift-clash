@@ -355,10 +355,9 @@ RC.Renderer = (function () {
     healthBar(b.x, y - 20, b.w * 0.8, b.hp / b.maxHp, b.hp < b.maxHp || !b.done);
   }
 
-  function drawUnit(g, u) {
-    if (fogged(g, u)) return;
+  // 유닛 색상(소유자색 + 종족 색조) — drawUnit / drawPortrait 공용
+  function unitColors(u, flash) {
     const p = pal(u.owner);
-    const flash = u.hitFlash > 0;
     const c = {
       body:  flash ? '#ffffff' : p.body,
       light: flash ? '#ffffff' : shade(p.body, 0.30),
@@ -377,6 +376,73 @@ RC.Renderer = (function () {
         c.steel = mix(c.steel, FORGE_TINT, 0.25);
       }
     }
+    return c;
+  }
+
+  // 유닛 스프라이트 본체 — 원점 기준으로 그림(+x 방향을 바라봄). drawUnit / drawPortrait 공용
+  function drawUnitSprite(u, c) {
+    const R = u.r;
+    if (u.type === 'wrench') drawWrench(R, c);
+    else if (u.type === 'volt') drawVolt(R, c);
+    else if (u.type === 'shielder') drawShielder(R, c);
+    else if (u.type === 'spark') drawSpark(R, c);
+    else if (u.type === 'hover') drawHover(R, c);
+    else if (u.type === 'patch') drawPatch(R, c);
+    else if (u.type === 'pulse') drawPulse(R, c);
+    else if (u.type === 'heli') drawHeli(R, c);
+    else if (u.type === 'jet') drawJet(R, c);
+    else if (u.type === 'dropship') drawDropship(R, c);
+    else if (u.type === 'slug') drawSlug(R, c);
+    else if (u.type === 'globling') drawGlobling(R, c);
+    else if (u.type === 'spitter') drawSpitter(R, c);
+    else if (u.type === 'bloat') drawBloat(R, c);
+    else if (u.type === 'floater') drawFloater(R, c);
+    else { ctx.fillStyle = c.body; rrect(-R, -R, R * 2, R * 2, 3); ctx.fill(); }
+  }
+
+  // 선택 유닛 초상화 — 작은 캔버스에 확대/애니메이션으로 '카메라 피드'처럼 보여준다
+  function drawPortrait(canvas, u) {
+    if (!canvas || !u) return;
+    const pctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const saved = ctx;
+    ctx = pctx;                       // 스프라이트 함수들이 쓰는 모듈 ctx를 잠시 교체
+    try {
+      ctx.clearRect(0, 0, W, H);
+      // 배경 — 종족색 은은한 방사 그라디언트
+      const tintBg = u.def.race === 'gloop' ? '#0c1f16' : '#0c1622';
+      const bg = ctx.createRadialGradient(W / 2, H * 0.42, 3, W / 2, H * 0.52, H * 0.78);
+      bg.addColorStop(0, tintBg); bg.addColorStop(1, '#05090e');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+      const t = performance.now() / 1000;
+      const bob = Math.sin(t * 2.3) * H * 0.02;      // 숨쉬는 듯한 위아래 흔들림
+      const c = unitColors(u, false);
+      ctx.translate(W / 2, H * 0.55 + bob);
+      const scale = (Math.min(W, H) * 0.30) / Math.max(7, u.r);
+      ctx.scale(scale, scale);
+      ctx.rotate(Math.sin(t * 1.1) * 0.05);          // 미세한 좌우 흔들림
+      ctx.fillStyle = 'rgba(0,0,0,0.32)';            // 바닥 그림자
+      ctx.beginPath(); ctx.ellipse(0, u.r * 1.15, u.r * 1.15, u.r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+      drawUnitSprite(u, c);
+      ctx.restore();
+
+      // 스캔라인 오버레이 (카메라 피드 느낌)
+      ctx.save();
+      ctx.globalAlpha = 0.08; ctx.fillStyle = '#8fe3ff';
+      for (let y = (performance.now() / 26) % 4; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+      ctx.restore();
+    } finally {
+      ctx = saved;                    // 반드시 메인 캔버스 ctx로 복구
+    }
+  }
+
+  function drawUnit(g, u) {
+    if (fogged(g, u)) return;
+    const flash = u.hitFlash > 0;
+    const c = unitColors(u, flash);
 
     const alt = u.def.flying ? 15 : 0;   // 공중 유닛 고도
 
@@ -397,24 +463,7 @@ RC.Renderer = (function () {
 
     ctx.translate(0, -alt);
     ctx.rotate(u.facing);
-    const R = u.r;
-
-    if (u.type === 'wrench') drawWrench(R, c);
-    else if (u.type === 'volt') drawVolt(R, c);
-    else if (u.type === 'shielder') drawShielder(R, c);
-    else if (u.type === 'spark') drawSpark(R, c);
-    else if (u.type === 'hover') drawHover(R, c);
-    else if (u.type === 'patch') drawPatch(R, c);
-    else if (u.type === 'pulse') drawPulse(R, c);
-    else if (u.type === 'heli') drawHeli(R, c);
-    else if (u.type === 'jet') drawJet(R, c);
-    else if (u.type === 'dropship') drawDropship(R, c);
-    else if (u.type === 'slug') drawSlug(R, c);
-    else if (u.type === 'globling') drawGlobling(R, c);
-    else if (u.type === 'spitter') drawSpitter(R, c);
-    else if (u.type === 'bloat') drawBloat(R, c);
-    else if (u.type === 'floater') drawFloater(R, c);
-    else { ctx.fillStyle = c.body; rrect(-R, -R, R * 2, R * 2, 3); ctx.fill(); }
+    drawUnitSprite(u, c);
 
     ctx.restore();
 
@@ -1148,5 +1197,5 @@ RC.Renderer = (function () {
     mctx.strokeRect(g.camera.x * sx, g.camera.y * sy, W * sx, H * sy);
   }
 
-  return { init, draw };
+  return { init, draw, drawPortrait };
 })();

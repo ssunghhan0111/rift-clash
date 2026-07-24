@@ -131,8 +131,11 @@
   .stat { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); }
   .stat b { font-family: var(--mono); color: var(--text); font-weight: 600; }
 
-  #cmd-panel { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
-  #cmd-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+  #cmd-panel { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden; }
+  #cmd-grid { display: flex; gap: 10px; flex-wrap: wrap; align-content: flex-start;
+              flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+  #cmd-grid::-webkit-scrollbar { width: 7px; }
+  #cmd-grid::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
   .cmd {
     position: relative; width: 132px; min-height: 60px;
     text-align: left; padding: 8px 10px 8px 12px;
@@ -162,6 +165,50 @@
   }
   .qslot span { position: relative; z-index: 1; }
   .qslot i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(240,138,42,.35); }
+
+  /* ── 유닛 초상화 (카메라 피드) ── */
+  #sel-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+  #sel-head-text { flex: 1; min-width: 0; }
+  #portrait-wrap {
+    flex: none; width: 78px; height: 78px; position: relative;
+    border: 1px solid var(--line); border-radius: 5px; background: #070c12;
+    overflow: hidden; box-shadow: inset 0 0 14px rgba(0,0,0,.7);
+  }
+  #portrait-wrap::after {                 /* 카메라 프레임 코너 느낌 */
+    content: ''; position: absolute; inset: 4px; pointer-events: none;
+    border: 1px solid rgba(143,227,255,.18); border-radius: 3px;
+  }
+  #portrait-wrap.hidden { display: none; }
+  #portrait { width: 100%; height: 100%; display: block; }
+
+  /* ── 세로 모드 회전 안내 ── */
+  #rotate-note {
+    position: fixed; inset: 0; z-index: 100; display: none;
+    background: radial-gradient(circle at 50% 38%, #1a2635, #06090e);
+    color: var(--text); align-items: center; justify-content: center;
+    text-align: center; padding: 26px; font-size: 15px; line-height: 1.7;
+  }
+  #rotate-note .rot-ic { font-size: 50px; margin-bottom: 14px; display: inline-block;
+    animation: rotwig 1.8s ease-in-out infinite; }
+  #rotate-note b { color: var(--orange); letter-spacing: .18em; font-family: var(--mono); font-size: 17px; }
+  @keyframes rotwig { 0%, 100% { transform: rotate(0deg); } 55% { transform: rotate(-90deg); } }
+  @media (orientation: portrait) and (max-width: 1024px) {
+    #rotate-note { display: flex; }
+  }
+
+  /* ── 좁은 화면(모바일/소형 태블릿) — 명령 버튼 축소 ── */
+  @media (max-width: 820px) {
+    #hud { grid-template-columns: 150px 1fr; height: 150px; }
+    #sel-panel { padding: 10px; }
+    #portrait-wrap { width: 58px; height: 58px; }
+    #sel-name { font-size: 14px; }
+    #sel-info { font-size: 10.5px; min-height: 0; margin: 3px 0 6px; }
+    #sel-stats { grid-template-columns: 1fr; }
+    .cmd { width: 106px; min-height: 50px; padding: 6px 8px 6px 10px; }
+    .cmd .l { font-size: 12px; }
+    .cmd .s { font-size: 9.5px; }
+    .cmd kbd { display: none; }
+  }
 
   /* ── 시작 화면 ─────────────────────────────── */
   #startscreen {
@@ -287,8 +334,13 @@
 
   <div id="hud">
     <div id="sel-panel">
-      <div id="sel-name">Nothing selected</div>
-      <div id="sel-info">Click or drag to select units.</div>
+      <div id="sel-head">
+        <div id="portrait-wrap" class="hidden"><canvas id="portrait" width="96" height="96"></canvas></div>
+        <div id="sel-head-text">
+          <div id="sel-name">Nothing selected</div>
+          <div id="sel-info">Click or drag to select units.</div>
+        </div>
+      </div>
       <div id="sel-stats"></div>
     </div>
     <div id="cmd-panel">
@@ -334,6 +386,13 @@
   <div style="display:flex; gap:12px; margin-top:22px;">
     <button id="lobby-start" class="hidden">Start Match</button>
     <button id="btn-menu2">Leave</button>
+  </div>
+</div>
+
+<div id="rotate-note">
+  <div>
+    <div class="rot-ic">📱</div>
+    <b>RIFT CLASH</b><br>Rotate your device to landscape<br>for the best view and controls.
   </div>
 </div>
 

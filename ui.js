@@ -12,6 +12,8 @@ RC.UI = (function () {
     el.selName = document.getElementById('sel-name');
     el.selInfo = document.getElementById('sel-info');
     el.selStats = document.getElementById('sel-stats');
+    el.portrait = document.getElementById('portrait');
+    el.portraitWrap = document.getElementById('portrait-wrap');
     el.cmds = document.getElementById('cmd-grid');
     el.queue = document.getElementById('queue-row');
     el.toast = document.getElementById('toast');
@@ -104,6 +106,23 @@ RC.UI = (function () {
     }).join(',') + '|' + g.res[me].shard.toFixed(0) + '|' + s.used + '/' + s.max + '|' + up;
     if (sig !== lastSig) { lastSig = sig; renderPanel(sel); }
     renderQueue(sel);
+    updatePortrait(sel);
+  }
+
+  // 선택 유닛 초상화 — 매 프레임 갱신(애니메이션). 여러 종류가 섞이면 무작위 한 기를 보여줌.
+  let portraitUnit = null, portraitTypes = '';
+  function updatePortrait(sel) {
+    if (!el.portraitWrap || !RC.Renderer.drawPortrait) return;
+    const units = sel.filter(e => e.kind === 'unit' && !e.dead);
+    if (!units.length) { el.portraitWrap.classList.add('hidden'); portraitUnit = null; portraitTypes = ''; return; }
+    el.portraitWrap.classList.remove('hidden');
+    const types = [...new Set(units.map(u => u.type))].sort().join(',');
+    // 선택 구성이 바뀌었거나 대상이 사라졌을 때만 다시 고른다(깜빡임 방지)
+    if (types !== portraitTypes || !portraitUnit || portraitUnit.dead || units.indexOf(portraitUnit) < 0) {
+      portraitTypes = types;
+      portraitUnit = units[(Math.random() * units.length) | 0];
+    }
+    RC.Renderer.drawPortrait(el.portrait, portraitUnit);
   }
 
   function renderPanel(sel) {
