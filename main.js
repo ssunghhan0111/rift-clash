@@ -28,6 +28,7 @@ window.RC = window.RC || {};
   let selRace = 'forge';
   let selGameMode = 'vs';       // 'tutorial' | 'vs' | 'survival'
   let selSquad = 'solo';        // survival: 'solo' | 'ally'
+  let selDiff = 'medium';       // survival: 'easy' | 'medium' | 'insane'
   let practiceHints = null;
 
   function drawMapPreview(canvas, map) {
@@ -107,6 +108,29 @@ window.RC = window.RC || {};
 
     buildGameModes();
     buildSquad();
+    buildDiff();
+  }
+
+  const DIFFS = [
+    { id: 'easy', name: 'Easy', sub: 'Smaller, weaker waves. Learn the ropes.' },
+    { id: 'medium', name: 'Medium', sub: 'A steady, rising challenge.' },
+    { id: 'insane', name: 'Crazy Hard', sub: 'Huge, brutal waves. Good luck.' },
+  ];
+  function buildDiff() {
+    const wrap = document.getElementById('ss-diff');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    DIFFS.forEach(d => {
+      const b = document.createElement('div');
+      b.className = 'modebtn' + (d.id === selDiff ? ' sel' : '');
+      b.innerHTML = `<div class="mb-name">${d.name}</div><div class="mb-sub">${d.sub}</div>`;
+      b.addEventListener('click', () => {
+        selDiff = d.id;
+        wrap.querySelectorAll('.modebtn').forEach(x => x.classList.remove('sel'));
+        b.classList.add('sel');
+      });
+      wrap.appendChild(b);
+    });
   }
 
   // ── Game-mode cards (Tutorial / Versus / Survival) ──
@@ -157,6 +181,7 @@ window.RC = window.RC || {};
     show('panel-tutorial', m === 'tutorial');
     show('sec-map', m === 'vs');
     show('sec-mode', m === 'vs');
+    show('sec-diff', m === 'survival');
     show('sec-squad', m === 'survival');
     show('sec-race', m !== 'tutorial');
     show('act-vs', m === 'vs', 'flex');
@@ -188,7 +213,7 @@ window.RC = window.RC || {};
   function startSurvival() {
     RC.online = false;
     game.practice = false;
-    game.setupSurvival({ race: selRace, ally: selSquad === 'ally' });
+    game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
     RC.AI.reset();
     resize();
     if (game.crystal) RC.Input.centerOn(game.crystal.x, game.crystal.y);

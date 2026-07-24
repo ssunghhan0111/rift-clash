@@ -34,6 +34,7 @@ window.RC = window.RC || {};
     setupSurvival(opts) {
       opts = opts || {};
       this.survival = true;
+      this.survivalDiff = opts.difficulty || 'medium';
       const race = opts.race || 'forge';
       const players = [{ owner: 1, team: 1, ai: false }];
       if (opts.ally) players.push({ owner: 3, team: 1, ai: true });

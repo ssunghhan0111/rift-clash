@@ -300,8 +300,9 @@ RC.UI = (function () {
 
   function showOverlay(kind) {
     if (g.survival) {
+      const dn = (RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(g.survivalDiff) : '';
       el.overlayText.innerHTML =
-        `<b class="lose">CRYSTAL SHATTERED</b><span>You held out for ${g.survivalWave || 0} waves.</span>`;
+        `<b class="lose">CRYSTAL SHATTERED</b><span>You held out for ${g.survivalWave || 0} waves${dn ? ' on ' + dn : ''}.</span>`;
     } else {
       el.overlayText.innerHTML = kind === 'win'
         ? '<b class="win">VICTORY</b><span>Enemy core destroyed.</span>'
