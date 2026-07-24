@@ -293,6 +293,13 @@ RC.BUILDINGS = {
     tower: true, dmg: 15, range: 160, cd: 0.9, air: true, acid: { dmg: 3, dur: 4, shred: 1, max: 4 },
     desc: 'Defensive turret that spits acid at ground and air.'
   },
+
+  // ── Survival objective ──
+  crystal: {
+    id: 'crystal', name: 'Rift Crystal', hp: 4000, w: 84, h: 84,
+    cost: 0, time: 0, supplyGiven: 0, produces: [], isCrystal: true,
+    desc: 'The universal crystal. Protect it — if it shatters, your run ends.'
+  },
 };
 
 // Order of buildings a worker can construct (default = Forge)

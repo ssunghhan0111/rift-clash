@@ -322,6 +322,29 @@ RC.Renderer = (function () {
         // 발광 코어
         ctx.fillStyle = acid ? '#7dff9e' : (big ? '#ffb24f' : C.node);
         ctx.beginPath(); ctx.arc(b.x, b.y, big ? 6 : 5, 0, Math.PI * 2); ctx.fill();
+      } else if (b.type === 'crystal') {
+        // 리프트 크리스탈 — 맥동하는 청록 결정 (지켜야 할 목표)
+        const tt = performance.now() / 1000;
+        const pulse = 0.6 + 0.4 * Math.abs(Math.sin(tt * 1.5));
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.globalAlpha = 0.25 * pulse;                 // 광채
+        ctx.fillStyle = C.node;
+        ctx.beginPath(); ctx.arc(0, 0, 48, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+        const shard = (ox, h, w2, col) => {
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.moveTo(ox, -h); ctx.lineTo(ox + w2, 8); ctx.lineTo(ox, 22); ctx.lineTo(ox - w2, 8);
+          ctx.closePath(); ctx.fill();
+        };
+        shard(-21, 30, 12, '#2aa7c4');
+        shard(21, 34, 13, '#2aa7c4');
+        shard(0, 54, 17, C.node);
+        ctx.globalAlpha = 0.85 * pulse;
+        shard(0, 48, 6, '#e6fdff');
+        ctx.globalAlpha = 1;
+        ctx.restore();
       }
     }
 
@@ -352,7 +375,7 @@ RC.Renderer = (function () {
       ctx.globalAlpha = 1;
     }
 
-    healthBar(b.x, y - 20, b.w * 0.8, b.hp / b.maxHp, b.hp < b.maxHp || !b.done);
+    healthBar(b.x, y - 20, b.w * 0.8, b.hp / b.maxHp, b.hp < b.maxHp || !b.done || b.def.isCrystal);
   }
 
   // 유닛 색상(소유자색 + 종족 색조) — drawUnit / drawPortrait 공용

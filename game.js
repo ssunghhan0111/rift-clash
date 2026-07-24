@@ -23,9 +23,25 @@ window.RC = window.RC || {};
 
     // 맵/모드 교체 후 재시작. racePick = { owner: 'forge'|'gloop' } (선택)
     setup(mapDef, mode, racePick) {
+      this.survival = false;
       this.mapDef = mapDef || this.mapDef;
       this.mode = mode || this.mode;
       if (racePick) this._racePick = racePick;
+      this.reset();
+    }
+
+    // 생존 모드 시작. opts = { race, ally(bool) }
+    setupSurvival(opts) {
+      opts = opts || {};
+      this.survival = true;
+      const race = opts.race || 'forge';
+      const players = [{ owner: 1, team: 1, ai: false }];
+      if (opts.ally) players.push({ owner: 3, team: 1, ai: true });
+      players.push({ owner: 2, team: 2, ai: false, waveEnemy: true });
+      this.mode = { id: 'survival', name: 'Survival', survival: true, count: players.length, players };
+      this._racePick = { 1: race, 3: race, 2: 'forge' };
+      this.survivalMap = RC.SURVIVAL;
+      this.mapDef = { world: RC.SURVIVAL.world, terrain: RC.SURVIVAL.terrain, obstacles: RC.SURVIVAL.obstacles, spawns: [{ x: 0, y: 0 }] };
       this.reset();
     }
 
@@ -62,7 +78,10 @@ window.RC = window.RC || {};
         this.upgrades[p.owner] = { atk: 0, arm: 0, eng: 0, spd: 0, crit: 0, frost: 0, tough: 0 };
       });
 
-      this.buildMap();
+      this.crystal = null;
+      this.survivalWave = 0;
+      if (this.survival) this._buildSurvivalMap();
+      else this.buildMap();
     }
 
     notify(msg) {
@@ -235,6 +254,55 @@ window.RC = window.RC || {};
       this.camera.y = this.spawn1.y - 380;
 
       this._initVision();
+    }
+
+    // ── 생존 모드 맵 생성 ─────────────────────────────
+    // 방어자 팀(1) 기지 + 지킬 크리스탈을 오른쪽에, 적 웨이브 스폰을 왼쪽에 배치.
+    _buildSurvivalMap() {
+      const map = this.survivalMap;
+      CFG.WORLD_W = map.world.w;
+      CFG.WORLD_H = map.world.h;
+      this.world = { w: map.world.w, h: map.world.h };
+      this.terrain = (map.terrain || []).map(t => ({ ...t }));
+      this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
+
+      // 자원 무더기 (일꾼 채집 대상) — 유닛 생성 전에 먼저 만든다
+      (map.nodeClusters || []).forEach(m => {
+        const n = m.n || 4, rad = m.rad || 100;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + 0.4;
+          this.nodes.push(new RC.ShardNode(m.x + Math.cos(a) * rad, m.y + Math.sin(a) * rad));
+        }
+      });
+
+      // 방어자(팀 1) 기지 + 시작 일꾼
+      const team1 = this.players.filter(p => p.team === 1);
+      team1.forEach((p, idx) => {
+        const base = map.bases[idx] || map.bases[0];
+        p.spawn = base;
+        const rdef = RC.RACES[p.race] || RC.RACES.forge;
+        this.buildings.push(new RC.Building(rdef.core, base.x, base.y, p.owner, true));
+        for (let w = 0; w < 4; w++) {
+          const u = new RC.Unit(rdef.worker, base.x - 60 + w * 40, base.y + 90, p.owner);
+          this.units.push(u);
+          const nn = this.findNearestNode(u.x, u.y);
+          if (nn) u.gatherFrom(nn);
+        }
+      });
+
+      // 지킬 크리스탈 (방어자 소유)
+      const cOwner = team1[0].owner;
+      this.crystal = new RC.Building('crystal', map.crystal.x, map.crystal.y, cOwner, true);
+      this.buildings.push(this.crystal);
+      this.enemySpawn = { x: map.enemySpawn.x, y: map.enemySpawn.y };
+
+      // 카메라 = 크리스탈 기준
+      this.spawn1 = { x: map.bases[0].x, y: map.bases[0].y };
+      this.camera.x = this.crystal.x - 640;
+      this.camera.y = this.crystal.y - 380;
+
+      this._initVision();
+      if (RC.Survival) RC.Survival.reset();
     }
 
     // ── 전장의 안개 / Fog of War ───────────────────────
@@ -547,6 +615,7 @@ window.RC = window.RC || {};
       });
 
       RC.AI.update(dt, this);
+      if (this.survival && RC.Survival) RC.Survival.update(dt, this);
       this.separate();
 
       // 죽는 순간 폭발 (블로트 산성 폭발 등)
@@ -569,13 +638,19 @@ window.RC = window.RC || {};
         if (this._visAcc >= CFG.VIS_INTERVAL) { this._visAcc = 0; this.updateVision(); }
       }
 
-      // 승패 — 내 코어가 죽으면 패, 상대 팀 코어가 전멸하면 승
-      const myCore = this.core(this.playerOwner);
-      if (!myCore) this.over = 'lose';
-      else {
-        const enemyLeft = this.buildings.some(b =>
-          b.def.isCore && !b.dead && this.areEnemies(b.owner, this.playerOwner));
-        if (!enemyLeft) this.over = 'win';
+      // 승패
+      if (this.survival) {
+        // 생존 모드 — 크리스탈이 깨지면 종료(무한 모드라 '승리'는 없음)
+        if (!this.crystal || this.crystal.dead) this.over = 'lose';
+      } else {
+        // 대전 — 내 코어가 죽으면 패, 상대 팀 코어가 전멸하면 승
+        const myCore = this.core(this.playerOwner);
+        if (!myCore) this.over = 'lose';
+        else {
+          const enemyLeft = this.buildings.some(b =>
+            b.def.isCore && !b.dead && this.areEnemies(b.owner, this.playerOwner));
+          if (!enemyLeft) this.over = 'win';
+        }
       }
     }
   }

@@ -113,3 +113,34 @@ RC.MODES = {
     ],
   },
 };
+
+// ── Survival map — a horizontal lane. Enemy waves march left→right toward the
+//    Rift Crystal; the defender base(s) sit behind it. Endless, escalating waves.
+RC.SURVIVAL = {
+  id: 'sv_gorge', name: 'Crystal Gorge',
+  world: { w: 3400, h: 1600 },
+  bg: '#101820', ground: '#16232b',
+  enemySpawn: { x: 250, y: 800 },     // waves appear here and head for the crystal
+  crystal: { x: 2430, y: 800 },       // the objective to protect
+  bases: [                            // defender start positions (player, then ally)
+    { x: 2960, y: 620 },
+    { x: 2960, y: 980 },
+  ],
+  // shard clusters near the defender side so you can gather and build
+  nodeClusters: [
+    { x: 3120, y: 400, n: 4, rad: 90 },
+    { x: 3120, y: 1200, n: 4, rad: 90 },
+    { x: 2560, y: 320, n: 3, rad: 80 },
+    { x: 2560, y: 1280, n: 3, rad: 80 },
+  ],
+  terrain: [
+    { x: 2430, y: 800, r: 300, color: '#123038' },
+    { x: 1500, y: 800, r: 220, color: '#1a2630' },
+  ],
+  // rock walls forming a central choke to funnel the horde
+  obstacles: [
+    { x: 1480, y: 340, w: 150, h: 520 },
+    { x: 1480, y: 1260, w: 150, h: 520 },
+    { x: 1960, y: 800, w: 120, h: 120 },
+  ],
+};

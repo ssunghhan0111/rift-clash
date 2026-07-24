@@ -9,6 +9,8 @@ RC.UI = (function () {
     el.shard = document.getElementById('res-shard');
     el.pop = document.getElementById('res-pop');
     el.clock = document.getElementById('res-clock');
+    el.wave = document.getElementById('res-wave');
+    el.waveBox = document.getElementById('wave-box');
     el.selName = document.getElementById('sel-name');
     el.selInfo = document.getElementById('sel-info');
     el.selStats = document.getElementById('sel-stats');
@@ -90,6 +92,12 @@ RC.UI = (function () {
     el.pop.className = (s.used >= s.max) ? 'val warn' : 'val';
     const m = Math.floor(g.time / 60), sec = Math.floor(g.time % 60);
     el.clock.textContent = `${m}:${String(sec).padStart(2, '0')}`;
+
+    // 생존 모드 — 웨이브 표시
+    if (el.waveBox) {
+      if (g.survival) { el.waveBox.style.display = ''; el.wave.textContent = g.survivalWave || 0; }
+      else el.waveBox.style.display = 'none';
+    }
 
     // 알림
     el.toast.innerHTML = g.log.map(l => `<div>${l.msg}</div>`).join('');
@@ -291,9 +299,14 @@ RC.UI = (function () {
   }
 
   function showOverlay(kind) {
-    el.overlayText.innerHTML = kind === 'win'
-      ? '<b class="win">VICTORY</b><span>Enemy core destroyed.</span>'
-      : '<b class="lose">DEFEAT</b><span>Your core has fallen.</span>';
+    if (g.survival) {
+      el.overlayText.innerHTML =
+        `<b class="lose">CRYSTAL SHATTERED</b><span>You held out for ${g.survivalWave || 0} waves.</span>`;
+    } else {
+      el.overlayText.innerHTML = kind === 'win'
+        ? '<b class="win">VICTORY</b><span>Enemy core destroyed.</span>'
+        : '<b class="lose">DEFEAT</b><span>Your core has fallen.</span>';
+    }
     el.overlay.classList.remove('hidden');
   }
 
