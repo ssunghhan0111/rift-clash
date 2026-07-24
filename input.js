@@ -4,6 +4,9 @@ window.RC = window.RC || {};
 RC.Input = (function () {
   const CFG = RC.CFG;
   let g, cv, mini;
+  let amoveArmed = false;                      // next ground order is an attack-move
+  function snd(n) { if (RC.Audio) RC.Audio.play(n); }
+  function mark(x, y, type) { if (g.marks) g.marks.push({ mark: type, x, y, t: 0.6 }); }
 
   const state = {
     screen: { x: 0, y: 0 },
@@ -189,6 +192,7 @@ RC.Input = (function () {
     const workers = g.selection.filter(s => s.kind === 'unit' && s.def.worker);
     const w = workers.length ? [workers[0]] : g.units.filter(u => u.owner === me && u.def.worker).slice(0, 1);
     RC.cmd(g, { t: 'build', bt: type, x: state.world.x, y: state.world.y, ids: w.map(u => u.id) });
+    if (RC.Audio) RC.Audio.play('build');
     if (!(e.pointerType === 'mouse' && e.shiftKey)) g.placing = null;
   }
 
@@ -210,7 +214,7 @@ RC.Input = (function () {
     }
 
     // touch/pen — smart tap: select if it's mine, otherwise issue a command
-    if (ent && ent.owner === me) { g.selection = [ent]; return; }
+    if (ent && ent.owner === me) { g.selection = [ent]; snd('select'); return; }
     const mine = g.selection.some(s => s.owner === me);
     if (mine) { onRight(); return; }
     g.selection = [];
@@ -230,6 +234,7 @@ RC.Input = (function () {
 
     const hasFighter = g.selection.some(s => s.kind === 'unit' && !s.def.worker);
     if (hasFighter) g.selection = g.selection.filter(s => s.kind !== 'unit' || !s.def.worker);
+    if (g.selection.length) snd('select');
   }
 
   function onRight() {
@@ -266,18 +271,27 @@ RC.Input = (function () {
     const node = g.nodeAt(wx, wy);
     const site = g.buildings.find(b => b.owner === me && !b.done && b.contains(wx, wy));
 
-    if (enemy) { RC.cmd(g, { t: 'attack', ids, tid: enemy.id }); return; }
+    if (enemy) { RC.cmd(g, { t: 'attack', ids, tid: enemy.id }); mark(enemy.x, enemy.y, 'attack'); snd('attack'); amoveArmed = false; return; }
     if (site && workerIds.length) {
       RC.cmd(g, { t: 'buildSite', ids: workerIds, bid: site.id });
       if (otherIds.length) RC.cmd(g, { t: 'move', ids: otherIds, x: wx, y: wy });
-      return;
+      mark(wx, wy, 'move'); snd('move'); amoveArmed = false; return;
     }
     if (node && workerIds.length) {
       RC.cmd(g, { t: 'gather', ids: workerIds, nid: node.id });
       if (otherIds.length) RC.cmd(g, { t: 'move', ids: otherIds, x: wx, y: wy });
-      return;
+      mark(node.x, node.y, 'move'); snd('move'); amoveArmed = false; return;
     }
-    RC.cmd(g, { t: 'move', ids, x: wx, y: wy });
+    // plain ground order — attack-move (armed) engages enemies on the way; workers still just move
+    if (amoveArmed && otherIds.length) {
+      RC.cmd(g, { t: 'amove', ids: otherIds, x: wx, y: wy });
+      if (workerIds.length) RC.cmd(g, { t: 'move', ids: workerIds, x: wx, y: wy });
+      mark(wx, wy, 'amove'); snd('attack');
+    } else {
+      RC.cmd(g, { t: 'move', ids, x: wx, y: wy });
+      mark(wx, wy, 'move'); snd('move');
+    }
+    amoveArmed = false;
   }
 
   function onKey(e) {
@@ -318,7 +332,13 @@ RC.Input = (function () {
         (s.def.ability && s.def.ability.key.toLowerCase() === k) ||
         (s.def.hero && (s.def.skills || []).some(sk => sk.key.toLowerCase() === k))
       ));
-    if (casters.length) { RC.cmd(g, { t: 'cast', ids: casters.map(u => u.id), key: k }); return; }
+    if (casters.length) { RC.cmd(g, { t: 'cast', ids: casters.map(u => u.id), key: k }); snd('cast'); return; }
+
+    // attack-move: 'A' then click (only when no selected unit uses 'A' for an ability)
+    if (k === 'a') {
+      const combat = g.selection.some(s => s.kind === 'unit' && s.owner === me && !s.def.worker);
+      if (combat) { amoveArmed = true; g.notify('Attack-move — click a destination'); snd('select'); return; }
+    }
 
     // build hotkey — with a worker selected, start placing the matching building
     const hasWorker = g.selection.some(s => s.kind === 'unit' && s.def.worker && s.owner === me);
@@ -382,5 +402,7 @@ RC.Input = (function () {
     }
   }
 
-  return { init, state, updateCamera, centerOn, clampCam };
+  function armAttackMove() { amoveArmed = true; if (g) g.notify('Attack-move — tap a destination'); snd('select'); }
+
+  return { init, state, updateCamera, centerOn, clampCam, armAttackMove };
 })();

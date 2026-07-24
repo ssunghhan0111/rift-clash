@@ -203,6 +203,7 @@
     #topbar { height: 38px; gap: 12px; padding: 0 10px; }
     #logo { display: none; }
     .res { font-size: 10px; gap: 5px; } .res .val { font-size: 13px; }
+    #mute-btn { margin-left: auto !important; }
     #hud { grid-template-columns: 148px 1fr; height: 138px; }
     #sel-panel { padding: 9px 8px; }
     #portrait-wrap { width: 54px; height: 54px; }
@@ -401,7 +402,8 @@
     <div class="res">Pop <span class="val" id="res-pop">0 / 0</span></div>
     <div class="res">Time <span class="val" id="res-clock">0:00</span></div>
     <div class="res" id="wave-box" style="display:none">Wave <span class="val" id="res-wave" style="color:var(--cyan)">0</span></div>
-    <div id="hint">Left-click select · Right-click command · Skill buttons/hotkeys for abilities · Research upgrades at the tech building · Workers build towers · Select units then right-click a dropship to board, U to unload</div>
+    <div id="hint">Left-click select · Right-click command · A then click = attack-move · Skill buttons/hotkeys for abilities · Workers build towers · Right-click a dropship to board</div>
+    <button id="mute-btn" title="Sound on/off" style="margin-left:10px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">🔊</button>
   </div>
 
   <div id="stage">
@@ -413,6 +415,7 @@
       <button class="tbtn" id="tb-idle" title="Find idle worker (F)">👷</button>
       <button class="tbtn" id="tb-home" title="Go to base (Space)">🏠</button>
       <button class="tbtn" id="tb-hero" title="Select hero (H)">⭐</button>
+      <button class="tbtn" id="tb-amove" title="Attack-move (A)">⚔️</button>
       <button class="tbtn" id="tb-cancel" title="Deselect (Esc)">✕</button>
       <div class="tb-groups">
         <button class="tbtn grp" data-g="1">1</button>
@@ -573,6 +576,8 @@
 
 <script src="config.js"></script>
 <script src="maps.js"></script>
+<script src="pathfind.js"></script>
+<script src="audio.js"></script>
 <script src="entities.js"></script>
 <script src="game.js"></script>
 <script src="ai.js"></script>

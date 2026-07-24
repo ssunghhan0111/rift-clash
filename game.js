@@ -84,6 +84,8 @@ window.RC = window.RC || {};
       this.survivalKills = 0;
       this.heroOf = {};
       this._ai = {};              // per-game AI memory (see ai.js) — reset with the game
+      this._nav = null;           // pathfinding nav grid — rebuilt lazily for the new map
+      this.marks = [];            // client-side visual feedback (command markers, damage numbers)
       if (this.survival) this._buildSurvivalMap();
       else this.buildMap();
     }
@@ -184,7 +186,11 @@ window.RC = window.RC || {};
         const d = RC.dist(h.x, h.y, u.x, u.y);
         if (d < bd) { bd = d; best = h; }
       }
-      if (best) best.gainXp(val);
+      if (best) {
+        const lv = best.level;
+        best.gainXp(val);
+        if (best.level > lv && best.owner === this.playerOwner && RC.Audio) RC.Audio.play('levelup');
+      }
     }
 
     // 영웅 전사 — 제거하지 않고 부활 대기 상태로. 부활 비용을 즉시 차감.
@@ -689,6 +695,7 @@ window.RC = window.RC || {};
       for (const u of this.units) {
         if (!u.dead || u._processedDeath) continue;
         u._processedDeath = true;
+        if (RC.Audio) RC.Audio.play('explode');
         this._awardKillXp(u);
         if (this.survival && !u.def.hero && this.areEnemies(u.owner, this.playerOwner)) this.survivalKills++;
         if (u.def.hero) this._downHero(u);

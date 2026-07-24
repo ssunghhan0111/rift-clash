@@ -33,6 +33,15 @@ window.RC = window.RC || {};
         if (tgt && game.areEnemies(tgt.owner, owner)) us.forEach(u => u.attackTarget(tgt));
         break;
       }
+      case 'amove': {   // attack-move: march to a point, engaging enemies met on the way
+        const us = ownUnits(game, owner, c.ids);
+        us.forEach((u, i) => {
+          const ring = Math.floor(i / 6), a = (i % 6) / 6 * Math.PI * 2;
+          const off = ring === 0 && us.length === 1 ? 0 : 26 + ring * 26;
+          u.attackMoveTo(c.x + Math.cos(a) * off, c.y + Math.sin(a) * off);
+        });
+        break;
+      }
       case 'gather': {
         const us = ownUnits(game, owner, c.ids);
         const node = byId(game.nodes, c.nid);

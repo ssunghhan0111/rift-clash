@@ -13,6 +13,7 @@ const os = require('os');
 global.window = global;
 require('./config.js');
 require('./maps.js');
+require('./pathfind.js');
 require('./entities.js');
 require('./game.js');
 require('./ai.js');

@@ -71,6 +71,7 @@ RC.Renderer = (function () {
     g.units.forEach(u => drawUnit(g, u));
     drawFog(g, W, H);                 // 전장의 안개 — 적/지형을 덮는다
     drawSelection(g);
+    drawMarks(g);                     // 명령 표식 + 데미지 숫자
     if (g.placing) drawGhost(g, input);
 
     ctx.restore();
@@ -1188,6 +1189,33 @@ RC.Renderer = (function () {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(g.fogCanvas, 0, 0, g.visCols, g.visRows, 0, 0, CFG.WORLD_W, CFG.WORLD_H);
     ctx.restore();
+  }
+
+  // 명령 목적지 표식 + 떠오르는 데미지/치유 숫자 (클라이언트 전용 시각 피드백)
+  function drawMarks(g) {
+    if (!g.marks || !g.marks.length) return;
+    for (const m of g.marks) {
+      if (m.dmg != null) {
+        const life = 0.8, k = Math.max(0, m.t / life);
+        const y = m.y - (1 - k) * 26;
+        ctx.globalAlpha = Math.min(1, k * 1.4);
+        ctx.font = 'bold ' + (m.crit ? 16 : 13) + 'px ui-monospace, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = m.heal ? C.heal : (m.crit ? C.crit : '#ffd9c0');
+        ctx.fillText((m.heal ? '+' : '') + Math.round(m.dmg), m.x, y);
+        ctx.globalAlpha = 1;
+      } else {
+        const life = 0.6, k = Math.max(0, m.t / life);
+        const col = m.mark === 'attack' ? C.hpBad : (m.mark === 'amove' ? '#ffb24f' : C.select);
+        const r = 6 + (1 - k) * 16;
+        ctx.globalAlpha = k * 0.9;
+        ctx.strokeStyle = col; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(m.x, m.y, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
   }
 
   function drawSelection(g) {

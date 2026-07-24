@@ -191,10 +191,13 @@ window.RC = window.RC || {};
     if (rh) rh.textContent = m === 'survival' ? 'Your faction' : 'Faction (enemy AI takes the other)';
   }
 
+  function audioGo() { if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); RC.Audio.startMusic(); } }
+
   function startGame() {
     RC.online = false;
     game.practice = false;
     game.heroesEnabled = true;
+    audioGo();
     game.playerOwner = 1;
     // my faction = selection, AI takes the opposite (guarantees Forge vs Gloop)
     const other = selRace === 'forge' ? 'gloop' : 'forge';
@@ -215,6 +218,7 @@ window.RC = window.RC || {};
     RC.online = false;
     game.practice = false;
     game.heroesEnabled = true;
+    audioGo();
     game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
     RC.AI.reset();
     resize();
@@ -375,6 +379,7 @@ window.RC = window.RC || {};
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
     showBrowser(); setBrowserStatus('Connecting…');
     RC.online = false;
+    if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); }
     N.connect(url);
   });
   document.getElementById('create-public').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: true }));
@@ -473,6 +478,7 @@ window.RC = window.RC || {};
 
   function startOnline(m) {
     RC.online = true;
+    audioGo();
     game.heroesEnabled = false;      // online matches run on the server, which has no heroes
     const map = RC.getMap(m.mapId);
     const mode = RC.MODES[m.modeId] || RC.MODES['1v1'];
@@ -513,10 +519,15 @@ window.RC = window.RC || {};
         game.selection = game.selection.filter(e => uset.has(e) || bset.has(e));
         if (RC.CFG.FOG_ENABLED && game.visNow) game.updateVision();
       }
+      if (game.marks && game.marks.length) { for (const m of game.marks) m.t -= dt; game.marks = game.marks.filter(m => m.t > 0); }
       RC.Renderer.draw(game, RC.Input.state);
       RC.UI.update();
 
-      if (game.over && !overlayShown) { overlayShown = true; RC.UI.showOverlay(game.over); }
+      if (game.over && !overlayShown) {
+        overlayShown = true;
+        RC.UI.showOverlay(game.over);
+        if (RC.Audio) RC.Audio.play(game.over === 'win' ? 'win' : 'lose');
+      }
       if (!game.over) overlayShown = false;
     }
 

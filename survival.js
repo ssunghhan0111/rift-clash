@@ -65,6 +65,7 @@ RC.Survival = (function () {
       g.upgrades[ENEMY].arm = Math.min(3, Math.floor(s.wave / D.armEvery));
     }
     g.notify('⚠ Wave ' + s.wave + ' incoming!');
+    if (RC.Audio) RC.Audio.play('wave');
   }
 
   function spawnOne(g) {

@@ -181,6 +181,9 @@ window.RC = window.RC || {};
       this.foe = null;          // 공격 대상 엔티티
       this.node = null;         // 채집 중인 무더기
       this.site = null;         // 건설 현장(건물)
+      this.path = null;         // 길찾기 경유점 목록 (null = 직선 이동)
+      this.attackMove = false;  // 공격-이동 (경로상 적 자동 교전 후 계속 진군)
+      this.amoveGoal = null;    // 공격-이동 최종 목적지
       this.carry = 0;
       this.gatherTimer = 0;
       this.hitFlash = 0;
@@ -236,26 +239,35 @@ window.RC = window.RC || {};
     moveTo(x, y) {
       this.state = 'move';
       this.target = { x, y };
-      this.foe = null; this.node = null; this.site = null;
+      this.foe = null; this.node = null; this.site = null; this.path = null;
+      this.attackMove = false; this.amoveGoal = null;
+    }
+    // 공격-이동: 목적지로 진군하되 경로상의 적을 자동 교전하고, 처치 후 계속 이동
+    attackMoveTo(x, y) {
+      this.state = 'move';
+      this.target = { x, y };
+      this.foe = null; this.node = null; this.site = null; this.path = null;
+      this.attackMove = true; this.amoveGoal = { x, y };
     }
     attackTarget(e) {
       this.state = 'attack';
-      this.foe = e; this.target = null; this.node = null; this.site = null;
+      this.foe = e; this.target = null; this.node = null; this.site = null; this.path = null;
     }
     gatherFrom(node) {
       if (!this.def.worker) return;
       this.state = 'toNode';
-      this.node = node; this.foe = null; this.site = null;
+      this.node = node; this.foe = null; this.site = null; this.path = null;
     }
     buildAt(b) {
       if (!this.def.worker) return;
       this.state = 'build';
-      this.site = b; this.foe = null; this.node = null;
+      this.site = b; this.foe = null; this.node = null; this.path = null;
       this.target = { x: b.x, y: b.y };
     }
     stop() {
       this.state = 'idle';
-      this.target = null; this.foe = null; this.node = null; this.site = null;
+      this.target = null; this.foe = null; this.node = null; this.site = null; this.path = null;
+      this.attackMove = false; this.amoveGoal = null;
     }
     boardTarget(ship) {
       if (this.def.flying) return;           // 공중 유닛은 탑승 불가
@@ -394,17 +406,33 @@ window.RC = window.RC || {};
     _idle(game) {
       if (this.def.worker || this.def.transport) return;   // 일꾼·수송선은 알아서 싸우지 않음
       const e = game.findNearestEnemy(this, CFG.AGGRO_RANGE);
-      if (e) this.attackTarget(e);
+      if (e) { this.attackTarget(e); return; }
+      // 공격-이동: 근처 적이 없으면 목적지로 계속 진군
+      if (this.attackMove && this.amoveGoal) {
+        if (RC.dist(this.x, this.y, this.amoveGoal.x, this.amoveGoal.y) > 8) this.attackMoveTo(this.amoveGoal.x, this.amoveGoal.y);
+        else { this.attackMove = false; this.amoveGoal = null; }
+      }
     }
 
     _move(dt, game) {
       if (!this.target) { this.state = 'idle'; return; }
-      // 이동 중에도 적이 가까우면 반응 (일꾼·수송선 제외)
+      // 이동 중에도 적이 가까우면 반응 (일꾼·수송선 제외). 공격-이동이면 더 넓게 감지.
       if (!this.def.worker && !this.def.transport) {
-        const e = game.findNearestEnemy(this, CFG.AGGRO_RANGE * 0.65);
-        if (e) { this.attackTarget(e); return; }
+        const range = this.attackMove ? CFG.AGGRO_RANGE : CFG.AGGRO_RANGE * 0.65;
+        const e = game.findNearestEnemy(this, range);
+        if (e) { this.attackTarget(e); return; }   // attackMove/amoveGoal persist → resumes after the kill
       }
-      if (this.step(dt, this.target.x, this.target.y, 4)) this.stop();
+      // 길찾기 — 직선 경로가 막혔을 때만 경유점을 따라간다 (지상 유닛). 공중은 직진.
+      let aim = this.target;
+      if (!this.def.flying && RC.Path) {
+        if (this.path == null) this.path = RC.Path.find(game, this.x, this.y, this.target.x, this.target.y);
+        if (this.path && this.path.length) {
+          aim = this.path[0];
+          if (RC.dist(this.x, this.y, aim.x, aim.y) <= this.r + 8) { this.path.shift(); aim = this.path[0] || this.target; }
+        }
+      }
+      const atGoal = (aim === this.target);
+      if (this.step(dt, aim.x, aim.y, 4) && atGoal) this.stop();
     }
 
     _toBoard(dt, game) {
@@ -459,6 +487,8 @@ window.RC = window.RC || {};
 
         game.fx.push({ x: this.x, y: this.y, tx: hx, ty: hy,
                        t: crit ? 0.14 : 0.09, owner: this.owner, splash: splash, crit: crit });
+        if (RC.Audio) RC.Audio.play('shoot');
+        if (game.marks && (crit || this.hero)) game.marks.push({ dmg: Math.round(dmg), x: foe.x, y: foe.y - (foe.r || 10) - 4, crit: crit, t: 0.8 });
         if (this.foe && this.foe.dead) this.foe = null;
       }
     }
@@ -577,6 +607,7 @@ window.RC = window.RC || {};
           if (!best || worst <= 0) return false;
           best.hp = Math.min(best.maxHp, best.hp + ab.heal);
           game.fx.push({ abil: 'heal', ax: best.x, ay: best.y, t: 0.5, radius: 22, owner: this.owner });
+          if (game.marks) game.marks.push({ dmg: ab.heal, heal: true, x: best.x, y: best.y - (best.r || 10) - 4, t: 0.8 });
           return true;
         }
         case 'surge': {  // 볼트병 — 과부하 사격
@@ -616,6 +647,7 @@ window.RC = window.RC || {};
           }
           if (!any) return false;
           game.fx.push({ abil: 'heal', ax: this.x, ay: this.y, t: 0.45, radius: ab.radius, owner: this.owner });
+          if (game.marks) game.marks.push({ dmg: ab.heal, heal: true, x: this.x, y: this.y - (this.r || 10) - 4, t: 0.8 });
           return true;
         }
         case 'nova': {   // 펄스코일 — 정전 파동 (범위 교란)

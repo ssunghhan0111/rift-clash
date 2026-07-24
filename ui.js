@@ -56,6 +56,16 @@ RC.UI = (function () {
       if (hero && !hero.dead) { g.selection = [hero]; if (!hero.downed) RC.Input.centerOn(hero.x, hero.y); }
     });
 
+    const muteBtn = document.getElementById('mute-btn');
+    if (muteBtn) muteBtn.addEventListener('click', () => {
+      if (!RC.Audio) return;
+      RC.Audio.init(); RC.Audio.resume();
+      muteBtn.textContent = RC.Audio.toggle() ? '🔊' : '🔇';
+    });
+
+    const amoveBtn = document.getElementById('tb-amove');
+    if (amoveBtn) amoveBtn.addEventListener('click', () => { if (RC.Input.armAttackMove) RC.Input.armAttackMove(); });
+
     document.getElementById('tb-cancel').addEventListener('click', () => {
       g.placing = null; g.selection = [];
     });
