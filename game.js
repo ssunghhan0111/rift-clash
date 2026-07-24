@@ -1,0 +1,584 @@
+// RIFT CLASH — 게임 상태 / Game
+// 최대 4인, 팀전 지원. 맵/모드는 setup()으로 주입.
+window.RC = window.RC || {};
+
+(function () {
+  const CFG = RC.CFG;
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  class Game {
+    constructor(mapDef, mode) {
+      this.mapDef = mapDef || RC.MAPS[0];
+      this.mode = mode || RC.MODES['1v1'];
+      this.reset();
+    }
+
+    // 맵/모드 교체 후 재시작. racePick = { owner: 'forge'|'gloop' } (선택)
+    setup(mapDef, mode, racePick) {
+      this.mapDef = mapDef || this.mapDef;
+      this.mode = mode || this.mode;
+      if (racePick) this._racePick = racePick;
+      this.reset();
+    }
+
+    reset() {
+      this.time = 0;
+      this.over = null;              // null | 'win' | 'lose'
+      this.units = [];
+      this.buildings = [];
+      this.nodes = [];
+      this.obstacles = [];
+      this.terrain = [];
+      this.fx = [];
+      this.selection = [];
+      this.placing = null;
+      this.camera = { x: 0, y: 0 };
+      this.speed = 1;
+      this.paused = false;
+      this.log = [];
+      this.groups = {};
+
+      // 플레이어 구성
+      this.players = this.mode.players.map(p => ({ ...p }));
+      this.playerOwner = (this.players.find(p => !p.ai) || this.players[0]).owner;
+      this.teamMap = {};
+      this.playerRace = {};
+      this.res = {};
+      this.upgrades = {};
+      const pick = this._racePick || {};
+      this.players.forEach(p => {
+        this.teamMap[p.owner] = p.team;
+        p.race = pick[p.owner] || p.race || 'forge';
+        this.playerRace[p.owner] = p.race;
+        this.res[p.owner] = { shard: CFG.START_SHARD };
+        this.upgrades[p.owner] = { atk: 0, arm: 0, eng: 0, spd: 0, crit: 0, frost: 0, tough: 0 };
+      });
+
+      this.buildMap();
+    }
+
+    notify(msg) {
+      this.log.unshift({ msg, t: 4 });
+      if (this.log.length > 4) this.log.pop();
+    }
+
+    // ── 종족 ──────────────────────────────────────────
+    raceOf(owner) { return (this.playerRace && this.playerRace[owner]) || 'forge'; }
+    raceDef(owner) { return RC.RACES[this.raceOf(owner)] || RC.RACES.forge; }
+    buildableFor(owner) { return this.raceDef(owner).buildable; }
+
+    // ── 팀 관계 ───────────────────────────────────────
+    teamOf(owner) { return this.teamMap[owner]; }
+    allied(a, b) { return this.teamMap[a] === this.teamMap[b]; }
+    areEnemies(a, b) { return this.teamMap[a] !== undefined && this.teamMap[b] !== undefined && this.teamMap[a] !== this.teamMap[b]; }
+    isAI(owner) { const p = this.players.find(pp => pp.owner === owner); return !!(p && p.ai); }
+
+    // ── 업그레이드 / 연구 ─────────────────────────────
+    upLevel(owner, kind) { return (this.upgrades[owner] && this.upgrades[owner][kind]) || 0; }
+
+    applyUpgrade(owner, kind) {
+      if (!this.upgrades[owner]) return;
+      const max = RC.UPGRADES[kind] ? RC.UPGRADES[kind].costs.length : CFG.UP_MAX_TIER;
+      if (this.upgrades[owner][kind] < max) this.upgrades[owner][kind]++;
+      if (kind === 'tough') this._rescaleTough(owner);
+      if (owner === this.playerOwner) {
+        const u = RC.UPGRADES[kind];
+        this.notify(`${u.name} Tier ${this.upgrades[owner][kind]} complete!`);
+      }
+    }
+
+    // 강화 골격 — 해당 owner 전 유닛(탑승 유닛 포함) 최대체력 재계산
+    _rescaleTough(owner) {
+      const f = 1 + this.upLevel(owner, 'tough') * CFG.UP_TOUGH_HP;
+      const scale = u => {
+        if (!u.baseMaxHp) return;
+        const ratio = u.maxHp ? u.hp / u.maxHp : 1;
+        u.maxHp = u.baseMaxHp * f;
+        u.hp = u.maxHp * ratio;
+      };
+      this.units.forEach(u => {
+        if (u.owner !== owner) return;
+        scale(u);
+        if (u.cargo) u.cargo.forEach(scale);
+      });
+    }
+
+    // 스폰 시 패시브 적용 (강화 골격)
+    initUnit(u) {
+      const lvl = this.upLevel(u.owner, 'tough');
+      if (lvl > 0 && u.baseMaxHp) { u.maxHp = u.baseMaxHp * (1 + lvl * CFG.UP_TOUGH_HP); u.hp = u.maxHp; }
+      return u;
+    }
+
+    // 타워/광역 피해 적용 (방어력·반격 처리)
+    hurt(foe, dmg, owner, source) {
+      if (!foe || foe.dead) return;
+      if (source && source.def && source.def.acid) RC.applyAcid(foe, source.def.acid);  // 산성 포탑
+      const armor = foe.kind === 'unit' ? foe.effArmor(this) : (foe.def && foe.def.armor ? foe.def.armor : 0);
+      const dealt = Math.max(1, dmg - armor);
+      if (foe.kind === 'unit') {
+        foe.hp -= dealt; foe.hitFlash = 0.12;
+        if (foe.hp <= 0) foe.dead = true;
+        else if (foe.state === 'idle' && !foe.def.worker && !foe.def.transport && source) foe.attackTarget(source);
+      } else if (foe.damage) {
+        foe.damage(dealt);
+      }
+    }
+
+    // 죽는 순간 산성 폭발 — 주변 적에게 피해 + 산성
+    _deathBurst(u) {
+      const b = u.def.deathBurst;
+      for (const t of this.units) {
+        if (t.dead || t === u || !this.areEnemies(t.owner, u.owner)) continue;
+        if (RC.dist(u.x, u.y, t.x, t.y) <= b.radius) {
+          this.hurt(t, b.dmg, u.owner, u);
+          if (u.def.acid) RC.applyAcid(t, u.def.acid);
+        }
+      }
+      for (const bl of this.buildings) {
+        if (bl.dead || !this.areEnemies(bl.owner, u.owner)) continue;
+        if (RC.dist(u.x, u.y, bl.x, bl.y) - bl.r <= b.radius) this.hurt(bl, b.dmg, u.owner, u);
+      }
+      this.fx.push({ abil: 'acidburst', ax: u.x, ay: u.y, t: 0.45, radius: b.radius, owner: u.owner });
+    }
+
+    // 타워 표적 — 사거리 내 가장 가까운 적 (공중 가능 여부 반영)
+    towerTarget(tower) {
+      let best = null, bd = tower.def.range;
+      for (const u of this.units) {
+        if (u.dead || u.boarded || !this.areEnemies(u.owner, tower.owner)) continue;
+        if (!tower.def.air && u.def.flying) continue;
+        const d = RC.dist(tower.x, tower.y, u.x, u.y);
+        if (d < bd) { bd = d; best = u; }
+      }
+      if (best) return best;
+      for (const b of this.buildings) {
+        if (b.dead || !this.areEnemies(b.owner, tower.owner)) continue;
+        const d = RC.dist(tower.x, tower.y, b.x, b.y) - b.r;
+        if (d < bd) { bd = d; best = b; }
+      }
+      return best;
+    }
+
+    // 아크 랩에서 업그레이드 연구 시작
+    research(building, kind) {
+      const owner = building.owner;
+      const def = RC.UPGRADES[kind];
+      if (!def || !building.done || building.research) return false;
+      const lvl = this.upLevel(owner, kind);
+      if (lvl >= def.costs.length) { if (owner === this.playerOwner) this.notify('Already at max tier'); return false; }
+      const cost = def.costs[lvl];
+      if (!this.canAfford(owner, cost)) { if (owner === this.playerOwner) this.notify('Not enough shards'); return false; }
+      this.res[owner].shard -= cost;
+      const time = def.time[lvl];
+      building.research = { kind, timeLeft: time, total: time };
+      return true;
+    }
+
+    // ── 맵 생성 ───────────────────────────────────────
+    buildMap() {
+      const map = this.mapDef;
+      CFG.WORLD_W = map.world.w;
+      CFG.WORLD_H = map.world.h;
+      this.world = { w: map.world.w, h: map.world.h };
+      this.terrain = (map.terrain || []).map(t => ({ ...t }));
+      this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
+
+      // 시작 지점을 무작위로 섞어 배정 (적 위치 랜덤)
+      const spots = shuffle(map.spawns).slice(0, this.players.length);
+      const center = { x: map.world.w / 2, y: map.world.h / 2 };
+
+      this.players.forEach((p, i) => {
+        const s = spots[i] || map.spawns[i % map.spawns.length];
+        p.spawn = s;
+        const rdef = RC.RACES[p.race] || RC.RACES.forge;
+        this.buildings.push(new RC.Building(rdef.core, s.x, s.y, p.owner, true));
+
+        // 본진 옆 자원 부채꼴 (맵 중앙 방향)
+        const dirX = center.x - s.x, dirY = center.y - s.y;
+        for (let k = 0; k < 5; k++) {
+          const a = Math.atan2(dirY, dirX) + (k - 2) * 0.34;
+          this.nodes.push(new RC.ShardNode(s.x + Math.cos(a) * 210, s.y + Math.sin(a) * 210));
+        }
+
+        // 시작 일꾼 4기
+        for (let w = 0; w < 4; w++) {
+          const ux = s.x - 60 + w * 40;
+          const uy = s.y + (s.y < center.y ? 90 : -90);
+          const u = new RC.Unit(rdef.worker, ux, uy, p.owner);
+          this.units.push(u);
+          u.gatherFrom(this.findNearestNode(u.x, u.y));
+        }
+      });
+
+      // 맵 중립 자원 군집
+      (map.midNodes || []).forEach(m => {
+        const n = m.n || 4, rad = m.rad || 100;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + 0.4;
+          this.nodes.push(new RC.ShardNode(m.x + Math.cos(a) * rad, m.y + Math.sin(a) * rad));
+        }
+      });
+
+      // 플레이어 본진 = 카메라 기준
+      const me = this.core(this.playerOwner);
+      this.spawn1 = me ? { x: me.x, y: me.y } : { x: map.world.w / 2, y: map.world.h / 2 };
+      this.camera.x = this.spawn1.x - 640;
+      this.camera.y = this.spawn1.y - 380;
+
+      this._initVision();
+    }
+
+    // ── 전장의 안개 / Fog of War ───────────────────────
+    // 격자 두 장: visSeen(한 번이라도 본 곳=탐사됨, 영구) / visNow(지금 보이는 곳, 매틱 갱신)
+    _initVision() {
+      const cell = CFG.VIS_CELL;
+      this.visCell = cell;
+      this.visCols = Math.ceil(CFG.WORLD_W / cell);
+      this.visRows = Math.ceil(CFG.WORLD_H / cell);
+      const n = this.visCols * this.visRows;
+      this.visSeen = new Uint8Array(n);
+      this.visNow = new Uint8Array(n);
+      this._visAcc = 0;
+      // 안개 렌더용 저해상도 캔버스 (격자 크기) — 브라우저에서만 생성
+      this.fogCanvas = null; this.fogCtx = null; this.fogImg = null;
+      if (typeof document !== 'undefined') {
+        this.fogCanvas = document.createElement('canvas');
+        this.fogCanvas.width = this.visCols;
+        this.fogCanvas.height = this.visRows;
+        this.fogCtx = this.fogCanvas.getContext('2d');
+        this.fogImg = this.fogCtx.createImageData(this.visCols, this.visRows);
+      }
+      this.updateVision();
+    }
+
+    // 엔티티 시야 반경
+    _sightOf(e) {
+      if (e.def.sight) return e.def.sight;
+      if (e.kind === 'building') {
+        if (e.def.isCore) return CFG.SIGHT_CORE;
+        if (e.def.tower) return (e.def.range || 0) + CFG.SIGHT_TOWER_PAD;
+        return CFG.SIGHT_BUILDING;
+      }
+      if (e.def.worker) return CFG.SIGHT_WORKER;
+      if (e.def.flying) return CFG.SIGHT_AIR;
+      return CFG.SIGHT_GROUND;
+    }
+
+    // 내 팀 시야로 visNow/visSeen 갱신
+    updateVision() {
+      if (!CFG.FOG_ENABLED || !this.visNow) return;
+      const cell = this.visCell, cols = this.visCols, rows = this.visRows;
+      const now = this.visNow, seen = this.visSeen;
+      now.fill(0);
+      const me = this.playerOwner;
+      const stamp = (x, y, r) => {
+        if (r <= 0) return;
+        const c0 = Math.max(0, Math.floor((x - r) / cell));
+        const c1 = Math.min(cols - 1, Math.floor((x + r) / cell));
+        const r0 = Math.max(0, Math.floor((y - r) / cell));
+        const r1 = Math.min(rows - 1, Math.floor((y + r) / cell));
+        const rr = r * r;
+        for (let cy = r0; cy <= r1; cy++) {
+          const wy = (cy + 0.5) * cell;
+          const base = cy * cols;
+          for (let cx = c0; cx <= c1; cx++) {
+            const wx = (cx + 0.5) * cell;
+            const dx = wx - x, dy = wy - y;
+            if (dx * dx + dy * dy <= rr) { const i = base + cx; now[i] = 1; seen[i] = 1; }
+          }
+        }
+      };
+      for (const u of this.units) {
+        if (u.dead || u.boarded) continue;
+        if (this.allied(u.owner, me)) stamp(u.x, u.y, this._sightOf(u));
+      }
+      for (const b of this.buildings) {
+        if (b.dead) continue;
+        if (this.allied(b.owner, me)) stamp(b.x, b.y, this._sightOf(b));
+      }
+      this._buildFogImage();
+    }
+
+    _buildFogImage() {
+      if (!this.fogImg) return;
+      const d = this.fogImg.data, n = this.visCols * this.visRows;
+      const now = this.visNow, seen = this.visSeen;
+      for (let i = 0; i < n; i++) {
+        const j = i << 2;
+        d[j] = 4; d[j + 1] = 8; d[j + 2] = 12;
+        d[j + 3] = now[i] ? 0 : (seen[i] ? 130 : 255);   // 보임=투명 / 탐사=반투명 / 미탐사=검정
+      }
+      this.fogCtx.putImageData(this.fogImg, 0, 0);
+    }
+
+    _cellIdx(x, y) {
+      const c = Math.floor(x / this.visCell), r = Math.floor(y / this.visCell);
+      if (c < 0 || r < 0 || c >= this.visCols || r >= this.visRows) return -1;
+      return r * this.visCols + c;
+    }
+    visibleAt(x, y) {
+      if (!CFG.FOG_ENABLED || !this.visNow) return true;
+      const i = this._cellIdx(x, y);
+      return i < 0 ? false : this.visNow[i] === 1;
+    }
+    exploredAt(x, y) {
+      if (!CFG.FOG_ENABLED || !this.visSeen) return true;
+      const i = this._cellIdx(x, y);
+      return i < 0 ? false : this.visSeen[i] === 1;
+    }
+
+    // ── 조회 헬퍼 ─────────────────────────────────────
+    core(owner) {
+      return this.buildings.find(b => b.owner === owner && b.def.isCore && !b.dead);
+    }
+    teamCores(team) {
+      return this.buildings.filter(b => b.def.isCore && !b.dead && this.teamMap[b.owner] === team);
+    }
+
+    supply(owner) {
+      let used = 0, max = 0;
+      this.units.forEach(u => {
+        if (u.owner === owner && !u.dead) {
+          used += u.def.supply;
+          if (u.cargo) u.cargo.forEach(c => used += c.def.supply);   // 탑승 유닛도 인구 차지
+        }
+      });
+      this.buildings.forEach(b => { if (b.owner === owner && !b.dead && b.done) max += b.def.supplyGiven; });
+      this.buildings.forEach(b => { if (b.owner === owner && !b.dead) b.queue.forEach(j => used += RC.UNITS[j.type].supply); });
+      return { used, max: Math.min(max, CFG.POP_CAP) };
+    }
+
+    addShard(owner, n) { this.res[owner].shard += n; }
+    canAfford(owner, cost) { return this.res[owner].shard >= cost; }
+
+    findNearestNode(x, y) {
+      let best = null, bd = Infinity;
+      for (const n of this.nodes) {
+        if (n.dead) continue;
+        const d = RC.dist(x, y, n.x, n.y);
+        if (d < bd) { bd = d; best = n; }
+      }
+      return best;
+    }
+
+    findDropoff(unit) {
+      let best = null, bd = Infinity;
+      for (const b of this.buildings) {
+        if (b.owner !== unit.owner || b.dead || !b.done || !b.def.dropoff) continue;
+        const d = RC.dist(unit.x, unit.y, b.x, b.y);
+        if (d < bd) { bd = d; best = b; }
+      }
+      return best;
+    }
+
+    // 팀이 다른 유닛/건물 중 가장 가까운 것
+    findNearestEnemy(unit, range) {
+      let best = null, bd = range;
+      for (const u of this.units) {
+        if (u.dead || !this.areEnemies(u.owner, unit.owner)) continue;
+        const d = RC.dist(unit.x, unit.y, u.x, u.y);
+        if (d < bd) { bd = d; best = u; }
+      }
+      if (best) return best;
+      for (const b of this.buildings) {
+        if (b.dead || !this.areEnemies(b.owner, unit.owner)) continue;
+        const d = RC.dist(unit.x, unit.y, b.x, b.y) - b.r;
+        if (d < bd) { bd = d; best = b; }
+      }
+      return best;
+    }
+
+    entityAt(x, y, owner) {
+      for (const u of this.units) {
+        if (u.dead) continue;
+        if (owner != null && u.owner !== owner) continue;
+        if (RC.dist(x, y, u.x, u.y) <= u.r + 5) return u;
+      }
+      for (const b of this.buildings) {
+        if (b.dead) continue;
+        if (owner != null && b.owner !== owner) continue;
+        if (b.contains(x, y)) return b;
+      }
+      return null;
+    }
+
+    nodeAt(x, y) {
+      for (const n of this.nodes) {
+        if (!n.dead && RC.dist(x, y, n.x, n.y) <= n.r + 8) return n;
+      }
+      return null;
+    }
+
+    // ── 배치 검사 ─────────────────────────────────────
+    canPlace(type, x, y, owner) {
+      const d = RC.BUILDINGS[type];
+      const pad = 8;
+      if (x - d.w / 2 < 0 || x + d.w / 2 > CFG.WORLD_W) return false;
+      if (y - d.h / 2 < 0 || y + d.h / 2 > CFG.WORLD_H) return false;
+      for (const b of this.buildings) {
+        if (b.dead) continue;
+        if (Math.abs(b.x - x) < (b.w + d.w) / 2 + pad &&
+            Math.abs(b.y - y) < (b.h + d.h) / 2 + pad) return false;
+      }
+      for (const o of this.obstacles) {
+        if (Math.abs(o.x - x) < (o.w + d.w) / 2 + pad &&
+            Math.abs(o.y - y) < (o.h + d.h) / 2 + pad) return false;
+      }
+      for (const n of this.nodes) {
+        if (n.dead) continue;
+        if (Math.abs(n.x - x) < d.w / 2 + n.r + pad &&
+            Math.abs(n.y - y) < d.h / 2 + n.r + pad) return false;
+      }
+      return true;
+    }
+
+    placeBuilding(type, x, y, owner, workers) {
+      const d = RC.BUILDINGS[type];
+      if (!this.canAfford(owner, d.cost)) { if (owner === this.playerOwner) this.notify('Not enough shards'); return null; }
+      if (!this.canPlace(type, x, y, owner)) { if (owner === this.playerOwner) this.notify('Can’t build here'); return null; }
+      this.res[owner].shard -= d.cost;
+      const b = new RC.Building(type, x, y, owner, false);
+      this.buildings.push(b);
+      (workers || []).forEach(w => w.buildAt(b));
+      return b;
+    }
+
+    train(building, type) {
+      const owner = building.owner;
+      const d = RC.UNITS[type];
+      if (!building.done) return false;
+      if (!this.canAfford(owner, d.cost)) { if (owner === this.playerOwner) this.notify('Not enough shards'); return false; }
+      const s = this.supply(owner);
+      if (s.used + d.supply > s.max) { if (owner === this.playerOwner) this.notify('Population full — build more supply'); return false; }
+      if (building.queue.length >= 5) return false;
+      this.res[owner].shard -= d.cost;
+      building.queue.push({ type, timeLeft: d.time, total: d.time });
+      return true;
+    }
+
+    cancelTrain(building) {
+      const job = building.queue.pop();
+      if (job) this.res[building.owner].shard += RC.UNITS[job.type].cost;
+    }
+
+    // 대기열에서 특정 순번의 생산을 취소하고 환불
+    cancelQueueAt(building, i) {
+      if (!building.queue || i < 0 || i >= building.queue.length) return false;
+      const job = building.queue.splice(i, 1)[0];
+      if (job) this.res[building.owner].shard += RC.UNITS[job.type].cost;
+      return true;
+    }
+
+    // 건설 중인(미완성) 건물을 취소 — 전액 환불 후 제거
+    cancelBuild(building) {
+      if (!building || building.dead || building.done) return false;
+      this.res[building.owner].shard += building.def.cost;
+      building.dead = true;
+      this.selection = this.selection.filter(e => e !== building);
+      return true;
+    }
+
+    // ── 충돌 분리 ─────────────────────────────────────
+    separate() {
+      const us = this.units;
+      for (let i = 0; i < us.length; i++) {
+        const a = us[i];
+        if (a.dead) continue;
+        const aFly = a.def.flying;
+        for (let j = i + 1; j < us.length; j++) {
+          const b = us[j];
+          if (b.dead) continue;
+          if (aFly !== !!b.def.flying) continue;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const d2 = dx * dx + dy * dy;
+          const min = a.r + b.r;
+          if (d2 > 0.0001 && d2 < min * min) {
+            const d = Math.sqrt(d2);
+            const push = (min - d) * 0.5;
+            const nx = dx / d, ny = dy / d;
+            a.x -= nx * push; a.y -= ny * push;
+            b.x += nx * push; b.y += ny * push;
+          }
+        }
+        if (!aFly) {
+          // 건물 밖으로
+          for (const bd of this.buildings) {
+            if (bd.dead) continue;
+            this._pushOutBox(a, bd);
+          }
+          // 장애물 밖으로
+          for (const o of this.obstacles) this._pushOutBox(a, o);
+        }
+        a.x = Math.max(a.r, Math.min(CFG.WORLD_W - a.r, a.x));
+        a.y = Math.max(a.r, Math.min(CFG.WORLD_H - a.r, a.y));
+      }
+    }
+
+    _pushOutBox(a, box) {
+      const hw = box.w / 2 + a.r, hh = box.h / 2 + a.r;
+      const dx = a.x - box.x, dy = a.y - box.y;
+      if (Math.abs(dx) < hw && Math.abs(dy) < hh) {
+        const ox = hw - Math.abs(dx), oy = hh - Math.abs(dy);
+        if (ox < oy) a.x += (dx < 0 ? -ox : ox);
+        else a.y += (dy < 0 ? -oy : oy);
+      }
+    }
+
+    // ── 메인 업데이트 ─────────────────────────────────
+    update(dt) {
+      if (this.paused || this.over) return;
+      dt *= this.speed;
+      this.time += dt;
+
+      this.buildings.forEach(b => { b.__builders = 0; });
+      this.units.forEach(u => u.update(dt, this));
+      this.buildings.forEach(b => {
+        if (!b.done && b.__builders > 0) b.advanceBuild(dt, b.__builders);
+        b.update(dt, this);
+      });
+
+      RC.AI.update(dt, this);
+      this.separate();
+
+      // 죽는 순간 폭발 (블로트 산성 폭발 등)
+      for (const u of this.units) {
+        if (u.dead && u.def.deathBurst && !u._burst) { u._burst = true; this._deathBurst(u); }
+      }
+
+      this.units = this.units.filter(u => !u.dead && !u.boarded);   // 탑승 유닛은 화면에서 제외
+      this.buildings = this.buildings.filter(b => !b.dead);
+      this.nodes = this.nodes.filter(n => !n.dead);
+      this.selection = this.selection.filter(e => !e.dead && !e.boarded);
+      this.fx.forEach(f => f.t -= dt);
+      this.fx = this.fx.filter(f => f.t > 0);
+      this.log.forEach(l => l.t -= dt);
+      this.log = this.log.filter(l => l.t > 0);
+
+      // 전장의 안개 — 주기적으로 시야 재계산
+      if (CFG.FOG_ENABLED && this.visNow) {
+        this._visAcc += dt;
+        if (this._visAcc >= CFG.VIS_INTERVAL) { this._visAcc = 0; this.updateVision(); }
+      }
+
+      // 승패 — 내 코어가 죽으면 패, 상대 팀 코어가 전멸하면 승
+      const myCore = this.core(this.playerOwner);
+      if (!myCore) this.over = 'lose';
+      else {
+        const enemyLeft = this.buildings.some(b =>
+          b.def.isCore && !b.dead && this.areEnemies(b.owner, this.playerOwner));
+        if (!enemyLeft) this.over = 'win';
+      }
+    }
+  }
+
+  RC.Game = Game;
+})();

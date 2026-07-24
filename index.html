@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>RIFT CLASH</title>
+<style>
+  :root {
+    --bg:      #0b1017;
+    --panel:   #16202c;
+    --panel-2: #1d2938;
+    --line:    #2b3a4d;
+    --blue:    #3a7fd5;
+    --orange:  #f08a2a;
+    --cyan:    #4fd6e8;
+    --text:    #cfdcea;
+    --dim:     #7b8ea3;
+    --bad:     #e0503f;
+    --good:    #5ddc7a;
+    --mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+    --sans: 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: var(--sans);
+    user-select: none;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ── 상단 자원 바 ─────────────────────────── */
+  #topbar {
+    height: 46px; flex: none;
+    display: flex; align-items: center; gap: 26px;
+    padding: 0 18px;
+    background: linear-gradient(#1d2938, #131c26);
+    border-bottom: 2px solid var(--orange);
+  }
+  #logo {
+    font-family: var(--mono); font-weight: 700; letter-spacing: .22em;
+    font-size: 13px; color: var(--orange); margin-right: 8px;
+  }
+  #logo b { color: var(--blue); }
+  .res { display: flex; align-items: baseline; gap: 7px; font-size: 12px; color: var(--dim); }
+  .res .val { font-family: var(--mono); font-size: 17px; color: var(--text); font-weight: 600; }
+  .res .val.warn { color: var(--bad); }
+  .dot { width: 9px; height: 9px; transform: rotate(45deg); background: var(--cyan); }
+  #hint { margin-left: auto; font-size: 11px; color: var(--dim); font-family: var(--mono); }
+  @media (max-width: 820px) { #hint { display: none; } }
+
+  /* ── 화면 ─────────────────────────────────── */
+  #stage { position: relative; flex: 1; min-height: 0; }
+  #screen {
+    display: block; width: 100%; height: 100%; cursor: crosshair;
+    touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none;
+  }
+
+  /* ── 터치용 툴바 (키보드 단축키 대체) ────────── */
+  #touchbar {
+    position: absolute; left: 12px; bottom: 12px;
+    display: flex; flex-wrap: wrap; gap: 6px; width: 158px;
+  }
+  .tbtn {
+    width: 44px; height: 44px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; line-height: 1;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    font-family: var(--sans); cursor: pointer;
+    touch-action: manipulation; -webkit-user-select: none; user-select: none;
+  }
+  .tbtn:active { background: var(--orange); color: #10171f; }
+  .tbtn.grp { flex: 1 1 auto; width: auto; font-family: var(--mono); font-weight: 700; }
+  .tbtn.grp.assigned { border-color: var(--cyan); color: var(--cyan); }
+  .tb-groups { display: flex; gap: 6px; width: 100%; }
+
+  #toast {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    text-align: center; pointer-events: none;
+  }
+  #toast div {
+    background: rgba(240,138,42,.9); color: #14202c;
+    font-weight: 700; font-size: 13px;
+    padding: 5px 14px; margin-bottom: 5px; border-radius: 2px;
+  }
+
+  #minimap {
+    position: absolute; right: 12px; bottom: 12px;
+    width: 200px; height: 150px;
+    border: 2px solid var(--line); background: #0d131b;
+    cursor: pointer;
+    touch-action: none; -webkit-touch-callout: none;
+  }
+
+  #overlay {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(8,12,18,.86);
+  }
+  #overlay.hidden { display: none; }
+  #overlay-text { text-align: center; display: grid; gap: 8px; margin-bottom: 22px; }
+  #overlay-text b { font-size: 46px; letter-spacing: .16em; font-family: var(--mono); }
+  #overlay-text b.win { color: var(--good); }
+  #overlay-text b.lose { color: var(--bad); }
+  #overlay-text span { color: var(--dim); }
+  #btn-restart {
+    display: block; margin: 0 auto;
+    background: var(--orange); color: #10171f; border: 0;
+    padding: 11px 30px; font-size: 14px; font-weight: 700;
+    font-family: var(--sans); cursor: pointer; border-radius: 2px;
+  }
+  #btn-restart:hover { filter: brightness(1.1); }
+
+  /* ── 하단 명령 패널 ───────────────────────── */
+  #hud {
+    flex: none; height: 152px;
+    display: grid; grid-template-columns: 300px 1fr;
+    background: var(--panel);
+    border-top: 2px solid var(--line);
+  }
+  #hud::before {
+    content: ''; position: absolute; /* 리벳 레일 */
+  }
+  #sel-panel {
+    padding: 12px 16px; border-right: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  }
+  #sel-name { font-size: 17px; font-weight: 700; color: #fff; }
+  #sel-info { font-size: 11.5px; color: var(--dim); margin: 5px 0 10px; line-height: 1.45; min-height: 32px; }
+  #sel-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 12px; }
+  .stat { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); }
+  .stat b { font-family: var(--mono); color: var(--text); font-weight: 600; }
+
+  #cmd-panel { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+  #cmd-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+  .cmd {
+    position: relative; width: 132px; min-height: 60px;
+    text-align: left; padding: 8px 10px 8px 12px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-left: 3px solid var(--blue);
+    font-family: var(--sans); cursor: pointer; border-radius: 2px;
+  }
+  .cmd:hover { background: #26364a; border-left-color: var(--orange); }
+  .cmd.off { opacity: .4; cursor: not-allowed; }
+  .cmd.ability { border-left-color: var(--cyan); background: #17303a; }
+  .cmd.ability:hover { border-left-color: var(--cyan); background: #1e3f4d; }
+  .cmd.ability .l { color: #bfefff; }
+  .cmd kbd {
+    position: absolute; top: 6px; right: 8px;
+    font-family: var(--mono); font-size: 10px; color: var(--orange);
+    border: 1px solid var(--line); padding: 0 4px; border-radius: 2px;
+  }
+  .cmd .l { display: block; font-size: 13px; font-weight: 700; }
+  .cmd .s { display: block; font-size: 10.5px; color: var(--dim); margin-top: 3px; }
+
+  #queue-row { display: flex; gap: 6px; }
+  .qslot {
+    position: relative; width: 92px; height: 22px;
+    background: #0f1822; border: 1px solid var(--line);
+    font-size: 10.5px; line-height: 20px; padding-left: 7px;
+    color: var(--dim); overflow: hidden;
+  }
+  .qslot span { position: relative; z-index: 1; }
+  .qslot i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(240,138,42,.35); }
+
+  /* ── 시작 화면 ─────────────────────────────── */
+  #startscreen {
+    position: fixed; inset: 0; z-index: 50;
+    background: radial-gradient(circle at 50% 30%, #1a2635, #0a0e14);
+    display: flex; flex-direction: column; align-items: center;
+    overflow-y: auto; padding: 26px 16px;
+  }
+  #startscreen.hidden { display: none; }
+  #ss-title {
+    font-family: var(--mono); font-weight: 700; letter-spacing: .22em;
+    font-size: 30px; color: var(--orange); margin: 6px 0 2px;
+  }
+  #ss-title b { color: var(--blue); }
+  #ss-sub { color: var(--dim); font-size: 12.5px; margin-bottom: 20px; }
+  .ss-h { color: var(--text); font-size: 13px; font-weight: 700; letter-spacing: .1em;
+          align-self: center; margin: 14px 0 9px; text-transform: uppercase; }
+
+  #ss-maps { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 760px; }
+  .mapcard {
+    width: 224px; background: var(--panel); border: 2px solid var(--line);
+    border-radius: 8px; padding: 0; cursor: pointer; overflow: hidden;
+    transition: border-color .12s, transform .12s;
+  }
+  .mapcard:hover { transform: translateY(-2px); }
+  .mapcard.sel { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
+  .mapcard canvas { display: block; width: 224px; height: 150px; background: #0d131b; }
+  .mapcard .mc-name { font-size: 14px; font-weight: 700; color: #fff; padding: 8px 10px 2px; }
+  .mapcard .mc-desc { font-size: 11px; color: var(--dim); padding: 0 10px 10px; line-height: 1.4; min-height: 44px; }
+
+  #ss-modes, #ss-races { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
+  .racebtn { min-width: 280px; max-width: 300px; text-align: left; border-top-width: 3px; }
+  .racebtn .mb-sub { line-height: 1.45; margin-top: 5px; }
+  .modebtn {
+    min-width: 150px; padding: 12px 18px; text-align: center;
+    background: var(--panel); border: 2px solid var(--line); border-radius: 8px;
+    color: var(--text); cursor: pointer; font-family: var(--sans);
+  }
+  .modebtn:hover { border-color: var(--blue); }
+  .modebtn.sel { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
+  .modebtn .mb-name { font-size: 15px; font-weight: 700; }
+  .modebtn .mb-sub { font-size: 11px; color: var(--dim); margin-top: 3px; }
+
+  #ss-start {
+    margin: 24px 0 8px; background: var(--orange); color: #10171f; border: 0;
+    padding: 14px 54px; font-size: 17px; font-weight: 700; letter-spacing: .05em;
+    font-family: var(--sans); cursor: pointer; border-radius: 6px;
+  }
+  #ss-start:hover { filter: brightness(1.1); }
+  #overlay .ov-btns { display: flex; gap: 10px; justify-content: center; }
+  #btn-menu {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    padding: 11px 24px; font-size: 14px; font-weight: 700;
+    font-family: var(--sans); cursor: pointer; border-radius: 2px;
+  }
+  #btn-menu:hover { filter: brightness(1.15); }
+
+  /* ── Online lobby ─────────────────────────────── */
+  #lobby {
+    position: fixed; inset: 0; z-index: 50;
+    background: radial-gradient(circle at 50% 30%, #1a2635, #0a0e14);
+    display: flex; flex-direction: column; align-items: center;
+    overflow-y: auto; padding: 26px 16px;
+  }
+  #lobby.hidden { display: none; }
+  #ss-online, #lobby-start, #btn-menu2 {
+    padding: 14px 30px; font-size: 16px; font-weight: 700;
+    font-family: var(--sans); cursor: pointer; border-radius: 6px; border: 0;
+  }
+  #ss-start { border: 0; }
+  #ss-online { background: var(--panel-2); color: var(--cyan); border: 1px solid var(--line); }
+  #ss-online:hover { filter: brightness(1.2); }
+  #lobby-start { background: var(--orange); color: #10171f; }
+  #lobby-start:hover { filter: brightness(1.1); }
+  #btn-menu2 { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+  .pchip {
+    background: var(--panel); border: 2px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; min-width: 120px; text-align: center;
+  }
+  .pchip.me { border-color: var(--cyan); }
+  .pchip .pn { font-weight: 700; font-size: 13px; }
+  .pchip .pr { font-size: 11px; color: var(--dim); margin-top: 3px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="topbar">
+    <div id="logo">RIFT<b>CLASH</b></div>
+    <div class="res"><span class="dot"></span>Shards <span class="val" id="res-shard">0</span></div>
+    <div class="res">Pop <span class="val" id="res-pop">0 / 0</span></div>
+    <div class="res">Time <span class="val" id="res-clock">0:00</span></div>
+    <div id="hint">Left-click select · Right-click command · Skill buttons/hotkeys for abilities · Research upgrades at the tech building · Workers build towers · Select units then right-click a dropship to board, U to unload</div>
+  </div>
+
+  <div id="stage">
+    <canvas id="screen"></canvas>
+    <div id="toast"></div>
+    <div id="touchbar">
+      <button class="tbtn" id="tb-pause" title="Pause (P)">⏸</button>
+      <button class="tbtn" id="tb-stop" title="Stop (S)">■</button>
+      <button class="tbtn" id="tb-idle" title="Find idle worker (F)">👷</button>
+      <button class="tbtn" id="tb-home" title="Go to base (Space)">🏠</button>
+      <button class="tbtn" id="tb-cancel" title="Deselect (Esc)">✕</button>
+      <div class="tb-groups">
+        <button class="tbtn grp" data-g="1">1</button>
+        <button class="tbtn grp" data-g="2">2</button>
+        <button class="tbtn grp" data-g="3">3</button>
+        <button class="tbtn grp" data-g="4">4</button>
+      </div>
+    </div>
+    <canvas id="minimap" width="200" height="150"></canvas>
+    <div id="overlay" class="hidden">
+      <div>
+        <div id="overlay-text"></div>
+        <div class="ov-btns">
+          <button id="btn-restart">Restart</button>
+          <button id="btn-menu">Menu</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div id="sel-panel">
+      <div id="sel-name">Nothing selected</div>
+      <div id="sel-info">Click or drag to select units.</div>
+      <div id="sel-stats"></div>
+    </div>
+    <div id="cmd-panel">
+      <div id="cmd-grid"></div>
+      <div id="queue-row"></div>
+    </div>
+  </div>
+
+</div>
+
+<div id="startscreen">
+  <div id="ss-title">RIFT<b>CLASH</b></div>
+  <div id="ss-sub">Pick a map, mode and faction, then start · enemy spawns are random</div>
+  <div class="ss-h">Map</div>
+  <div id="ss-maps"></div>
+  <div class="ss-h">Mode</div>
+  <div id="ss-modes"></div>
+  <div class="ss-h">Faction (enemy AI takes the other)</div>
+  <div id="ss-races"></div>
+  <div style="display:flex; gap:12px; align-items:center;">
+    <button id="ss-start">Start Battle</button>
+    <button id="ss-online">Online (LAN)</button>
+  </div>
+  <div id="ss-onlinehint" style="color:var(--dim); font-size:11.5px; margin-top:8px; max-width:520px; text-align:center;">
+    Online: on one computer run <b>node server.js</b> in the game folder, then open the address it prints on each device (same WiFi). Click “Online (LAN)” here after loading the page from that address.
+  </div>
+</div>
+
+<!-- ── Online lobby ─────────────────────────────── -->
+<div id="lobby" class="hidden">
+  <div id="ss-title">RIFT<b>CLASH</b> · LAN</div>
+  <div id="lobby-status" style="color:var(--dim); font-size:12.5px; margin-bottom:8px;">Connecting…</div>
+  <div class="ss-h">Players</div>
+  <div id="lobby-players" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; max-width:640px;"></div>
+  <div class="ss-h">Your faction</div>
+  <div id="lobby-races" style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;"></div>
+  <div id="lobby-host" class="hidden" style="display:flex; flex-direction:column; align-items:center;">
+    <div class="ss-h">Map</div>
+    <div id="lobby-maps" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;"></div>
+    <div class="ss-h">Mode</div>
+    <div id="lobby-modes" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;"></div>
+  </div>
+  <div style="display:flex; gap:12px; margin-top:22px;">
+    <button id="lobby-start" class="hidden">Start Match</button>
+    <button id="btn-menu2">Leave</button>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="maps.js"></script>
+<script src="entities.js"></script>
+<script src="game.js"></script>
+<script src="ai.js"></script>
+<script src="net_core.js"></script>
+<script src="net.js"></script>
+<script src="renderer.js"></script>
+<script src="input.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
