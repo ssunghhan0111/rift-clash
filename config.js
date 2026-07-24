@@ -218,7 +218,47 @@ RC.UNITS = {
                desc: 'Drops acid spores on a target point for area damage.' },
     desc: 'Drifting air unit that drops acid spores. Melts clumped enemies.'
   },
+
+  // ══ Heroes — one per race. Gain XP from nearby enemy kills, level up (skills rank up
+  //    automatically), and revive at your base after a delay + shard cost if slain. ══
+  warden: {
+    id: 'warden', name: 'Ironclad Warden', role: 'Hero', hero: true,
+    hp: 600, dmg: 22, range: 30, cd: 1.0, speed: 80, r: 16,
+    cost: 0, time: 0, supply: 0, armor: 3, energy: 200, key: 'H',
+    grow: { hp: 70, dmg: 4, armor: 0.5 },
+    revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
+    // 3 skills; each ranks up with level. All effects are self-contained (no passive stat plumbing).
+    skills: [
+      { id: 'salvo', name: 'Seismic Slam', key: 'F', cost: 40, cd: 8, radius: 120, dmg: 45, dmgPerRank: 28,
+        desc: 'Smashes the ground for heavy area damage.' },
+      { id: 'mend',  name: 'Repair Pulse', key: 'G', cost: 35, cd: 7, radius: 170, heal: 60, healPerRank: 40,
+        desc: 'Repairs the Warden and nearby allies.' },
+      { id: 'warp',  name: 'Warp Charge',  key: 'C', cost: 25, cd: 6, dist: 240, distPerRank: 40,
+        desc: 'Blinks forward to close in or escape.' },
+    ],
+    desc: 'A towering war machine. Grows stronger with every battle — you need it to win.'
+  },
+  matriarch: {
+    id: 'matriarch', name: 'Brood Matriarch', role: 'Hero', hero: true, race: 'gloop', regen: 4,
+    hp: 480, dmg: 18, range: 120, cd: 1.0, speed: 84, r: 15,
+    cost: 0, time: 0, supply: 0, armor: 1, energy: 220, key: 'H',
+    acid: { dmg: 4, dur: 5, shred: 2, max: 6 },
+    grow: { hp: 55, dmg: 4, armor: 0.4 },
+    revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
+    skills: [
+      { id: 'nova',  name: 'Corrosive Nova', key: 'A', cost: 40, cd: 8, radius: 175, dmg: 26, dmgPerRank: 16, drain: 0, slowDur: 3,
+        desc: 'Acidic blast that damages and slows nearby foes.' },
+      { id: 'salvo', name: 'Spore Storm',    key: 'F', cost: 45, cd: 9, radius: 115, dmg: 38, dmgPerRank: 24,
+        desc: 'Rains acid spores over an area.' },
+      { id: 'weld',  name: 'Regenerate',     key: 'G', cost: 35, cd: 7, radius: 180, heal: 90, healPerRank: 55, target: 'repair',
+        desc: 'Rapidly heals the most-wounded nearby ally.' },
+    ],
+    desc: 'Acid-spewing matriarch. Feeds on the fallen to grow — essential to victory.'
+  },
 };
+
+// Hero progression tuning
+RC.HERO = { maxLevel: 10, xpBase: 100, xpStep: 60, killXp: 12, killXpPerSupply: 8, workerXp: 6, heroXp: 55, xpRange: 620 };
 
 // ── Buildings ─────────────────────────────────────────
 RC.BUILDINGS = {
@@ -312,7 +352,7 @@ RC.RACES = {
   forge: {
     id: 'forge', name: 'Forge', tint: '#f08a2a',
     blurb: 'Machine legion — a straightforward army of skills, upgrades and towers, with Patch Bot / Pulse Coil support.',
-    core: 'core', worker: 'wrench',
+    core: 'core', worker: 'wrench', hero: 'warden',
     buildable: ['cell', 'factory', 'hoverpad', 'arclab', 'guardtower', 'arcbattery'],
     ai: {
       worker: 'wrench', supply: 'cell',
@@ -325,7 +365,7 @@ RC.RACES = {
   gloop: {
     id: 'gloop', name: 'Gloop', tint: '#5ddc7a',
     blurb: 'Acid swarm — units self-heal and their attacks melt enemy armor. No healers required.',
-    core: 'biocore', worker: 'slug',
+    core: 'biocore', worker: 'slug', hero: 'matriarch',
     buildable: ['membrane', 'hatchery', 'spire', 'evochamber', 'acidtower'],
     ai: {
       worker: 'slug', supply: 'membrane',

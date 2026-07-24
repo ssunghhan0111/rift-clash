@@ -196,6 +196,7 @@ RC.Input = (function () {
     const me = ME();
     let ent = g.entityAt(state.world.x, state.world.y, null);
     if (ent && ent.owner !== me && g.areEnemies(ent.owner, me) && !g.visibleAt(ent.x, ent.y)) ent = null;   // hidden enemies can't be selected
+    if (ent && ent.owner === me && ent.kind === 'unit' && ent.def.worker && ent.state === 'build') ent = null;   // busy builder is unavailable
 
     if (e.pointerType === 'mouse') {
       if (!ent) { if (!e.shiftKey) g.selection = []; return; }
@@ -222,7 +223,8 @@ RC.Input = (function () {
     const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x);
     const y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
     const hits = g.units.filter(u =>
-      u.owner === me && u.x >= x1 && u.x <= x2 && u.y >= y1 && u.y <= y2);
+      u.owner === me && u.x >= x1 && u.x <= x2 && u.y >= y1 && u.y <= y2 &&
+      u.state !== 'build');   // a worker busy constructing is unavailable to select
     if (e.pointerType === 'mouse' && e.shiftKey) hits.forEach(h => { if (!g.selection.includes(h)) g.selection.push(h); });
     else g.selection = hits;
 
@@ -303,9 +305,19 @@ RC.Input = (function () {
       return;
     }
 
-    // ability hotkey — cast on all selected units of mine whose ability key matches
+    // select your hero (and jump to it)
+    if (k === 'h') {
+      const hero = g.heroOf && g.heroOf[me];
+      if (hero && !hero.dead) { g.selection = [hero]; if (!hero.downed) centerOn(hero.x, hero.y); }
+      return;
+    }
+
+    // ability / hero-skill hotkey — cast on selected units of mine whose (skill) key matches
     const casters = g.selection.filter(s =>
-      s.kind === 'unit' && s.owner === me && s.def.ability && s.def.ability.key.toLowerCase() === k);
+      s.kind === 'unit' && s.owner === me && (
+        (s.def.ability && s.def.ability.key.toLowerCase() === k) ||
+        (s.def.hero && (s.def.skills || []).some(sk => sk.key.toLowerCase() === k))
+      ));
     if (casters.length) { RC.cmd(g, { t: 'cast', ids: casters.map(u => u.id), key: k }); return; }
 
     // build hotkey — with a worker selected, start placing the matching building

@@ -81,6 +81,7 @@ window.RC = window.RC || {};
 
       this.crystal = null;
       this.survivalWave = 0;
+      this.heroOf = {};
       if (this.survival) this._buildSurvivalMap();
       else this.buildMap();
     }
@@ -157,7 +158,7 @@ window.RC = window.RC || {};
     _deathBurst(u) {
       const b = u.def.deathBurst;
       for (const t of this.units) {
-        if (t.dead || t === u || !this.areEnemies(t.owner, u.owner)) continue;
+        if (t.dead || t.downed || t === u || !this.areEnemies(t.owner, u.owner)) continue;
         if (RC.dist(u.x, u.y, t.x, t.y) <= b.radius) {
           this.hurt(t, b.dmg, u.owner, u);
           if (u.def.acid) RC.applyAcid(t, u.def.acid);
@@ -170,11 +171,56 @@ window.RC = window.RC || {};
       this.fx.push({ abil: 'acidburst', ax: u.x, ay: u.y, t: 0.45, radius: b.radius, owner: u.owner });
     }
 
+    // ── 영웅: 경험치 / 전사 / 부활 ─────────────────────
+    // 죽은 유닛 u 근처의 '적' 영웅(가장 가까운 하나)에게 경험치 지급
+    _awardKillXp(u) {
+      const H = RC.HERO; if (!H) return;
+      const val = u.def.hero ? H.heroXp : (u.def.worker ? H.workerXp : H.killXp + (u.def.supply || 0) * H.killXpPerSupply);
+      let best = null, bd = H.xpRange;
+      for (const h of this.units) {
+        if (!h.hero || h.dead || h.downed || !this.areEnemies(h.owner, u.owner)) continue;
+        const d = RC.dist(h.x, h.y, u.x, u.y);
+        if (d < bd) { bd = d; best = h; }
+      }
+      if (best) best.gainXp(val);
+    }
+
+    // 영웅 전사 — 제거하지 않고 부활 대기 상태로. 부활 비용을 즉시 차감.
+    _downHero(u) {
+      u.dead = false;
+      u.downed = true;
+      u.hp = 0;
+      const rv = u.def.revive || {};
+      u.reviveT = (rv.base || 60) + (u.level - 1) * (rv.perLevel || 8);
+      const cost = (rv.cost || 100) + (u.level - 1) * (rv.costPerLevel || 20);
+      u.reviveCost = cost;
+      if (this.res[u.owner]) this.res[u.owner].shard = Math.max(0, this.res[u.owner].shard - cost);
+      u.foe = null; u.target = null; u.node = null; u.site = null;
+      if (u.owner === this.playerOwner) this.notify(`${u.def.name} has fallen — reviving in ${Math.round(u.reviveT)}s`);
+    }
+
+    // 영웅 부활 — 본진 옆에 레벨/스킬을 유지한 채 완전 회복으로 재등장
+    reviveHero(u) {
+      const core = this.core(u.owner);
+      if (!core) { u.reviveT = 5; return; }   // 본진이 없으면 잠시 후 재시도
+      u.downed = false;
+      u.dead = false;
+      u._processedDeath = false;
+      u.hp = u.maxHp;
+      u.energy = u.maxEnergy || 0;
+      u.acidStacks = 0; u.slow = 0; u.surge = 0; u.rail = 0; u.bulwark = 0;
+      u.skillCd = {};
+      u.x = core.x + (Math.random() * 40 - 20);
+      u.y = core.y + core.h / 2 + 44;
+      u.state = 'idle'; u.foe = null; u.target = null;
+      if (u.owner === this.playerOwner) this.notify(`${u.def.name} has revived!`);
+    }
+
     // 타워 표적 — 사거리 내 가장 가까운 적 (공중 가능 여부 반영)
     towerTarget(tower) {
       let best = null, bd = tower.def.range;
       for (const u of this.units) {
-        if (u.dead || u.boarded || !this.areEnemies(u.owner, tower.owner)) continue;
+        if (u.dead || u.boarded || u.downed || !this.areEnemies(u.owner, tower.owner)) continue;
         if (!tower.def.air && u.def.flying) continue;
         const d = RC.dist(tower.x, tower.y, u.x, u.y);
         if (d < bd) { bd = d; best = u; }
@@ -237,6 +283,14 @@ window.RC = window.RC || {};
           this.units.push(u);
           u.gatherFrom(this.findNearestNode(u.x, u.y));
         }
+
+        // 영웅 (오프라인 전용)
+        if (this.heroesEnabled && rdef.hero) {
+          const hx = s.x + (s.x < center.x ? 95 : -95);
+          const h = new RC.Unit(rdef.hero, hx, s.y, p.owner);
+          this.units.push(h);
+          this.heroOf[p.owner] = h;
+        }
       });
 
       // 맵 중립 자원 군집
@@ -288,6 +342,11 @@ window.RC = window.RC || {};
           this.units.push(u);
           const nn = this.findNearestNode(u.x, u.y);
           if (nn) u.gatherFrom(nn);
+        }
+        if (this.heroesEnabled && rdef.hero) {
+          const h = new RC.Unit(rdef.hero, base.x + 95, base.y, p.owner);
+          this.units.push(h);
+          this.heroOf[p.owner] = h;
         }
       });
 
@@ -367,7 +426,7 @@ window.RC = window.RC || {};
         }
       };
       for (const u of this.units) {
-        if (u.dead || u.boarded) continue;
+        if (u.dead || u.boarded || u.downed) continue;
         if (this.allied(u.owner, me)) stamp(u.x, u.y, this._sightOf(u));
       }
       for (const b of this.buildings) {
@@ -453,7 +512,7 @@ window.RC = window.RC || {};
     findNearestEnemy(unit, range) {
       let best = null, bd = range;
       for (const u of this.units) {
-        if (u.dead || !this.areEnemies(u.owner, unit.owner)) continue;
+        if (u.dead || u.downed || !this.areEnemies(u.owner, unit.owner)) continue;
         const d = RC.dist(unit.x, unit.y, u.x, u.y);
         if (d < bd) { bd = d; best = u; }
       }
@@ -468,7 +527,7 @@ window.RC = window.RC || {};
 
     entityAt(x, y, owner) {
       for (const u of this.units) {
-        if (u.dead) continue;
+        if (u.dead || u.downed) continue;
         if (owner != null && u.owner !== owner) continue;
         if (RC.dist(x, y, u.x, u.y) <= u.r + 5) return u;
       }
@@ -561,11 +620,11 @@ window.RC = window.RC || {};
       const us = this.units;
       for (let i = 0; i < us.length; i++) {
         const a = us[i];
-        if (a.dead) continue;
+        if (a.dead || a.downed) continue;
         const aFly = a.def.flying;
         for (let j = i + 1; j < us.length; j++) {
           const b = us[j];
-          if (b.dead) continue;
+          if (b.dead || b.downed) continue;
           if (aFly !== !!b.def.flying) continue;
           const dx = b.x - a.x, dy = b.y - a.y;
           const d2 = dx * dx + dy * dy;
@@ -622,6 +681,14 @@ window.RC = window.RC || {};
       // 죽는 순간 폭발 (블로트 산성 폭발 등)
       for (const u of this.units) {
         if (u.dead && u.def.deathBurst && !u._burst) { u._burst = true; this._deathBurst(u); }
+      }
+
+      // 영웅 — 근처 아군 영웅에게 처치 경험치 지급 + 영웅은 제거 대신 '전사'로 전환
+      for (const u of this.units) {
+        if (!u.dead || u._processedDeath) continue;
+        u._processedDeath = true;
+        this._awardKillXp(u);
+        if (u.def.hero) this._downHero(u);
       }
 
       this.units = this.units.filter(u => !u.dead && !u.boarded);   // 탑승 유닛은 화면에서 제외

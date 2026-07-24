@@ -9,7 +9,8 @@ window.RC = window.RC || {};
 
   function ownUnits(game, owner, ids) {
     const set = new Set(ids);
-    return game.units.filter(u => u.owner === owner && set.has(u.id) && !u.dead && !u.boarded);
+    // A worker mid-construction is locked: it ignores new commands until the build finishes or is cancelled.
+    return game.units.filter(u => u.owner === owner && set.has(u.id) && !u.dead && !u.boarded && u.state !== 'build');
   }
   function byId(arr, id) { return arr.find(e => e.id === id && !e.dead); }
 
@@ -56,7 +57,10 @@ window.RC = window.RC || {};
       case 'cancelBuild': { const b = game.buildings.find(x => x.id === c.bid && !x.dead); if (b && b.owner === owner) game.cancelBuild(b); break; }
       case 'cast': {
         const us = ownUnits(game, owner, c.ids);
-        us.forEach(u => { if (u.def.ability && u.def.ability.key.toLowerCase() === c.key) u.cast(game); });
+        us.forEach(u => {
+          if (u.def.hero) u.cast(game, c.key);
+          else if (u.def.ability && u.def.ability.key.toLowerCase() === c.key) u.cast(game);
+        });
         break;
       }
       case 'rally': {

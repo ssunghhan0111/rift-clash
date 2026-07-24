@@ -194,6 +194,7 @@ window.RC = window.RC || {};
   function startGame() {
     RC.online = false;
     game.practice = false;
+    game.heroesEnabled = true;
     game.playerOwner = 1;
     // my faction = selection, AI takes the opposite (guarantees Forge vs Gloop)
     const other = selRace === 'forge' ? 'gloop' : 'forge';
@@ -213,6 +214,7 @@ window.RC = window.RC || {};
   function startSurvival() {
     RC.online = false;
     game.practice = false;
+    game.heroesEnabled = true;
     game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
     RC.AI.reset();
     resize();
@@ -429,6 +431,7 @@ window.RC = window.RC || {};
 
   function startOnline(m) {
     RC.online = true;
+    game.heroesEnabled = false;      // online matches run on the server, which has no heroes
     const map = RC.getMap(m.mapId);
     const mode = RC.MODES[m.modeId] || RC.MODES['1v1'];
     game.setup(map, mode);                 // builds world/terrain/obstacles + fog grid

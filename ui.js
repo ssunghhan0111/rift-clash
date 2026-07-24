@@ -50,6 +50,12 @@ RC.UI = (function () {
       if (c) RC.Input.centerOn(c.x, c.y);
     });
 
+    const heroBtn = document.getElementById('tb-hero');
+    if (heroBtn) heroBtn.addEventListener('click', () => {
+      const hero = g.heroOf && g.heroOf[g.playerOwner];
+      if (hero && !hero.dead) { g.selection = [hero]; if (!hero.downed) RC.Input.centerOn(hero.x, hero.y); }
+    });
+
     document.getElementById('tb-cancel').addEventListener('click', () => {
       g.placing = null; g.selection = [];
     });
@@ -108,6 +114,7 @@ RC.UI = (function () {
     const sig = sel.map(e => {
       let t = e.id + ':' + (e.queue ? e.queue.length : 0) + ':' + Math.round(e.buildProgress * 20 || 0);
       if (e.kind === 'unit' && e.def.ability) t += ':' + (e.canCast(g) ? 1 : 0);
+      if (e.hero) t += ':H' + e.level + ':' + Math.floor(e.xp) + ':' + (e.downed ? 1 : 0) + ':' + Math.floor(g.time);
       if (e.research) t += ':r' + Math.ceil(e.research.timeLeft);
       else if (e.kind === 'building' && e.def.research) t += ':r0';
       return t;
@@ -182,7 +189,11 @@ RC.UI = (function () {
       if (arm) rows.push(['Armor', arm]);
       if (e.maxEnergy) rows.push(['Energy', `${Math.floor(e.energy)} / ${Math.floor(e.effMaxEnergy(g))}`]);
       if (e.def.transport) rows.push(['Cargo', `${e.cargo ? e.cargo.length : 0} / ${e.def.transport}`]);
-      rows.push(['State', stateName(e)]);
+      if (e.hero) {
+        rows.unshift(['Level', `${e.level}${e.level >= RC.HERO.maxLevel ? ' (MAX)' : ''}`]);
+        if (e.level < RC.HERO.maxLevel) rows.push(['XP', `${Math.floor(e.xp)} / ${e.xpToNext()}`]);
+      }
+      rows.push(['State', e.downed ? 'Reviving' : stateName(e)]);
     } else if (!e.done) {
       rows.push(['Building', `${Math.floor(e.buildProgress * 100)}%`]);
       if (e.research) rows.push(['Researching', RC.UPGRADES[e.research.kind].name]);
@@ -222,12 +233,40 @@ RC.UI = (function () {
              'Cancel construction and refund the full cost.');
     } else if (e.kind === 'unit' && e.def.worker) {
       buildButtons();
+    } else if (e.kind === 'unit' && e.def.hero) {
+      heroSkills(e);
     }
 
     // unit ability button
     if (e.kind === 'unit' && e.def.ability) {
       abilityBtn(e.def.ability, e.canCast(g), () => RC.cmd(g, { t: 'cast', ids: [e.id], key: e.def.ability.key.toLowerCase() }));
     }
+  }
+
+  // 영웅 스킬 3개 버튼 (미습득=잠김, 부활 중=카운트다운)
+  function heroSkills(h) {
+    if (h.downed) {
+      const b = document.createElement('div');
+      b.className = 'cmd off';
+      b.innerHTML = `<span class="l">Reviving…</span><span class="s">${Math.ceil(h.reviveT)}s · −${h.reviveCost} shards</span>`;
+      el.cmds.appendChild(b);
+      return;
+    }
+    (h.def.skills || []).forEach((sk, i) => {
+      const rank = h.heroRank(i);
+      const key = sk.key.toLowerCase();
+      const cd = (h.skillCd && h.skillCd[key]) || 0;
+      const locked = rank <= 0;
+      const ready = !locked && cd <= 0 && h.energy >= sk.cost;
+      const b = document.createElement('button');
+      b.className = 'cmd ability' + (ready ? '' : ' off');
+      const rankStr = locked ? 'Locked (Lv ' + (i + 1) + ')' : 'Rank ' + rank;
+      b.innerHTML = `<kbd>${sk.key}</kbd><span class="l">✦ ${sk.name}</span>` +
+                    `<span class="s">${rankStr} · E${sk.cost}${cd > 0 ? ' · ' + Math.ceil(cd) + 's' : ''}</span>`;
+      b.title = `${sk.name} — ${sk.desc || ''}`;
+      if (!locked) b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key }); });
+      el.cmds.appendChild(b);
+    });
   }
 
   // 스킬 버튼 — 에너지/쿨다운 반영

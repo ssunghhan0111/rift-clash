@@ -420,7 +420,47 @@ RC.Renderer = (function () {
     else if (u.type === 'spitter') drawSpitter(R, c);
     else if (u.type === 'bloat') drawBloat(R, c);
     else if (u.type === 'floater') drawFloater(R, c);
+    else if (u.type === 'warden') drawWarden(R, c);
+    else if (u.type === 'matriarch') drawMatriarch(R, c);
     else { ctx.fillStyle = c.body; rrect(-R, -R, R * 2, R * 2, 3); ctx.fill(); }
+  }
+
+  // ── 영웅: 아이언클래드 워든 (포지) — 거대 전투 메카 ──
+  function drawWarden(R, c) {
+    ctx.fillStyle = c.dark; rrect(-R * 0.72, -R * 0.5, R * 1.44, R * 1.1, 5); ctx.fill();
+    ctx.fillStyle = c.body; rrect(-R * 0.58, -R * 0.62, R * 1.15, R * 1.05, 5); ctx.fill();
+    ctx.fillStyle = c.light; rrect(-R * 0.58, -R * 0.62, R * 1.15, R * 0.34, 5); ctx.fill();
+    ctx.fillStyle = c.dark;
+    ctx.beginPath(); ctx.arc(-R * 0.12, -R * 0.68, R * 0.34, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-R * 0.12, R * 0.68, R * 0.34, 0, Math.PI * 2); ctx.fill();
+    // 대형 팔포/해머 (앞으로)
+    ctx.fillStyle = c.steel; ctx.fillRect(R * 0.2, -R * 0.26, R * 1.2, R * 0.52);
+    ctx.fillStyle = c.trim; ctx.fillRect(R * 1.35, -R * 0.36, R * 0.28, R * 0.72);
+    // 머리 + 바이저
+    ctx.fillStyle = c.steel; ctx.beginPath(); ctx.arc(R * 0.22, 0, R * 0.36, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.eye; ctx.fillRect(R * 0.36, -R * 0.13, R * 0.18, R * 0.26);
+    ctx.strokeStyle = c.dark; ctx.lineWidth = 1.2;
+    rrect(-R * 0.58, -R * 0.62, R * 1.15, R * 1.05, 5); ctx.stroke();
+  }
+
+  // ── 영웅: 브루드 매트리아크 (글룹) — 거대 여왕 점액 ──
+  function drawMatriarch(R, c) {
+    ctx.fillStyle = c.dark; blob(R * 1.05, 0.1, 2); ctx.fill();
+    ctx.fillStyle = c.body; blob(R * 0.9, 0.1, 2); ctx.fill();
+    ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.24, R * 0.4, 0, Math.PI * 2); ctx.fill();
+    // 왕관 가시
+    ctx.fillStyle = ACID;
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * R * 0.3, -R * 0.66); ctx.lineTo(i * R * 0.3 + R * 0.1, -R * 1.05); ctx.lineTo(i * R * 0.3 + R * 0.2, -R * 0.66);
+      ctx.closePath(); ctx.fill();
+    }
+    // 분사 주둥이
+    ctx.fillStyle = c.dark;
+    ctx.beginPath(); ctx.moveTo(R * 0.5, -R * 0.26); ctx.lineTo(R * 1.1, 0); ctx.lineTo(R * 0.5, R * 0.26); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = ACID; ctx.beginPath(); ctx.arc(R * 1.02, 0, R * 0.17, 0, Math.PI * 2); ctx.fill();
+    // 눈
+    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.05, -R * 0.12, R * 0.15, 0, Math.PI * 2); ctx.fill();
   }
 
   // 선택 유닛 초상화 — 작은 캔버스에 확대/애니메이션으로 '카메라 피드'처럼 보여준다
@@ -463,6 +503,7 @@ RC.Renderer = (function () {
   }
 
   function drawUnit(g, u) {
+    if (u.downed) return;              // 전사한 영웅 — 필드에 표시하지 않음(부활 대기)
     if (fogged(g, u)) return;
     const flash = u.hitFlash > 0;
     const c = unitColors(u, flash);
@@ -492,6 +533,21 @@ RC.Renderer = (function () {
 
     // 버프/디버프 표시 링 + 시전 섬광
     drawBuffs(u);
+
+    // 영웅 표식 — 금색 링 + 레벨 배지
+    if (u.hero) {
+      ctx.save();
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.ellipse(u.x, u.y + u.r * 0.5, u.r * 1.4, u.r * 0.64, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(10,16,22,0.9)';
+      ctx.beginPath(); ctx.arc(u.x - u.r - 3, u.y - u.r - 3, 8.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 11px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(u.level || 1), u.x - u.r - 3, u.y - u.r - 3);
+      ctx.restore();
+    }
 
     // 자원 운반 표시 — 등에 진 광석
     if (u.carry > 0) {

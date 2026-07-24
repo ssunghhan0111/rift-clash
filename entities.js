@@ -186,6 +186,51 @@ window.RC = window.RC || {};
       this.hitFlash = 0;
       // 산성 중첩 (글룹 피격 시) — 방어 감소 + 지속 피해
       this.acidStacks = 0; this.acidT = 0; this.acidDmg = 0; this.acidShred = 0;
+
+      // 영웅 — 경험치 / 레벨 / 스킬 쿨다운 / 부활 상태
+      if (d.hero) {
+        this.hero = true;
+        this.level = 1;
+        this.xp = 0;
+        this.skillCd = {};        // skill key -> cooldown seconds
+        this.downed = false;      // slain, waiting to revive (kept in play, inert)
+        this.reviveT = 0;
+        this.reviveCost = 0;
+      }
+    }
+
+    // ── 영웅: 레벨/스킬 헬퍼 ──────────────────────────
+    xpToNext() { return RC.HERO.xpBase + (this.level - 1) * RC.HERO.xpStep; }
+    // i번째 스킬의 현재 랭크(0=미습득). 레벨 i+1에 습득, 이후 3레벨마다 +1, 최대 3.
+    heroRank(i) {
+      if (this.level < i + 1) return 0;
+      return Math.min(3, 1 + Math.floor((this.level - (i + 1)) / 3));
+    }
+    _skillByKey(key) {
+      const list = this.def.skills || [];
+      for (let i = 0; i < list.length; i++) if (list[i].key.toLowerCase() === key) return { sk: list[i], idx: i };
+      return null;
+    }
+    _effSkill(sk, rank) {
+      const ab = Object.assign({}, sk);
+      if (sk.dmgPerRank) ab.dmg = (sk.dmg || 0) + (rank - 1) * sk.dmgPerRank;
+      if (sk.healPerRank) ab.heal = (sk.heal || 0) + (rank - 1) * sk.healPerRank;
+      if (sk.distPerRank) ab.dist = (sk.dist || 0) + (rank - 1) * sk.distPerRank;
+      return ab;
+    }
+    gainXp(n) {
+      if (!this.hero || this.level >= RC.HERO.maxLevel) return;
+      this.xp += n;
+      while (this.level < RC.HERO.maxLevel && this.xp >= this.xpToNext()) {
+        this.xp -= this.xpToNext();
+        this.level++;
+        const g = this.def.grow || {};
+        const ratio = this.maxHp ? this.hp / this.maxHp : 1;
+        this.baseMaxHp = this.def.hp + (this.level - 1) * (g.hp || 0);
+        this.maxHp = this.baseMaxHp;
+        this.hp = Math.min(this.maxHp, this.maxHp * ratio + (g.hp || 0));   // small heal on level up
+      }
+      if (this.level >= RC.HERO.maxLevel) this.xp = 0;
     }
 
     moveTo(x, y) {
@@ -240,12 +285,14 @@ window.RC = window.RC || {};
     // ── 효과가 반영된 실효 스탯 ──
     effAtk(game) {
       let d = this.def.dmg + this._up(game, 'atk') * RC.CFG.UP_ATK_STEP;
+      if (this.hero) d += (this.level - 1) * ((this.def.grow && this.def.grow.dmg) || 0);
       if (this.rail > 0 && this.def.ability) d += this.def.ability.dmgBonus || 0;
       if (this.surge > 0) d *= 1.5;
       return d;
     }
     effArmor(game) {
       let a = (this.def.armor || 0) + this._up(game, 'arm') * RC.CFG.UP_ARM_STEP;
+      if (this.hero) a += (this.level - 1) * ((this.def.grow && this.def.grow.armor) || 0);
       if (this.bulwark > 0 && this.def.ability) a += this.def.ability.armorBonus || 0;
       if (this.acidStacks > 0) a -= this.acidStacks * this.acidShred;   // 산성 = 갑옷 부식
       return Math.max(0, a);
@@ -278,9 +325,16 @@ window.RC = window.RC || {};
     effRegen(game) { return RC.CFG.ENERGY_REGEN + this._up(game, 'eng') * RC.CFG.UP_ENG_REGEN; }
 
     update(dt, game) {
+      // 영웅 전사 상태 — 부활 대기(전투/이동 정지), 시간이 되면 부활
+      if (this.downed) {
+        this.reviveT -= dt;
+        if (this.reviveT <= 0 && game.reviveHero) game.reviveHero(this);
+        return;
+      }
       this.cd = Math.max(0, this.cd - dt);
       this.hitFlash = Math.max(0, this.hitFlash - dt);
       this.abilityCd = Math.max(0, this.abilityCd - dt);
+      if (this.hero) { for (const k in this.skillCd) if (this.skillCd[k] > 0) this.skillCd[k] = Math.max(0, this.skillCd[k] - dt); }
       this.castFx = Math.max(0, this.castFx - dt);
       this.critFx = Math.max(0, this.critFx - dt);
       this.surge = Math.max(0, this.surge - dt);
@@ -314,8 +368,8 @@ window.RC = window.RC || {};
       // 이동 속도 갱신 (뿌리내림 시 0)
       this.curSpeed = this.rail > 0 ? 0 : this.effSpeed(game);
 
-      // AI 유닛 자동 스킬 시전
-      if (this.def.ability && game.isAI && game.isAI(this.owner)) this._autoCast(dt, game);
+      // AI 유닛 자동 스킬 시전 (영웅 포함)
+      if ((this.def.ability || this.def.hero) && game.isAI && game.isAI(this.owner)) this._autoCast(dt, game);
 
       // 죽은 대상 정리
       if (this.foe && this.foe.dead) this.foe = null;
@@ -473,12 +527,32 @@ window.RC = window.RC || {};
     }
 
     // ── 스킬 시전 ────────────────────────────────────
-    canCast(game) {
+    canCast(game, key) {
+      if (this.hero) {
+        if (this.downed) return false;
+        const s = this._skillByKey((key || '').toLowerCase());
+        if (!s || this.heroRank(s.idx) <= 0) return false;
+        return (this.skillCd[s.sk.key.toLowerCase()] || 0) <= 0 && this.energy >= s.sk.cost;
+      }
       const ab = this.def.ability;
       return !!ab && this.abilityCd <= 0 && this.energy >= ab.cost;
     }
 
-    cast(game) {
+    cast(game, key) {
+      if (this.hero) {
+        if (this.downed) return false;
+        const s = this._skillByKey((key || '').toLowerCase());
+        if (!s) return false;
+        const rank = this.heroRank(s.idx);
+        const kk = s.sk.key.toLowerCase();
+        if (rank <= 0 || (this.skillCd[kk] || 0) > 0 || this.energy < s.sk.cost) return false;
+        const ab = this._effSkill(s.sk, rank);
+        if (!this._applyAbility(game, ab)) return false;   // 대상 없으면 소모 안 함
+        this.energy -= s.sk.cost;
+        this.skillCd[kk] = s.sk.cd;
+        this.castFx = 0.4;
+        return true;
+      }
       const ab = this.def.ability;
       if (!ab || this.abilityCd > 0 || this.energy < ab.cost) return false;
       if (!this._applyAbility(game, ab)) return false;   // 대상이 없으면 소모 안 함
@@ -591,11 +665,30 @@ window.RC = window.RC || {};
       return false;
     }
 
+    // AI 영웅 자동 시전 — 습득한 스킬을 상황에 맞게
+    _heroAutoCast(game) {
+      const list = this.def.skills || [];
+      for (let i = 0; i < list.length; i++) {
+        const sk = list[i];
+        if (this.heroRank(i) <= 0) continue;
+        const key = sk.key.toLowerCase();
+        if ((this.skillCd[key] || 0) > 0 || this.energy < sk.cost) continue;
+        if (sk.id === 'mend' || sk.id === 'weld') {
+          if (this.hp < this.maxHp * 0.6) this.cast(game, key);
+        } else if (sk.id === 'warp') {
+          // 자동 점멸은 하지 않음
+        } else if (this.foe && !this.foe.dead) {
+          this.cast(game, key);          // 공격 스킬 — 교전 중일 때
+        }
+      }
+    }
+
     // AI 유닛 자동 시전 — 상황에 맞을 때만
     _autoCast(dt, game) {
       this._castTry -= dt;
       if (this._castTry > 0) return;
       this._castTry = 0.5;
+      if (this.hero) { this._heroAutoCast(game); return; }
       if (!this.canCast(game)) return;
       const id = this.def.ability.id;
       if (id === 'unload') return;                                            // 수송선은 자동 하차 안 함
