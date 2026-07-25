@@ -118,14 +118,63 @@ RC.UI = (function () {
     syncPause();
   }
 
-  // 터치용 툴바 — 키보드 단축키(P/S/F/Space/Esc/컨트롤그룹)를 버튼으로 대체
+  // ── 음성 채팅 버튼 ────────────────────────────────
+  // 경기 중에는 이 버튼 하나가 전부다: 처음 누르면 마이크 권한을 받아 통화에 들어가고,
+  // 그 다음부터는 음소거 토글. 통화를 완전히 끊는 건 로비 패널에서 한다.
+  function initVoiceButton() {
+    const btn = document.getElementById('tb-voice');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      if (!RC.Voice) return;
+      const st = RC.Voice.status();
+      if (!st.joined) {
+        if (!RC.online) { g.notify('🎤 Voice chat works in online matches.'); return; }
+        btn.disabled = true;
+        const okJoin = await RC.Voice.join();
+        btn.disabled = false;
+        if (!okJoin) g.notify('🎤 ' + (RC.Voice.status().error || 'Could not start voice chat.'));
+        else g.notify('🎤 Voice on — the others can hear you.');
+      } else {
+        const on = RC.Voice.toggleMic();
+        g.notify(on ? '🎤 Mic on' : '🔇 Mic muted');
+      }
+      syncVoice();
+    });
+    if (RC.Voice && RC.Voice.on) RC.Voice.on(syncVoice);
+    syncVoice();
+  }
+  // 버튼 모양 + "지금 누가 말하고 있는지" 표시. 매 프레임 호출되어도 싸다.
+  function syncVoice() {
+    const btn = document.getElementById('tb-voice');
+    const hud = document.getElementById('voice-hud');
+    if (!btn || !RC.Voice) return;
+    const st = RC.Voice.status();
+    btn.classList.toggle('live', st.joined && st.micOn);
+    btn.classList.toggle('muted', st.joined && !st.micOn);
+    btn.textContent = (st.joined && !st.micOn) ? '🔇' : '🎤';
+    btn.title = !RC.online ? 'Voice chat — online matches only'
+              : !st.joined ? 'Turn on voice chat'
+              : (st.micOn ? 'Mute your mic' : 'Unmute your mic');
+    btn.style.opacity = RC.online ? '' : '.45';
+    if (!hud) return;
+    const rows = st.peers.filter(p => p.state !== 'closed');
+    if (!st.joined || !rows.length) { hud.classList.add('hidden'); hud.innerHTML = ''; return; }
+    hud.classList.remove('hidden');
+    hud.innerHTML = rows.map(p =>
+      '<div class="' + (p.speaking ? 'talking' : '') + '">' +
+      (p.speaking ? '🔊 ' : (p.state === 'failed' ? '⚠ ' : '· ')) + esc(p.name) +
+      (p.state === 'connected' ? '' : ' (' + p.state + ')') + '</div>').join('');
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // 터치용 툴바 — 키보드 단축키(P/F/Space/Esc/컨트롤그룹)를 버튼으로 대체.
+  // 유닛 정지(S)는 버튼에서 뺐다 — 키보드에는 그대로 남아 있다.
   function initTouchbar() {
     document.getElementById('tb-pause').addEventListener('click', togglePause);
-
-    document.getElementById('tb-stop').addEventListener('click', () => {
-      const ids = g.selection.filter(u => u.kind === 'unit' && u.owner === g.playerOwner).map(u => u.id);
-      if (ids.length) RC.cmd(g, { t: 'stop', ids });
-    });
+    initVoiceButton();
 
     document.getElementById('tb-idle').addEventListener('click', () => {
       const idle = g.units.find(u => u.owner === g.playerOwner && u.def.worker && u.state === 'idle');
@@ -220,6 +269,7 @@ RC.UI = (function () {
   function update() {
     // 일시정지 표시는 매 프레임 맞춘다 — P 키로 바꿔도 버튼이 따라온다
     syncPause();
+    syncVoice();
     const me = g.playerOwner;
     if (!g.res[me]) return;                 // online: state not received yet
     const s = g.supply(me);
@@ -610,5 +660,5 @@ RC.UI = (function () {
     el.overlay.classList.remove('hidden');
   }
 
-  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch };
+  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch, syncVoice };
 })();

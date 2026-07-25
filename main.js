@@ -447,6 +447,7 @@ window.RC = window.RC || {};
 
   function openMenu() {
     started = false;
+    if (RC.Voice && RC.Voice.joined) RC.Voice.leave();     // quitting to the menu hangs up
     if (RC.online) { RC.NetClient.close(); RC.online = false; }
     document.getElementById('lobby').classList.add('hidden');
     document.getElementById('browser').classList.add('hidden');
@@ -704,6 +705,75 @@ window.RC = window.RC || {};
     });
   })();
 
+  // ── Voice chat panel (lobby) ────────────────────────────
+  // The in-match control is the 🎤 touchbar button; this is where you actually
+  // join, leave, mute and see who is on the call.
+  let voiceRoster = [];
+  function renderVoice() {
+    const panel = document.getElementById('voice-panel');
+    if (!panel || !RC.Voice) return;
+    const st = RC.Voice.status();
+    const show = (id, on) => { const e = document.getElementById(id); if (e) e.classList.toggle('hidden', !on); };
+    show('voice-join', !st.joined);
+    show('voice-mic', st.joined);
+    show('voice-deaf', st.joined);
+    show('voice-leave', st.joined);
+
+    const note = document.getElementById('voice-note');
+    if (note) note.textContent = st.joined
+      ? 'You are on the call — audio goes straight between players, not through the server.'
+      : (st.reason || 'Talk to the other players while you play.');
+
+    const mic = document.getElementById('voice-mic');
+    if (mic) { mic.textContent = st.micOn ? 'Mute mic' : 'Unmute mic'; mic.classList.toggle('on', !st.micOn); }
+    const deaf = document.getElementById('voice-deaf');
+    if (deaf) { deaf.textContent = st.deaf ? 'Undeafen' : 'Deafen'; deaf.classList.toggle('on', st.deaf); }
+    const join = document.getElementById('voice-join');
+    if (join) { join.disabled = !!st.reason; join.title = st.reason || 'Ask for microphone access and join the call'; }
+
+    const err = document.getElementById('voice-error');
+    if (err) err.textContent = st.error || '';
+
+    const list = document.getElementById('voice-list');
+    if (!list) return;
+    // everyone in the room who has voice on, us first
+    const rows = [];
+    if (st.joined) rows.push({ me: true, name: myName() || 'You', state: 'connected', speaking: st.speaking, micOn: st.micOn });
+    st.peers.forEach(p => rows.push({ me: false, name: p.name, state: p.state, speaking: p.speaking, micOn: true }));
+    // people in the room who have NOT joined voice yet — worth showing, so you
+    // know whether to wait for them or just type
+    const onCall = new Set(st.peers.map(p => p.id));
+    (lobbyData ? lobbyData.players : []).forEach(pl => {
+      if (pl.id === myId || onCall.has(pl.id)) return;
+      if (voiceRoster.some(v => v.id === pl.id)) return;
+      rows.push({ me: false, name: pl.name, state: 'off', speaking: false, micOn: false });
+    });
+    if (!rows.length) { list.innerHTML = '<div id="voice-empty">Nobody is on the call yet — press Join Voice.</div>'; return; }
+    const STATE_TEXT = { connected: 'connected', connecting: 'connecting…', reconnecting: 'reconnecting…',
+                         failed: 'could not connect', off: 'not on voice' };
+    list.innerHTML = rows.map(r =>
+      '<div class="vrow' + (r.speaking ? ' talking' : '') + (r.state === 'failed' ? ' failed' : '') + '">' +
+      '<div class="vdot"></div>' +
+      '<div class="vnm">' + esc(r.name) + (r.me ? ' (you)' : '') + '</div>' +
+      '<div class="vst">' + (r.me && !r.micOn ? 'mic muted' : (STATE_TEXT[r.state] || r.state)) + '</div>' +
+      '</div>').join('');
+  }
+  (function initVoicePanel() {
+    if (!RC.Voice) return;
+    RC.Voice.init(null, m => N.send(m));
+    RC.Voice.on(() => { renderVoice(); if (RC.UI && RC.UI.syncVoice) RC.UI.syncVoice(); });
+    const j = document.getElementById('voice-join');
+    if (j) j.addEventListener('click', async () => { j.disabled = true; await RC.Voice.join(); j.disabled = false; renderVoice(); });
+    const m = document.getElementById('voice-mic');
+    if (m) m.addEventListener('click', () => { RC.Voice.toggleMic(); renderVoice(); });
+    const d = document.getElementById('voice-deaf');
+    if (d) d.addEventListener('click', () => { RC.Voice.toggleDeaf(); renderVoice(); });
+    const l = document.getElementById('voice-leave');
+    if (l) l.addEventListener('click', () => { RC.Voice.leave(); renderVoice(); });
+    renderVoice();
+  })();
+  function leaveVoice() { if (RC.Voice && RC.Voice.joined) RC.Voice.leave(); voiceRoster = []; renderVoice(); }
+
   function openBrowser(kind) {
     // No nickname yet? Ask first — other players are about to see this name.
     if (!myName()) { openNickname(() => openBrowser(kind)); return; }
@@ -732,11 +802,13 @@ window.RC = window.RC || {};
     if (code.length >= 3) { setBrowserStatus('Joining ' + code + '…'); N.send({ t: 'join', code }); }
   });
   document.getElementById('browser-back').addEventListener('click', () => {
+    leaveVoice();
     N.close(); RC.online = false; started = false;
     presence = []; hideInvite();
     browserEl.classList.add('hidden'); openMenu();
   });
   document.getElementById('btn-menu2').addEventListener('click', () => {
+    leaveVoice();                       // leaving the room leaves the call
     N.send({ t: 'leave' });
     lobbyEl.classList.add('hidden'); showBrowser(); setBrowserStatus('Pick or create a game.');
   });
@@ -748,9 +820,15 @@ window.RC = window.RC || {};
     N.send({ t: 'list' });
   });
   N.on('__error', () => setBrowserStatus('Could not connect — the server may be waking up. Wait ~30s, then press Back and Online again.'));
-  N.on('__close', () => { presence = []; renderPresence(); hideInvite(); if (!started) setBrowserStatus('Disconnected. Press Back, then Online to reconnect.'); });
+  N.on('__close', () => { presence = []; renderPresence(); hideInvite(); leaveVoice(); if (!started) setBrowserStatus('Disconnected. Press Back, then Online to reconnect.'); });
 
-  N.on('welcome', m => { myId = m.id; renderPresence(); });
+  N.on('welcome', m => {
+    myId = m.id;
+    if (RC.Voice) RC.Voice.init(myId, msg => N.send(msg));   // the id decides who offers
+    renderPresence();
+  });
+  N.on('voicePeers', m => { voiceRoster = m.peers || []; if (RC.Voice) RC.Voice.setRoster(voiceRoster); renderVoice(); });
+  N.on('rtc', m => { if (RC.Voice) RC.Voice.onSignal(m); });
   N.on('rooms', m => renderRooms(m.rooms));
   N.on('presence', m => { presence = m.players || []; renderPresence(); });
   N.on('invited', m => showInvite(m));
@@ -759,7 +837,7 @@ window.RC = window.RC || {};
   N.on('inviteError', m => setBrowserStatus(m.msg || 'That invite could not be sent.'));
   N.on('joined', m => { roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null; showLobby(); });
   N.on('joinError', m => setBrowserStatus(m.msg || 'Could not join that game.'));
-  N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); RC.isHost = isHost; if (m.code) roomCode = m.code; roomPublic = m.public; renderLobby(); renderPresence(); });
+  N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); RC.isHost = isHost; if (m.code) roomCode = m.code; roomPublic = m.public; renderLobby(); renderPresence(); renderVoice(); });
   N.on('toLobby', () => { started = false; game.over = null; overlayShown = false; overlay.classList.add('hidden'); showLobby(); });
 
   N.on('start', m => startOnline(m));
@@ -819,8 +897,12 @@ window.RC = window.RC || {};
     const isSurvival = lobbyData.gameMode === 'survival';
     const vsOpts = document.getElementById('lobby-vs-opts');
     const svOpts = document.getElementById('lobby-sv-opts');
-    if (vsOpts) vsOpts.classList.toggle('hidden', isSurvival);
-    if (svOpts) svOpts.classList.toggle('hidden', !isSurvival);
+    // These two carry an inline display:flex, and there is no generic .hidden rule —
+    // so toggling the class never hid them. A versus lobby was showing an empty
+    // "Difficulty" heading, and a survival lobby was showing Map and Mode pickers
+    // that do nothing. Set display directly so the inline style is the one changing.
+    if (vsOpts) vsOpts.style.display = isSurvival ? 'none' : 'flex';
+    if (svOpts) svOpts.style.display = isSurvival ? 'flex' : 'none';
     const codeLine = document.getElementById('lobby-code');
     if (codeLine && isSurvival) {
       codeLine.textContent = (roomPublic ? '🌐 Public co-op' : ('🔒 Private co-op — share code: ' + (roomCode || ''))) +

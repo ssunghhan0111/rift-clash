@@ -273,7 +273,7 @@ function roomBroadcast(room, obj) { const s = JSON.stringify(obj); room.clients.
 function isHost(c) { return c.room && c.room.clients.length && c.room.clients[0] === c; }
 
 function onConnect(socket) {
-  const c = { socket, id: nextClientId++, name: 'Player ' + nextClientId, race: 'forge', room: null };
+  const c = { socket, id: nextClientId++, name: 'Player ' + nextClientId, race: 'forge', room: null, voice: false };
   sockets.add(c);
   send(c, {
     t: 'welcome', id: c.id,
@@ -335,6 +335,7 @@ function joinRoom(c, room) {
   c.room = room;
   room.clients.push(c);
   send(c, { t: 'joined', roomId: room.id, code: room.code, name: room.name, public: room.public });
+  send(c, voiceRoster(room));            // who is already on the call
   pushLobby(room);
   broadcastRoomList();
   broadcastPresence();
@@ -344,6 +345,7 @@ function leaveRoom(c) {
   const room = c.room;
   if (!room) return;
   c.room = null;
+  c.voice = false;                       // leaving the room leaves the call
   room.clients = room.clients.filter(x => x !== c);
   if (room.lobby.started && room.game) {
     const owner = room.ownerOf.get(c.socket);
@@ -351,7 +353,7 @@ function leaveRoom(c) {
     if (room.ownerOf.size === 0) stopMatch(room);   // everyone left → end match
   }
   if (room.clients.length === 0) destroyRoom(room);
-  else pushLobby(room);
+  else { pushLobby(room); pushVoiceRoster(room); }
   broadcastRoomList();
   broadcastPresence();
 }
@@ -372,6 +374,17 @@ function lobbyState(room) {
   };
 }
 function pushLobby(room) { if (!room.lobby.started) roomBroadcast(room, lobbyState(room)); }
+
+// Who in this room has their microphone on. Sent to the whole room (including
+// players who are not in voice) so the lobby can show who is talkable-to, and
+// sent whether or not the match has started — voice outlives the lobby screen.
+function voiceRoster(room) {
+  return {
+    t: 'voicePeers',
+    peers: room.clients.filter(c => c.voice).map(c => ({ id: c.id, name: c.name })),
+  };
+}
+function pushVoiceRoster(room) { if (room) roomBroadcast(room, voiceRoster(room)); }
 
 function roomListPayload() {
   const list = [];
@@ -469,6 +482,33 @@ function onMsg(c, m) {
     case 'inviteDecline': {
       const target = clientById(m.to);
       if (target) send(target, { t: 'inviteDeclined', name: c.name });
+      break;
+    }
+
+    // ── Voice chat signalling ──
+    // The server never carries any audio. It relays the WebRTC handshake between
+    // two players in the SAME room and nothing else — the media itself goes
+    // peer-to-peer, so a call costs this process a handful of small messages.
+    case 'voiceJoin':
+      if (!c.room) break;
+      c.voice = true;
+      pushVoiceRoster(c.room);
+      break;
+    case 'voiceLeave':
+      if (!c.voice) break;
+      c.voice = false;
+      if (c.room) pushVoiceRoster(c.room);
+      break;
+    case 'rtc': {
+      // Relay an offer / answer / ICE candidate. Both ends must be in the same
+      // room with voice on, or this becomes a way to spray messages at strangers.
+      if (!c.room || !c.voice) break;
+      const target = clientById(m.to);
+      if (!target || target === c || target.room !== c.room || !target.voice) break;
+      if (m.kind !== 'offer' && m.kind !== 'answer' && m.kind !== 'ice') break;
+      const payload = { t: 'rtc', from: c.id, fromName: c.name, kind: m.kind };
+      if (m.kind === 'ice') payload.ice = m.ice; else payload.sdp = m.sdp;
+      send(target, payload);
       break;
     }
     case 'join': {

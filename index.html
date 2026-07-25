@@ -574,6 +574,48 @@
   #invite-btns button { flex: 1; padding: 9px 0; font-size: 13px; font-weight: 700; border-radius: 6px;
     cursor: pointer; font-family: var(--sans); border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
   #inv-accept { background: var(--orange); color: #10171f; border-color: transparent; }
+
+  /* ── Voice chat ── */
+  #voice-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 92vw); }
+  #voice-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #voice-controls button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 9px 16px; font-size: 13px; font-weight: 700;
+    cursor: pointer; font-family: var(--sans);
+  }
+  #voice-controls button:hover:not(:disabled) { filter: brightness(1.25); }
+  #voice-controls button:disabled { opacity: .4; cursor: not-allowed; }
+  #voice-controls button.hidden { display: none; }
+  #voice-join { background: var(--cyan); color: #082027; border-color: transparent; }
+  #voice-mic.on, #voice-deaf.on { background: var(--bad); color: #fff; border-color: transparent; }
+  #voice-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+  .vrow {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 8px 13px;
+  }
+  .vrow .vdot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+  .vrow.talking { border-color: var(--good); }
+  .vrow.talking .vdot { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .vrow.failed { border-color: var(--bad); }
+  .vrow.failed .vdot { background: var(--bad); }
+  .vrow .vnm { font-weight: 700; font-size: 13.5px; color: #fff; }
+  .vrow .vst { font-size: 11px; color: var(--dim); margin-left: auto; }
+  #voice-empty { color: var(--dim); font-size: 12px; text-align: center; padding: 10px; }
+  #voice-error { color: var(--bad); font-size: 12px; text-align: center; min-height: 16px; max-width: 520px; }
+
+  /* in-match: who is talking, above the touchbar */
+  #voice-hud {
+    position: absolute; left: 12px; bottom: 176px; z-index: 12;
+    display: flex; flex-direction: column; gap: 4px; pointer-events: none;
+  }
+  #voice-hud.hidden { display: none; }
+  #voice-hud div {
+    background: #0d1520e0; border: 1px solid var(--line); border-radius: 14px;
+    padding: 3px 11px; font-size: 11.5px; color: var(--dim); white-space: nowrap;
+  }
+  #voice-hud div.talking { color: var(--good); border-color: var(--good); }
+  .tbtn.live { background: var(--good); color: #07230f; }
+  .tbtn.muted { background: var(--bad); color: #fff; }
 </style>
 </head>
 <body>
@@ -597,7 +639,7 @@
     <div id="touchbar">
       <button class="tbtn" id="tb-pause" title="Pause (P)">⏸</button>
       <button class="tbtn" id="tb-gamemenu" title="End match — restart or quit">⏹</button>
-      <button class="tbtn" id="tb-stop" title="Stop selected units (S)">■</button>
+      <button class="tbtn" id="tb-voice" title="Voice chat — talk to the other players">🎤</button>
       <button class="tbtn" id="tb-idle" title="Find idle worker (F)">👷</button>
       <button class="tbtn" id="tb-home" title="Go to base (Space)">🏠</button>
       <button class="tbtn" id="tb-hero" title="Select hero (H)">⭐</button>
@@ -635,6 +677,7 @@
       </div>
     </div>
 
+    <div id="voice-hud" class="hidden"></div>
     <div id="paused-tag" class="hidden">⏸ PAUSED</div>
   </div>
 
@@ -807,6 +850,20 @@
       <div id="lobby-diffs" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;"></div>
     </div>
   </div>
+  <div class="ss-h" style="display:flex; align-items:center; gap:10px;">🎤 Voice Chat
+    <span id="voice-note" style="font-size:11px; color:var(--dim); font-weight:400;"></span>
+  </div>
+  <div id="voice-panel">
+    <div id="voice-controls">
+      <button id="voice-join">🎤 Join Voice</button>
+      <button id="voice-mic" class="hidden">Mute mic</button>
+      <button id="voice-deaf" class="hidden">Deafen</button>
+      <button id="voice-leave" class="hidden">Leave Voice</button>
+    </div>
+    <div id="voice-list"></div>
+    <div id="voice-error"></div>
+  </div>
+
   <div class="ss-h" style="display:flex; align-items:center; gap:10px;">Invite Players
     <span id="lobby-online-count" style="font-size:11px; color:var(--dim); font-weight:400;"></span>
   </div>
@@ -838,6 +895,8 @@
   </div>
 </div>
 
+<div id="voice-sink" style="position:absolute;width:0;height:0;overflow:hidden"></div>
+
 <div id="rotate-note">
   <div>
     <div class="rot-ic">📱</div>
@@ -854,6 +913,7 @@
 <script src="ai.js"></script>
 <script src="daily.js"></script>
 <script src="weather.js"></script>
+<script src="voice.js"></script>
 <script src="survival.js"></script>
 <script src="leaderboard.js"></script>
 <script src="dev.js"></script>
