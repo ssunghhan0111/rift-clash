@@ -416,10 +416,10 @@ window.RC = window.RC || {};
 
     _move(dt, game) {
       if (!this.target) { this.state = 'idle'; return; }
-      // 이동 중에도 적이 가까우면 반응 (일꾼·수송선 제외). 공격-이동이면 더 넓게 감지.
-      if (!this.def.worker && !this.def.transport) {
-        const range = this.attackMove ? CFG.AGGRO_RANGE : CFG.AGGRO_RANGE * 0.65;
-        const e = game.findNearestEnemy(this, range);
+      // 일반 이동(Move)은 적을 무시하고 그냥 이동 → 교전 중에도 후퇴 가능.
+      // 공격-이동(attack-move)일 때만 경로상의 적을 자동 교전한다.
+      if (this.attackMove && !this.def.worker && !this.def.transport) {
+        const e = game.findNearestEnemy(this, CFG.AGGRO_RANGE);
         if (e) { this.attackTarget(e); return; }   // attackMove/amoveGoal persist → resumes after the kill
       }
       // 길찾기 — 직선 경로가 막혔을 때만 경유점을 따라간다 (지상 유닛). 공중은 직진.

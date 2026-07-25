@@ -163,7 +163,7 @@ RC.AI = (function () {
         const target = nearestEnemyCore(g, own, core) || { x: core.x, y: core.y };
         army.forEach((u, i) => {
           const a = (i / army.length) * Math.PI * 2;
-          u.moveTo(target.x + Math.cos(a) * 70, target.y + Math.sin(a) * 70);
+          u.attackMoveTo(target.x + Math.cos(a) * 70, target.y + Math.sin(a) * 70);   // engage defenders on the way
         });
         s.waveNum++;
         s.waveTimer = K.AI_WAVE_GAP;

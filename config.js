@@ -70,10 +70,10 @@ RC.COLORS = {
   obstacle:  '#3a4757',
   obstacleDark: '#232d3a',
 
-  p1_body:   '#3a7fd5', p1_trim: '#f08a2a', p1_dark: '#1e4a80',
-  p2_body:   '#c9484b', p2_trim: '#f0c02a', p2_dark: '#7d2426',
-  p3_body:   '#3fbf6f', p3_trim: '#d7f05a', p3_dark: '#1f6b3c',
-  p4_body:   '#9a6bd8', p4_trim: '#e0a0ff', p4_dark: '#573a80',
+  p1_body:   '#3a86e0', p1_trim: '#ffb04a', p1_dark: '#1e4a80',
+  p2_body:   '#e6483f', p2_trim: '#ffd23f', p2_dark: '#8a221c',
+  p3_body:   '#38c46a', p3_trim: '#d7f05a', p3_dark: '#1f6b3c',
+  p4_body:   '#b46bff', p4_trim: '#e0a0ff', p4_dark: '#573a80',
 
   team1:     '#6fd3ff',
   team2:     '#ff8a5c',

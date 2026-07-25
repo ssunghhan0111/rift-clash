@@ -74,7 +74,7 @@ RC.Survival = (function () {
     const u = new RC.Unit(type, o.x + (Math.random() * 120 - 60), o.y + (Math.random() * 500 - 250), ENEMY);
     scaleHp(u, s.wave, g);
     g.units.push(u);
-    u.moveTo(g.crystal.x, g.crystal.y);
+    u.attackMoveTo(g.crystal.x, g.crystal.y);   // fight through defenders, but keep pressing the crystal
   }
 
   // Keep idle horde units marching toward the crystal
@@ -82,7 +82,7 @@ RC.Survival = (function () {
     if (!g.crystal || g.crystal.dead) return;
     for (const u of g.units) {
       if (u.owner !== ENEMY || u.dead) continue;
-      if (u.state === 'idle') u.moveTo(g.crystal.x, g.crystal.y);
+      if (u.state === 'idle') u.attackMoveTo(g.crystal.x, g.crystal.y);
     }
   }
 

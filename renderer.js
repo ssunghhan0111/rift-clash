@@ -392,12 +392,15 @@ RC.Renderer = (function () {
     };
     // 종족 색조 — 글룹은 유기적 초록빛, 포지는 차가운 강철빛 (소유자 색은 유지)
     if (!flash) {
+      // Keep the OWNER's color dominant (blue you / red enemy / green ally / purple) for
+      // readability — the faction only tints lightly, staying identifiable via green acid
+      // accents (eyes, drips) for Gloop and cool steel highlights for Forge.
       if (u.def.race === 'gloop') {
-        c.body = mix(c.body, GLOOP_TINT, 0.30); c.light = mix(c.light, GLOOP_TINT, 0.30);
-        c.dark = mix(c.dark, GLOOP_TINT, 0.22); c.steel = mix(c.steel, GLOOP_TINT, 0.35);
+        c.body = mix(c.body, GLOOP_TINT, 0.14); c.light = mix(c.light, GLOOP_TINT, 0.16);
+        c.dark = mix(c.dark, GLOOP_TINT, 0.14); c.steel = mix(c.steel, GLOOP_TINT, 0.30);
         c.eye = '#c9ff8f';
       } else {
-        c.steel = mix(c.steel, FORGE_TINT, 0.25);
+        c.steel = mix(c.steel, FORGE_TINT, 0.22);
       }
     }
     return c;
@@ -989,9 +992,9 @@ RC.Renderer = (function () {
   // 글룹 건물 본체 — 둥근 점액 덩어리 + 방울 (금속 대신)
   function gloopBody(b, p, x, y) {
     const rad = Math.min(b.w, b.h) * 0.4;
-    const body = mix(p.body, GLOOP_TINT, 0.42);
-    const dk = mix(shade(p.body, -0.4), GLOOP_TINT, 0.3);
-    const lt = mix(shade(p.body, 0.28), GLOOP_TINT, 0.4);
+    const body = mix(p.body, GLOOP_TINT, 0.24);
+    const dk = mix(shade(p.body, -0.4), GLOOP_TINT, 0.18);
+    const lt = mix(shade(p.body, 0.28), GLOOP_TINT, 0.26);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     rrect(x + 4, y + 7, b.w, b.h, rad); ctx.fill();
     ctx.fillStyle = dk;

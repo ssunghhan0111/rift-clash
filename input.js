@@ -20,7 +20,10 @@ RC.Input = (function () {
   // 활성 포인터(마우스/터치) 추적 — 2개 이상이면 두 손가락 팬
   const pointers = new Map();
   let primaryId = null;
-  let panMode = false;
+  let panMode = false;       // camera-drag active (two-finger, single-finger touch, or middle mouse)
+  let panSingle = false;     // pan driven by a single pointer (touch or middle mouse)
+  let panMoved = false;      // the pan pointer actually moved (→ it was navigation, not a tap)
+  let boxArmed = false;      // touch: next drag is a selection box instead of a pan
   let panLast = null;
   let longPressTimer = null;
   let longPressFired = false;
@@ -71,25 +74,27 @@ RC.Input = (function () {
     const r = cv.getBoundingClientRect();
     const p = rectPoint(e, r);
 
-    // 데스크탑 우클릭 = 즉시 명령 (기존 동작 유지)
     if (e.pointerType === 'mouse') {
-      if (e.button === 2) {
+      if (e.button === 2) {              // right-click = immediate command
         state.screen.x = p.x; state.screen.y = p.y;
         const w = toWorld(p.x, p.y); state.world.x = w.x; state.world.y = w.y;
         onRight();
         return;
       }
-      if (e.button !== 0) return; // 휠클릭 등 무시
+      if (e.button === 1) {              // middle-drag = free camera pan (desktop)
+        e.preventDefault();
+        panMode = true; panSingle = true; panMoved = false; panLast = { x: p.x, y: p.y };
+        primaryId = e.pointerId; pointers.set(e.pointerId, { x: p.x, y: p.y });
+        return;
+      }
+      if (e.button !== 0) return;
     }
 
     pointers.set(e.pointerId, { x: p.x, y: p.y });
 
-    if (pointers.size >= 2) {
-      // 두 손가락 → 카메라 패닝 모드
-      panMode = true;
-      clearLongPress();
-      state.dragging = false;
-      panLast = centroid();
+    if (pointers.size >= 2) {            // two fingers → pan
+      panMode = true; panSingle = false; panMoved = false;
+      clearLongPress(); state.dragging = false; panLast = centroid();
       return;
     }
 
@@ -97,27 +102,30 @@ RC.Input = (function () {
     state.screen.x = p.x; state.screen.y = p.y;
     const w = toWorld(p.x, p.y); state.world.x = w.x; state.world.y = w.y;
 
-    if (g.placing) {
-      placeAt(e);
-      return;
-    }
+    if (g.placing) { placeAt(e); return; }
 
-    state.dragging = true;
     state.dragStart.x = p.x; state.dragStart.y = p.y;
 
     if (e.pointerType !== 'mouse') {
-      // 롱프레스 = 선택에 추가/제거 (shift+클릭 대체, 터치 전용)
+      // Touch: a single-finger drag PANS the camera (natural navigation); a tap still
+      // selects/commands. Drag a selection box only when the box-select toggle is armed.
+      if (boxArmed) { state.dragging = true; }
+      else { panMode = true; panSingle = true; panMoved = false; panLast = { x: p.x, y: p.y }; }
       longPressFired = false;
       clearLongPress();
       longPressTimer = setTimeout(() => {
-        longPressFired = true;
+        longPressFired = true; panMode = false; panSingle = false;   // long-press cancels the pan
         const ent = g.entityAt(state.world.x, state.world.y, null);
         if (ent && ent.owner === g.playerOwner) {
           if (g.selection.includes(ent)) g.selection = g.selection.filter(s => s !== ent);
           else g.selection.push(ent);
         }
       }, 480);
+      return;
     }
+
+    // Mouse left-drag = selection box
+    state.dragging = true;
   }
 
   function onPointerMove(e) {
@@ -126,14 +134,15 @@ RC.Input = (function () {
 
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: p.x, y: p.y });
 
-    if (panMode && pointers.size >= 2) {
-      const c = centroid();
-      if (panLast) {
+    if (panMode) {
+      const c = panSingle ? { x: p.x, y: p.y } : centroid();
+      if (panLast && c) {
         g.camera.x -= (c.x - panLast.x);
         g.camera.y -= (c.y - panLast.y);
         clampCam();
       }
       panLast = c;
+      if (Math.abs(p.x - state.dragStart.x) > 6 || Math.abs(p.y - state.dragStart.y) > 6) { panMoved = true; clearLongPress(); }
       return;
     }
 
@@ -154,7 +163,11 @@ RC.Input = (function () {
     pointers.delete(e.pointerId);
 
     if (panMode) {
-      if (pointers.size < 2) { panMode = false; panLast = null; }
+      // a single-finger touch that didn't move was actually a tap → select/command
+      if (panSingle && wasPrimary && !panMoved && !longPressFired && e.pointerType !== 'mouse') handleTap(e);
+      if (pointers.size < 2) { panMode = false; panSingle = false; panLast = null; }
+      if (wasPrimary) primaryId = null;
+      clearLongPress();
       return;
     }
 
@@ -169,12 +182,13 @@ RC.Input = (function () {
     const dy = Math.abs(state.screen.y - state.dragStart.y);
 
     if (dx < 6 && dy < 6) {
-      if (longPressFired) return; // 롱프레스가 이미 처리함
+      if (longPressFired) return;
       handleTap(e);
       return;
     }
 
     boxSelect(e);
+    boxArmed = false;          // consume the armed box-select after one drag
   }
 
   function clearLongPress() { clearTimeout(longPressTimer); longPressTimer = null; }
@@ -403,6 +417,7 @@ RC.Input = (function () {
   }
 
   function armAttackMove() { amoveArmed = true; if (g) g.notify('Attack-move — tap a destination'); snd('select'); }
+  function armBoxSelect() { boxArmed = true; if (g) g.notify('Box-select — drag over your units'); snd('select'); }
 
-  return { init, state, updateCamera, centerOn, clampCam, armAttackMove };
+  return { init, state, updateCamera, centerOn, clampCam, armAttackMove, armBoxSelect };
 })();

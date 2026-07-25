@@ -66,6 +66,9 @@ RC.UI = (function () {
     const amoveBtn = document.getElementById('tb-amove');
     if (amoveBtn) amoveBtn.addEventListener('click', () => { if (RC.Input.armAttackMove) RC.Input.armAttackMove(); });
 
+    const boxBtn = document.getElementById('tb-box');
+    if (boxBtn) boxBtn.addEventListener('click', () => { if (RC.Input.armBoxSelect) RC.Input.armBoxSelect(); });
+
     document.getElementById('tb-cancel').addEventListener('click', () => {
       g.placing = null; g.selection = [];
     });
