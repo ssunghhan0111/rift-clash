@@ -734,16 +734,27 @@ window.RC = window.RC || {};
     if (join) { join.disabled = !!st.reason; join.title = st.reason || 'Turn the mic and speaker on'; }
 
     const err = document.getElementById('voice-error');
-    if (err) err.textContent = st.needsGesture
-      ? 'Tap anywhere to let the browser start playing the incoming audio.'
-      : (st.error || '');
+    if (err) err.textContent = st.error || '';
+    // A blocked-playback state is the one failure a player can actually fix, so
+    // it gets a banner rather than a line of small grey text.
+    const tap = document.getElementById('voice-tap');
+    if (tap) {
+      const blocked = st.joined && (st.needsGesture || st.peers.some(p => p.state === 'connected' && !p.playing));
+      tap.classList.toggle('hidden', !blocked);
+    }
 
     const list = document.getElementById('voice-list');
     if (!list) return;
     // everyone in the room who has voice on, us first
     const rows = [];
     if (st.joined) rows.push({ me: true, name: myName() || 'You', state: 'connected', speaking: st.speaking, micOn: st.micOn });
-    st.peers.forEach(p => rows.push({ me: false, name: p.name, state: p.state, speaking: p.speaking, micOn: true }));
+    st.peers.forEach(p => rows.push({
+      me: false, name: p.name, state: p.state, speaking: p.speaking, micOn: true,
+      trouble: RC.Voice.troubleWith(p),
+      detail: p.state === 'connected'
+        ? ((p.receiving ? 'receiving' : 'no audio in') + ' · ' + (p.playing ? 'playing' : 'not playing'))
+        : '',
+    }));
     // people in the room who have NOT joined voice yet — worth showing, so you
     // know whether to wait for them or just type
     const onCall = new Set(st.peers.map(p => p.id));
@@ -755,12 +766,16 @@ window.RC = window.RC || {};
     if (!rows.length) { list.innerHTML = '<div id="voice-empty">Nobody is on the call yet — press Join Voice.</div>'; return; }
     const STATE_TEXT = { connected: 'connected', connecting: 'connecting…', reconnecting: 'reconnecting…',
                          failed: 'could not connect', off: 'not on voice' };
-    list.innerHTML = rows.map(r =>
-      '<div class="vrow' + (r.speaking ? ' talking' : '') + (r.state === 'failed' ? ' failed' : '') + '">' +
-      '<div class="vdot"></div>' +
-      '<div class="vnm">' + esc(r.name) + (r.me ? ' (you)' : '') + '</div>' +
-      '<div class="vst">' + (r.me && !r.micOn ? 'mic muted' : (STATE_TEXT[r.state] || r.state)) + '</div>' +
-      '</div>').join('');
+    list.innerHTML = rows.map(r => {
+      const right = r.me ? (r.micOn ? 'mic on' : 'mic muted')
+                         : (r.trouble || r.detail || STATE_TEXT[r.state] || r.state);
+      return '<div class="vrow' + (r.speaking ? ' talking' : '') +
+        ((r.state === 'failed' || r.trouble) ? ' failed' : '') + '">' +
+        '<div class="vdot"></div>' +
+        '<div class="vnm">' + esc(r.name) + (r.me ? ' (you)' : '') + '</div>' +
+        '<div class="vst">' + esc(right) + '</div>' +
+        '</div>';
+    }).join('');
   }
   (function initVoicePanel() {
     if (!RC.Voice) return;
@@ -774,6 +789,10 @@ window.RC = window.RC || {};
     if (d) d.addEventListener('click', () => { RC.Voice.toggleDeaf(); renderVoice(); });
     const l = document.getElementById('voice-leave');
     if (l) l.addEventListener('click', () => { RC.Voice.leave(true); renderVoice(); });
+    // The banner's job is simply to BE a user gesture — the click handler in
+    // voice.js does the retry; this just gives the player somewhere to press.
+    const tap = document.getElementById('voice-tap');
+    if (tap) tap.addEventListener('click', () => setTimeout(renderVoice, 250));
     renderVoice();
   })();
   // Not an explicit hang-up: the room ended or the socket dropped, so auto-join stays armed.

@@ -158,11 +158,14 @@ RC.UI = (function () {
     const rows = st.peers.filter(p => p.state !== 'closed');
     if (!st.joined || !rows.length) { hud.classList.add('hidden'); hud.innerHTML = ''; return; }
     hud.classList.remove('hidden');
-    const tapNote = st.needsGesture ? '<div class="talking">Tap the screen to hear voice</div>' : '';
-    hud.innerHTML = tapNote + rows.map(p =>
-      '<div class="' + (p.speaking ? 'talking' : '') + '">' +
-      (p.speaking ? '🔊 ' : (p.state === 'failed' ? '⚠ ' : '· ')) + esc(p.name) +
-      (p.state === 'connected' ? '' : ' (' + p.state + ')') + '</div>').join('');
+    const blocked = st.needsGesture || rows.some(p => p.state === 'connected' && !p.playing);
+    const tapNote = blocked ? '<div class="warn">👆 Tap the screen to hear voice</div>' : '';
+    hud.innerHTML = tapNote + rows.map(p => {
+      const trouble = RC.Voice.troubleWith ? RC.Voice.troubleWith(p) : '';
+      return '<div class="' + (p.speaking ? 'talking' : (trouble ? 'warn' : '')) + '">' +
+        (p.speaking ? '🔊 ' : (trouble ? '⚠ ' : '· ')) + esc(p.name) +
+        (trouble ? ' — ' + esc(trouble) : '') + '</div>';
+    }).join('');
   }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c =>

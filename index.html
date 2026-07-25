@@ -602,6 +602,13 @@
   .vrow .vst { font-size: 11px; color: var(--dim); margin-left: auto; }
   #voice-empty { color: var(--dim); font-size: 12px; text-align: center; padding: 10px; }
   #voice-error { color: var(--bad); font-size: 12px; text-align: center; min-height: 16px; max-width: 520px; }
+  #voice-tap {
+    background: var(--orange); color: #10171f; border: 0; border-radius: 7px;
+    padding: 11px 22px; font-size: 14px; font-weight: 700; cursor: pointer;
+    font-family: var(--sans); animation: ultpulse 1.4s ease-in-out infinite;
+  }
+  #voice-tap.hidden { display: none; }
+  #voice-hud div.warn { color: var(--orange); border-color: var(--orange); }
 
   /* in-match: who is talking, above the touchbar */
   #voice-hud {
@@ -860,6 +867,7 @@
       <button id="voice-leave" class="hidden">Leave Voice</button>
     </div>
     <div id="voice-list"></div>
+    <button id="voice-tap" class="hidden">👆 Tap here to turn the sound on</button>
     <div id="voice-error"></div>
   </div>
 

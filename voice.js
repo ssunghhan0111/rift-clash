@@ -122,6 +122,7 @@ RC.Voice = (function () {
         const now = p.speaking ? v > SPEAK_OFF : v > SPEAK_ON;
         if (now !== p.speaking) { p.speaking = now; changed = true; }
       }
+      nudgePlayback();
       if (changed) fire();
     }, 140);
   }
@@ -194,7 +195,10 @@ RC.Voice = (function () {
   }
   function releaseEl(el) {
     if (!el) return;
+    try { el.pause(); } catch (e) {}
     try { el.srcObject = null; } catch (e) {}
+    el.removeAttribute('src');
+    el.removeAttribute('data-voice-peer');
     el.__inUse = false;
   }
   // If the browser refused to start playback, the very next tap anywhere retries it.
@@ -206,9 +210,7 @@ RC.Voice = (function () {
       document.removeEventListener('pointerdown', retry, true);
       document.removeEventListener('touchend', retry, true);
       if (audioCtx && audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
-      for (const p of peers.values()) {
-        if (p.el && p.el.srcObject && p.el.paused) { const pr = p.el.play(); if (pr && pr.catch) pr.catch(() => {}); }
-      }
+      for (const p of peers.values()) tryPlay(p);
       fire();
     };
     document.addEventListener('pointerdown', retry, true);
@@ -218,16 +220,67 @@ RC.Voice = (function () {
 
   function attachAudio(p, ms) {
     if (!p.el) { p.el = takeEl(); p.el.setAttribute('data-voice-peer', String(p.id)); }
-    p.el.srcObject = ms;
-    p.el.muted = deaf;
-    const play = p.el.play();
-    if (play && play.catch) play.catch(() => armGestureRetry());
+    const el = p.el;
+    // The element was unlocked by PLAYING a silent file, so it still carries that
+    // file in `src`. Leaving it there and assigning `srcObject` on top is the
+    // single nastiest trap here: Chrome quietly prefers srcObject, but WebKit
+    // keeps the old resource and the remote voice is never heard — which is
+    // exactly "the tablet can't hear the PC" while the PC hears the tablet fine.
+    try { el.pause(); } catch (e) {}
+    el.removeAttribute('src');
+    el.srcObject = null;
+    el.srcObject = ms;
+    el.muted = deaf;
+    el.volume = 1;
+    p.stream = ms;
+    tryPlay(p);
     // Local metering uses Web Audio; for REMOTE streams Safari is unreliable there,
     // so this analyser is only a fallback — see remoteLevel().
     p.meter = meterFor(ms);
     p.state = 'connected';
     fire();
   }
+
+  // Ask the element to play, and keep asking. A single attempt is not enough:
+  // an automatic join has no user gesture behind it, so the first try is often
+  // refused and only a later tap can succeed.
+  function tryPlay(p) {
+    if (!p || !p.el || !p.el.srcObject) return;
+    let pr = null;
+    try { pr = p.el.play(); } catch (e) { armGestureRetry(); return; }
+    if (pr && pr.then) pr.then(() => { p.blocked = false; fire(); })
+                         .catch(() => { p.blocked = true; armGestureRetry(); fire(); });
+  }
+  // Called on every meter tick — if an element that has a stream is sitting
+  // paused, something refused it and we quietly try again.
+  function nudgePlayback() {
+    for (const p of peers.values()) {
+      if (p.el && p.el.srcObject && p.el.paused) { p.blocked = true; tryPlay(p); armGestureRetry(); }
+      else if (p.el && !p.el.paused) p.blocked = false;
+    }
+  }
+
+  // ── Diagnostics ──────────────────────────────────────
+  // "I can't hear them" has three very different causes: nothing is arriving over
+  // the network, something is arriving but playback is blocked, or it is playing
+  // and the volume is elsewhere. Guessing between them is miserable, so measure it.
+  let statsTimer = null;
+  function startStats() {
+    if (statsTimer) return;
+    statsTimer = setInterval(async () => {
+      for (const p of peers.values()) {
+        try {
+          const rep = await p.pc.getStats();
+          let bytes = 0;
+          rep.forEach(s => { if (s.type === 'inbound-rtp' && s.kind === 'audio') bytes = s.bytesReceived || 0; });
+          p.recvRate = Math.max(0, bytes - (p.recvBytes || 0));
+          p.recvBytes = bytes;
+        } catch (e) { /* stats are best effort */ }
+      }
+      fire();
+    }, 1000);
+  }
+  function stopStats() { if (statsTimer) { clearInterval(statsTimer); statsTimer = null; } }
 
   // How loud a peer is right now. Preferred source is the level the RTP stack
   // already reports (works on Safari/iOS, where a Web Audio node fed from a remote
@@ -358,6 +411,7 @@ RC.Voice = (function () {
     if (!isAuto) { setAutoWanted(true); autoTried = true; }
     setMicEnabled(true);
     startMeters();
+    startStats();
     if (send) send({ t: 'voiceJoin' });
     fire();
     return true;
@@ -369,6 +423,7 @@ RC.Voice = (function () {
     joined = false;
     for (const id of [...peers.keys()]) dropPeer(id);
     stopMeters();
+    stopStats();
     stopMic();
     for (const el of pool) { try { el.srcObject = null; el.removeAttribute('src'); el.load(); el.remove(); } catch (e) {} }
     pool = [];
@@ -394,15 +449,31 @@ RC.Voice = (function () {
   }
   function toggleDeaf() { setDeaf(!deaf); return deaf; }
 
+  // A single sentence describing why a peer might be inaudible, or '' when fine.
+  function troubleWith(p) {
+    if (p.state === 'failed') return 'could not connect';
+    if (p.state !== 'connected') return p.state;
+    if (p.blocked || !p.playing) return 'sound blocked — tap the screen';
+    if (!p.receiving && p.recvBytes === 0) return 'no audio arriving yet';
+    return '';
+  }
+
   function status() {
     return {
       supported: supported(), secure: secure(), reason: unavailableReason(),
       joined, micOn, deaf, error: lastError, myId, needsGesture, auto: autoWanted(),
       speaking: joined && micOn && localSpeaking,
-      peers: [...peers.values()].map(p => ({ id: p.id, name: p.name, state: p.state, speaking: p.speaking })),
+      peers: [...peers.values()].map(p => ({
+        id: p.id, name: p.name, state: p.state, speaking: p.speaking,
+        // what is actually happening to their voice on THIS device
+        receiving: (p.recvRate || 0) > 0,          // bytes arriving over the network
+        recvBytes: p.recvBytes || 0,
+        playing: !!(p.el && p.el.srcObject && !p.el.paused),
+        blocked: !!p.blocked,                      // the browser refused to start playback
+      })),
     };
   }
 
   return { init, join, autoJoin, resetAuto, leave, toggleMic, setMicEnabled, toggleDeaf, setDeaf,
-           onSignal, setRoster, status, on, get joined() { return joined; } };
+           onSignal, setRoster, status, troubleWith, on, get joined() { return joined; } };
 })();
