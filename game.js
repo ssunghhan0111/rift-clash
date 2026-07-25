@@ -150,9 +150,9 @@ window.RC = window.RC || {};
       const armor = foe.kind === 'unit' ? foe.effArmor(this) : (foe.def && foe.def.armor ? foe.def.armor : 0);
       const dealt = Math.max(1, dmg - armor);
       if (foe.kind === 'unit') {
-        foe.hp -= dealt; foe.hitFlash = 0.12;
-        if (foe.hp <= 0) foe.dead = true;
-        else if (foe.state === 'idle' && !foe.def.worker && !foe.def.transport && source) foe.attackTarget(source);
+        RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
+        foe.hitFlash = 0.12;
+        if (!foe.dead && foe.state === 'idle' && !foe.def.worker && !foe.def.transport && source) foe.attackTarget(source);
       } else if (foe.damage) {
         foe.damage(dealt);
       }

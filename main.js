@@ -193,17 +193,37 @@ window.RC = window.RC || {};
 
   function audioGo() { if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); RC.Audio.startMusic(); } }
 
+  // ── Fullscreen ────────────────────────────────────
+  // Browsers require fullscreen to be requested synchronously from a user
+  // gesture (click/tap), so this is called right at the top of each
+  // "start the match" handler. Best-effort: silently no-ops if the browser
+  // blocks it (e.g. no gesture in the chain, or unsupported like iPhone Safari).
+  function goFullscreen() {
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+    if (!req) return;
+    try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  }
+  function exitFullscreenIfActive() {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+    if (!fsEl) return;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+    if (!exit) return;
+    try { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  }
+
   function startGame() {
     RC.online = false;
     game.practice = false;
     game.heroesEnabled = true;
+    goFullscreen();
     audioGo();
     game.playerOwner = 1;
-    // my faction = selection, AI takes the opposite (guarantees Forge vs Gloop)
-    const other = selRace === 'forge' ? 'gloop' : 'forge';
+    // my faction = selection; each AI takes one of the OTHER factions at random,
+    // so you always face a different race than your own (and 2v2 can mix them).
     const mode = RC.MODES[selMode];
     const racePick = {};
-    mode.players.forEach(p => { racePick[p.owner] = p.ai ? other : selRace; });
+    mode.players.forEach(p => { racePick[p.owner] = p.ai ? RC.otherRace(selRace) : selRace; });
     game.setup(RC.getMap(selMap), mode, racePick);
     RC.AI.reset();
     resize();
@@ -218,6 +238,7 @@ window.RC = window.RC || {};
     RC.online = false;
     game.practice = false;
     game.heroesEnabled = true;
+    goFullscreen();
     audioGo();
     game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
     RC.AI.reset();
@@ -246,16 +267,18 @@ window.RC = window.RC || {};
 
   // ── Tutorial: reference screens ──
   const TUT_TABS = ['Overview', 'Modes', 'Factions', 'Units'];
+  // 종족 판정 — race가 없는 정의는 기본(Forge) 소속. 3종족 이상에서도 동작한다.
+  const raceOf = d => d.race || 'forge';
   function unitCard(d) {
-    const gloop = d.race === 'gloop';
     const bits = [`HP ${d.hp}`];
+    if (d.shield) bits.push(`SHLD ${d.shield}`);
     if (d.dmg) bits.push(`ATK ${d.dmg}`);
     if (d.range > 20) bits.push(`RNG ${d.range}`);
     if (d.armor) bits.push(`ARM ${d.armor}`);
     bits.push(`${d.cost} shards`, `pop ${d.supply}`);
     if (d.regen) bits.push(`regen ${d.regen}/s`);
     if (d.acid) bits.push('applies acid');
-    return `<div class="tut-card ${gloop ? 'gloop' : ''}">
+    return `<div class="tut-card ${raceOf(d)}">
       <div><span class="tc-name">${d.name}</span><span class="tc-role">${d.role || ''}</span></div>
       <div class="tc-stats">${bits.join(' · ')}</div>
       <div class="tc-desc">${d.desc || ''}</div>
@@ -263,11 +286,13 @@ window.RC = window.RC || {};
     </div>`;
   }
   function bldCard(d) {
-    const gloop = d.race === 'gloop';
-    const bits = [`HP ${d.hp}`, d.cost ? `${d.cost} shards` : 'free'];
+    const bits = [`HP ${d.hp}`];
+    if (d.shield) bits.push(`SHLD ${d.shield}`);
+    bits.push(d.cost ? `${d.cost} shards` : 'free');
     if (d.supplyGiven) bits.push(`+${d.supplyGiven} pop`);
+    if (d.warpBeacon) bits.push('warp beacon');
     if (d.tower) bits.push(`turret · ${d.dmg} dmg · rng ${d.range}`);
-    return `<div class="tut-card ${gloop ? 'gloop' : ''}">
+    return `<div class="tut-card ${raceOf(d)}">
       <div><span class="tc-name">${d.name}</span></div>
       <div class="tc-stats">${bits.join(' · ')}</div>
       <div class="tc-desc">${d.desc || ''}</div>
@@ -279,8 +304,9 @@ window.RC = window.RC || {};
     if (tab === 'Overview') {
       body.innerHTML =
         `<h3>Goal</h3><p>Gather <b>shards</b>, build structures, grow an army, and destroy the enemy — or, in Survival, protect the Rift Crystal.</p>
-         <h3>Economy</h3><p>Workers (Wrench Bot / Slug) mine shard clusters and carry them back to your Core. Shards pay for everything.</p>
-         <h3>Population</h3><p>Every unit costs population. Build <b>Power Cells</b> / <b>Spore Membranes</b> to raise your population cap.</p>
+         <h3>Economy</h3><p>Workers (Wrench Bot / Slug / Acolyte) mine shard clusters and carry them back to your Core. Shards pay for everything.</p>
+         <h3>Population</h3><p>Every unit costs population. Build <b>Power Cells</b> / <b>Spore Membranes</b> / <b>Warp Conduits</b> to raise your population cap.</p>
+         <h3>Faction identity</h3><p>Forge leans on upgrades, repair support and towers. Gloop units self-heal and their attacks melt armor. <b>Aether</b> units carry recharging plasma shields that soak damage before health — and their combat units <b>warp in at any Warp Conduit</b>, so a conduit built near the enemy becomes a forward staging point.</p>
          <h3>Build order</h3><p class="muted">Core → workers → Power Cell → Factory → army → upgrades &amp; air. Right-click to move, attack, gather or assist a build. Press &amp; hold any command button to see what it does.</p>
          <h3>Controls</h3><p class="muted">Left-click / drag to select · right-click to command · Q/W/E to produce · number keys for control groups · minimap and screen edges to pan.</p>`;
     } else if (tab === 'Modes') {
@@ -291,8 +317,8 @@ window.RC = window.RC || {};
     } else if (tab === 'Factions') {
       body.innerHTML = RC.RACE_ORDER.map(rid => {
         const r = RC.RACES[rid];
-        const units = Object.values(RC.UNITS).filter(u => (u.race === 'gloop') === (rid === 'gloop')).map(u => u.name).join(', ');
-        const blds = Object.values(RC.BUILDINGS).filter(b => !b.isCrystal && (b.race === 'gloop') === (rid === 'gloop')).map(b => b.name).join(', ');
+        const units = Object.values(RC.UNITS).filter(u => raceOf(u) === rid).map(u => u.name).join(', ');
+        const blds = Object.values(RC.BUILDINGS).filter(b => !b.isCrystal && raceOf(b) === rid).map(b => b.name).join(', ');
         return `<h3 style="color:${r.tint}">${r.name}</h3><p>${r.blurb}</p>
           <p class="muted"><b>Units:</b> ${units}</p>
           <p class="muted"><b>Buildings:</b> ${blds}</p>`;
@@ -300,8 +326,8 @@ window.RC = window.RC || {};
     } else { // Units
       body.innerHTML = RC.RACE_ORDER.map(rid => {
         const r = RC.RACES[rid];
-        const units = Object.values(RC.UNITS).filter(u => (u.race === 'gloop') === (rid === 'gloop'));
-        const blds = Object.values(RC.BUILDINGS).filter(b => !b.isCrystal && (b.race === 'gloop') === (rid === 'gloop'));
+        const units = Object.values(RC.UNITS).filter(u => raceOf(u) === rid);
+        const blds = Object.values(RC.BUILDINGS).filter(b => !b.isCrystal && raceOf(b) === rid);
         return `<h3 style="color:${r.tint}">${r.name} — Units</h3>${units.map(unitCard).join('')}` +
                `<h3 style="color:${r.tint}">${r.name} — Buildings</h3>${blds.map(bldCard).join('')}`;
       }).join('');
@@ -330,6 +356,7 @@ window.RC = window.RC || {};
     document.getElementById('lobby').classList.add('hidden');
     document.getElementById('browser').classList.add('hidden');
     overlay.classList.add('hidden');
+    exitFullscreenIfActive();
     buildStartScreen();
     applyGameMode(selGameMode);
     ss.classList.remove('hidden');
@@ -397,7 +424,7 @@ window.RC = window.RC || {};
     N.send({ t: 'leave' });
     lobbyEl.classList.add('hidden'); showBrowser(); setBrowserStatus('Pick or create a game.');
   });
-  document.getElementById('lobby-start').addEventListener('click', () => N.send({ t: 'start' }));
+  document.getElementById('lobby-start').addEventListener('click', () => { goFullscreen(); N.send({ t: 'start' }); });
 
   N.on('__open', () => { setBrowserStatus('Connected. Create or join a game below.'); N.send({ t: 'list' }); });
   N.on('__error', () => setBrowserStatus('Could not connect — the server may be waking up. Wait ~30s, then press Back and Online again.'));
@@ -478,6 +505,7 @@ window.RC = window.RC || {};
 
   function startOnline(m) {
     RC.online = true;
+    goFullscreen();
     audioGo();
     game.heroesEnabled = false;      // online matches run on the server, which has no heroes
     const map = RC.getMap(m.mapId);

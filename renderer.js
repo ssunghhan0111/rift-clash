@@ -176,6 +176,9 @@ RC.Renderer = (function () {
       if (b.def.race === 'gloop') {
         // 글룹 — 유기적 점액 덩어리 본체 (둥글둥글, 초록빛)
         gloopBody(b, p, x, y);
+      } else if (b.def.race === 'aether') {
+        // Aether — 각진 결정 구조 + 부유 파편 (보랏빛)
+        aetherBody(b, p, x, y);
       } else {
         // 포지 — 각진 금속 본체 + 리벳
         const light = shade(p.body, 0.26), dk = shade(p.body, -0.4);
@@ -376,7 +379,10 @@ RC.Renderer = (function () {
       ctx.globalAlpha = 1;
     }
 
-    healthBar(b.x, y - 20, b.w * 0.8, b.hp / b.maxHp, b.hp < b.maxHp || !b.done || b.def.isCrystal);
+    if (b.done) shieldFlare(b);
+    shieldBar(b, b.x, y - 25, b.w * 0.8);
+    healthBar(b.x, y - 20, b.w * 0.8, b.hp / b.maxHp,
+              b.hp < b.maxHp || !b.done || b.def.isCrystal || (b.maxShield > 0 && b.shield < b.maxShield));
   }
 
   // 유닛 색상(소유자색 + 종족 색조) — drawUnit / drawPortrait 공용
@@ -399,9 +405,16 @@ RC.Renderer = (function () {
         c.body = mix(c.body, GLOOP_TINT, 0.14); c.light = mix(c.light, GLOOP_TINT, 0.16);
         c.dark = mix(c.dark, GLOOP_TINT, 0.14); c.steel = mix(c.steel, GLOOP_TINT, 0.30);
         c.eye = '#c9ff8f';
+      } else if (u.def.race === 'aether') {
+        // Aether — 광택 있는 보랏빛 크리스탈 표면 + 하얗게 빛나는 사이오닉 코어
+        c.body = mix(c.body, AETHER_TINT, 0.16); c.light = mix(c.light, PSI, 0.24);
+        c.dark = mix(c.dark, AETHER_TINT, 0.18); c.steel = mix(c.steel, AETHER_TINT, 0.34);
+        c.eye = PSI_HOT;
+        c.psi = PSI;
       } else {
         c.steel = mix(c.steel, FORGE_TINT, 0.22);
       }
+      if (!c.psi) c.psi = PSI;
     }
     return c;
   }
@@ -424,9 +437,237 @@ RC.Renderer = (function () {
     else if (u.type === 'spitter') drawSpitter(R, c);
     else if (u.type === 'bloat') drawBloat(R, c);
     else if (u.type === 'floater') drawFloater(R, c);
+    else if (u.type === 'acolyte') drawAcolyte(R, c);
+    else if (u.type === 'ardent') drawArdent(R, c);
+    else if (u.type === 'lancer') drawLancer(R, c);
+    else if (u.type === 'bastion') drawBastion(R, c);
+    else if (u.type === 'seraph') drawSeraph(R, c);
+    else if (u.type === 'oracle') drawOracle(R, c);
     else if (u.type === 'warden') drawWarden(R, c);
     else if (u.type === 'matriarch') drawMatriarch(R, c);
+    else if (u.type === 'archon') drawArchon(R, c);
     else { ctx.fillStyle = c.body; rrect(-R, -R, R * 2, R * 2, 3); ctx.fill(); }
+  }
+
+  // ══ Aether — 크리스탈 외골격 + 사이오닉 발광 ═══════════
+  // 공통 모티프: 각진 결정면 몸통, 하얗게 빛나는 코어, 떠 있는 파편.
+
+  // 떠도는 크리스탈 파편 (여러 유닛이 공유하는 장식)
+  function psiShards(R, c, n, rad, spin) {
+    const t = performance.now() / 1000 * (spin || 1);
+    ctx.fillStyle = c.psi;
+    ctx.globalAlpha = 0.75;
+    for (let i = 0; i < n; i++) {
+      const a = t + (i / n) * Math.PI * 2;
+      const px = Math.cos(a) * R * rad, py = Math.sin(a) * R * rad;
+      ctx.beginPath();
+      ctx.moveTo(px, py - R * 0.17); ctx.lineTo(px + R * 0.11, py); ctx.lineTo(px, py + R * 0.17); ctx.lineTo(px - R * 0.11, py);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // 각진 결정 몸통 (육각형에 가까운 다이아몬드)
+  function crystalBody(R, c, sx, sy) {
+    ctx.fillStyle = c.dark;
+    ctx.beginPath();
+    ctx.moveTo(R * sx, 0); ctx.lineTo(R * sx * 0.3, -R * sy); ctx.lineTo(-R * sx * 0.85, -R * sy * 0.72);
+    ctx.lineTo(-R * sx, 0); ctx.lineTo(-R * sx * 0.85, R * sy * 0.72); ctx.lineTo(R * sx * 0.3, R * sy);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.body;
+    ctx.beginPath();
+    ctx.moveTo(R * sx * 0.8, 0); ctx.lineTo(R * sx * 0.2, -R * sy * 0.78); ctx.lineTo(-R * sx * 0.68, -R * sy * 0.56);
+    ctx.lineTo(-R * sx * 0.8, 0); ctx.lineTo(-R * sx * 0.68, R * sy * 0.56); ctx.lineTo(R * sx * 0.2, R * sy * 0.78);
+    ctx.closePath(); ctx.fill();
+    // 상단 결정면 하이라이트
+    ctx.fillStyle = c.light;
+    ctx.beginPath();
+    ctx.moveTo(R * sx * 0.2, -R * sy * 0.72); ctx.lineTo(-R * sx * 0.62, -R * sy * 0.5);
+    ctx.lineTo(-R * sx * 0.2, -R * sy * 0.16); ctx.lineTo(R * sx * 0.45, -R * sy * 0.3);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawAcolyte(R, c) {
+    crystalBody(R, c, 0.82, 0.72);
+    // 채집용 에너지 집게
+    ctx.strokeStyle = c.steel; ctx.lineWidth = R * 0.15; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(R * 0.5, -R * 0.3); ctx.lineTo(R * 1.0, -R * 0.14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(R * 0.5, R * 0.3); ctx.lineTo(R * 1.0, R * 0.14); ctx.stroke();
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.arc(R * 1.05, 0, R * 0.15, 0, Math.PI * 2); ctx.fill();
+    psiShards(R, c, 2, 0.95, 1.6);
+  }
+
+  function drawArdent(R, c) {
+    crystalBody(R, c, 0.86, 0.8);
+    // 쌍날 사이오닉 블레이드
+    ctx.fillStyle = c.psi;
+    ctx.globalAlpha = 0.9;
+    [-1, 1].forEach(s => {
+      ctx.beginPath();
+      ctx.moveTo(R * 0.45, s * R * 0.34); ctx.lineTo(R * 1.5, s * R * 0.1);
+      ctx.lineTo(R * 0.5, s * R * 0.06); ctx.closePath(); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // 발광 코어
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.2, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawLancer(R, c) {
+    crystalBody(R, c, 0.78, 0.76);
+    // 삼각대 다리
+    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.13; ctx.lineCap = 'round';
+    [-0.75, 0, 0.75].forEach(a => {
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.lineTo(-Math.cos(a) * R * 0.95, Math.sin(a) * R * 1.05); ctx.stroke();
+    });
+    // 전면 위상 포신
+    ctx.fillStyle = c.steel;
+    ctx.beginPath();
+    ctx.moveTo(R * 0.4, -R * 0.2); ctx.lineTo(R * 1.3, -R * 0.09);
+    ctx.lineTo(R * 1.3, R * 0.09); ctx.lineTo(R * 0.4, R * 0.2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.arc(R * 1.28, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
+    psiShards(R, c, 3, 1.0, -1.2);
+  }
+
+  function drawBastion(R, c) {
+    // 육중한 하부 + 이중 크리스탈 장갑
+    ctx.fillStyle = c.dark; rrect(-R * 0.8, -R * 0.66, R * 1.6, R * 1.32, R * 0.22); ctx.fill();
+    crystalBody(R, c, 0.72, 0.62);
+    // 어깨 결정 방벽
+    ctx.fillStyle = c.light;
+    [-1, 1].forEach(s => {
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.15, s * R * 0.62); ctx.lineTo(R * 0.3, s * R * 0.95);
+      ctx.lineTo(R * 0.62, s * R * 0.55); ctx.lineTo(R * 0.1, s * R * 0.42);
+      ctx.closePath(); ctx.fill();
+    });
+    // 대형 위상 캐논
+    ctx.fillStyle = c.steel; ctx.fillRect(R * 0.35, -R * 0.24, R * 1.15, R * 0.48);
+    ctx.fillStyle = c.psi; ctx.fillRect(R * 1.42, -R * 0.3, R * 0.2, R * 0.6);
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.arc(-R * 0.1, 0, R * 0.22, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawSeraph(R, c) {
+    // 날개 — 뒤로 젖혀진 에너지 깃
+    ctx.fillStyle = c.dark;
+    [-1, 1].forEach(s => {
+      ctx.beginPath();
+      ctx.moveTo(R * 0.1, s * R * 0.16); ctx.lineTo(-R * 1.05, s * R * 0.98);
+      ctx.lineTo(-R * 0.55, s * R * 0.2); ctx.closePath(); ctx.fill();
+    });
+    ctx.fillStyle = c.psi; ctx.globalAlpha = 0.55;
+    [-1, 1].forEach(s => {
+      ctx.beginPath();
+      ctx.moveTo(R * 0.05, s * R * 0.14); ctx.lineTo(-R * 0.82, s * R * 0.78);
+      ctx.lineTo(-R * 0.5, s * R * 0.2); ctx.closePath(); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // 유선형 동체
+    ctx.fillStyle = c.body;
+    ctx.beginPath();
+    ctx.moveTo(R * 1.25, 0); ctx.lineTo(-R * 0.3, -R * 0.4); ctx.lineTo(-R * 0.62, 0); ctx.lineTo(-R * 0.3, R * 0.4);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.light;
+    ctx.beginPath();
+    ctx.moveTo(R * 1.0, 0); ctx.lineTo(-R * 0.15, -R * 0.22); ctx.lineTo(-R * 0.3, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.arc(R * 0.5, 0, R * 0.15, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawOracle(R, c) {
+    // 공중에 떠 있는 고리 + 중앙 코어
+    const t = performance.now() / 1000;
+    ctx.fillStyle = c.dark;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 0.85, R * 0.85, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.body;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 0.62, R * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.light;
+    ctx.beginPath(); ctx.arc(-R * 0.18, -R * 0.2, R * 0.26, 0, Math.PI * 2); ctx.fill();
+    // 회전하는 지지 고리
+    ctx.strokeStyle = c.psi; ctx.lineWidth = R * 0.11;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 1.05, R * 0.42 * (0.5 + 0.5 * Math.abs(Math.cos(t * 1.4))), t * 0.9, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.arc(R * 0.28, 0, R * 0.17, 0, Math.PI * 2); ctx.fill();
+    psiShards(R, c, 3, 1.25, 0.8);
+  }
+
+  // ── 영웅: 래디언트 아콘 (Aether) — 순수 에너지 존재 ──
+  function drawArchon(R, c) {
+    const t = performance.now() / 1000;
+    // 요동치는 에너지 코로나
+    ctx.globalAlpha = 0.28 + 0.1 * Math.sin(t * 3);
+    ctx.fillStyle = c.psi;
+    ctx.beginPath(); ctx.arc(0, 0, R * (1.15 + 0.08 * Math.sin(t * 2.4)), 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // 결정 껍질 — 갈라진 판 4장
+    ctx.fillStyle = c.dark;
+    for (let i = 0; i < 4; i++) {
+      const a = t * 0.5 + i * Math.PI / 2;
+      ctx.save(); ctx.rotate(a);
+      ctx.beginPath();
+      ctx.moveTo(R * 0.42, -R * 0.3); ctx.lineTo(R * 0.95, 0); ctx.lineTo(R * 0.42, R * 0.3);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    // 내부 핵
+    ctx.fillStyle = c.body;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.light;
+    ctx.beginPath(); ctx.arc(-R * 0.14, -R * 0.16, R * 0.28, 0, Math.PI * 2); ctx.fill();
+    // 백열 중심
+    ctx.fillStyle = PSI_HOT;
+    ctx.globalAlpha = 0.75 + 0.25 * Math.sin(t * 5);
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.26, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // 전방 사이오닉 창
+    ctx.strokeStyle = c.psi; ctx.lineWidth = R * 0.13; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(R * 0.7, 0); ctx.lineTo(R * 1.35, 0); ctx.stroke();
+  }
+
+  // Aether 건물 본체 — 각진 결정 구조 + 부유 파편
+  function aetherBody(b, p, x, y) {
+    const body = mix(p.body, AETHER_TINT, 0.22);
+    const dk = mix(shade(p.body, -0.42), AETHER_TINT, 0.2);
+    const lt = mix(shade(p.body, 0.3), PSI, 0.3);
+    const t = performance.now() / 1000;
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    rrect(x + 4, y + 7, b.w, b.h, 5); ctx.fill();
+    // 모서리를 자른 팔각 실루엣
+    const cut = Math.min(b.w, b.h) * 0.24;
+    const oct = (ox, oy, w, h, inset) => {
+      const k = cut * (1 - inset * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(ox + k, oy); ctx.lineTo(ox + w - k, oy); ctx.lineTo(ox + w, oy + k);
+      ctx.lineTo(ox + w, oy + h - k); ctx.lineTo(ox + w - k, oy + h); ctx.lineTo(ox + k, oy + h);
+      ctx.lineTo(ox, oy + h - k); ctx.lineTo(ox, oy + k);
+      ctx.closePath();
+    };
+    ctx.fillStyle = dk; oct(x, y, b.w, b.h, 0); ctx.fill();
+    ctx.fillStyle = body; oct(x + 4, y + 4, b.w - 8, b.h - 8, 0.3); ctx.fill();
+    // 상단 결정면
+    ctx.fillStyle = lt;
+    ctx.beginPath();
+    ctx.moveTo(x + b.w * 0.22, y + b.h * 0.14); ctx.lineTo(x + b.w * 0.72, y + b.h * 0.2);
+    ctx.lineTo(x + b.w * 0.56, y + b.h * 0.44); ctx.lineTo(x + b.w * 0.2, y + b.h * 0.36);
+    ctx.closePath(); ctx.fill();
+    // 부유 파편 — 건물 위를 천천히 도는 결정
+    ctx.fillStyle = PSI; ctx.globalAlpha = 0.6;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.6 + i * 2.09;
+      const px = b.x + Math.cos(a) * b.w * 0.42, py = b.y + Math.sin(a) * b.h * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(px, py - 4.5); ctx.lineTo(px + 3, py); ctx.lineTo(px, py + 4.5); ctx.lineTo(px - 3, py);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = mix(AETHER_TINT, '#140a20', 0.1); ctx.lineWidth = 2;
+    oct(x + 2, y + 2, b.w - 4, b.h - 4, 0.2); ctx.stroke();
   }
 
   // ── 영웅: 아이언클래드 워든 (포지) — 거대 전투 메카 ──
@@ -477,7 +718,9 @@ RC.Renderer = (function () {
     try {
       ctx.clearRect(0, 0, W, H);
       // 배경 — 종족색 은은한 방사 그라디언트
-      const tintBg = u.def.race === 'gloop' ? '#0c1f16' : '#0c1622';
+      const tintBg = u.def.race === 'gloop' ? '#0c1f16'
+                   : u.def.race === 'aether' ? '#16102a'
+                   : '#0c1622';
       const bg = ctx.createRadialGradient(W / 2, H * 0.42, 3, W / 2, H * 0.52, H * 0.78);
       bg.addColorStop(0, tintBg); bg.addColorStop(1, '#05090e');
       ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
@@ -562,7 +805,10 @@ RC.Renderer = (function () {
       ctx.beginPath(); ctx.arc(u.x + u.r * 0.7 - 1.3, u.y - u.r * 0.9 - 1.3, 1.6, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
-    healthBar(u.x, u.y - u.r - 10, u.r * 2.3, u.hp / u.maxHp, u.hp < u.maxHp);
+    // 플라즈마 실드 (Aether) — 껍질 반짝임 + 체력바 위 실드 띠
+    shieldFlare(u);
+    shieldBar(u, u.x, u.y - u.r - 14, u.r * 2.3);
+    healthBar(u.x, u.y - u.r - 10, u.r * 2.3, u.hp / u.maxHp, u.hp < u.maxHp || (u.maxShield > 0 && u.shield < u.maxShield));
     // 에너지 바 — 스킬 있는 유닛만, 체력바 바로 아래
     if (u.maxEnergy && (u.hp < u.maxHp || u.energy < u.maxEnergy)) {
       const w = u.r * 2.3, frac = Math.max(0, Math.min(1, u.energy / (u.effMaxEnergy ? u.effMaxEnergy(g) : u.maxEnergy)));
@@ -988,6 +1234,9 @@ RC.Renderer = (function () {
   const ACID = '#7dff9e';
   const GLOOP_TINT = '#4fd06a';   // 유기적 초록빛 (종족 색조)
   const FORGE_TINT = '#8fb0d8';   // 차가운 강철빛 (종족 색조)
+  const AETHER_TINT = '#b98cff';  // 사이오닉 보랏빛 (종족 색조)
+  const PSI = '#e2c6ff';          // 발광 에너지 (실드 / 크리스탈 코어)
+  const PSI_HOT = '#ffffff';
 
   // 글룹 건물 본체 — 둥근 점액 덩어리 + 방울 (금속 대신)
   function gloopBody(b, p, x, y) {
@@ -1108,6 +1357,33 @@ RC.Renderer = (function () {
     ctx.fillRect(cx - w / 2, y, w, h);
     ctx.fillStyle = frac > 0.35 ? C.hpGood : C.hpBad;
     ctx.fillRect(cx - w / 2, y, w * Math.max(0, frac), h);
+  }
+
+  // 플라즈마 실드 바 (Aether) — 체력바 바로 위에 얇은 하늘빛 띠
+  function shieldBar(e, cx, y, w) {
+    if (!e.maxShield) return;
+    const frac = Math.max(0, Math.min(1, e.shield / e.maxShield));
+    if (frac >= 1 && e.hp >= e.maxHp) return;    // 완전 무손상이면 숨김
+    const h = 3;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(cx - w / 2, y, w, h);
+    ctx.fillStyle = PSI;
+    ctx.fillRect(cx - w / 2, y, w * frac, h);
+  }
+
+  // 피격 순간 실드 껍질 반짝임
+  function shieldFlare(e) {
+    if (!e.maxShield || e.shield <= 0) return;
+    const a = e.shieldFx > 0 ? Math.min(1, e.shieldFx / 0.18) : 0;
+    const idle = 0.10 * (e.shield / e.maxShield);   // 은은한 상시 껍질
+    const alpha = Math.max(idle, a * 0.55);
+    if (alpha <= 0.02) return;
+    const rad = (e.kind === 'building' ? Math.max(e.w, e.h) * 0.62 : e.r + 5);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = PSI; ctx.lineWidth = a > 0 ? 2.5 : 1.5;
+    ctx.beginPath(); ctx.arc(e.x, e.y, rad, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
   }
 
   function drawShot(f) {

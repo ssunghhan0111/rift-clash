@@ -193,7 +193,9 @@ RC.UI = (function () {
     el.selName.textContent = e.def.name;
     el.selInfo.textContent = e.def.desc || '';
     const rows = [];
-    rows.push(['Health', `${Math.ceil(e.hp)} / ${e.maxHp}`]);
+    rows.push(['Health', `${Math.ceil(e.hp)} / ${Math.round(e.maxHp)}`]);
+    // 플라즈마 실드 (Aether) — 체력 바로 아래에 표시
+    if (e.maxShield) rows.push(['Shield', `${Math.ceil(e.shield)} / ${Math.round(e.maxShield)}`]);
     if (e.kind === 'unit') {
       const atk = e.effAtk ? Math.round(e.effAtk(g)) : e.def.dmg;
       rows.push(['Attack', atk]);
@@ -296,6 +298,7 @@ RC.UI = (function () {
   // 툴팁 문구 — 유닛/건물의 핵심 스탯 + 설명
   function unitTip(d) {
     const bits = [`HP ${d.hp}`];
+    if (d.shield) bits.push(`SHLD ${d.shield}`);
     if (d.dmg) bits.push(`ATK ${d.dmg}`);
     if (d.range > 20) bits.push(`RNG ${d.range}`);
     if (d.armor) bits.push(`ARM ${d.armor}`);
@@ -304,7 +307,8 @@ RC.UI = (function () {
     return `${d.name} — ${d.desc}\n[${bits.join(' · ')}] · ${d.cost} shards · pop ${d.supply}`;
   }
   function bldTip(d) {
-    return `${d.name} — ${d.desc}\n${d.cost ? d.cost + ' shards' : 'free'}${d.supplyGiven ? ' · +' + d.supplyGiven + ' pop' : ''}`;
+    const extra = (d.shield ? ` · shield ${d.shield}` : '') + (d.warpBeacon ? ' · warp beacon' : '');
+    return `${d.name} — ${d.desc}\n${d.cost ? d.cost + ' shards' : 'free'}${d.supplyGiven ? ' · +' + d.supplyGiven + ' pop' : ''}${extra}`;
   }
 
   function buildButtons() {

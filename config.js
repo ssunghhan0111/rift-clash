@@ -14,11 +14,18 @@ RC.CFG = {
   GATHER_TIME: 2.4,     // 채집에 걸리는 초
   NODE_START: 1200,     // 결정 무더기 매장량
 
-  CAM_SPEED: 900,       // px/sec
-  EDGE_PAN: 18,         // 화면 가장자리 감지 픽셀
+  CAM_SPEED: 2200,      // px/sec (max, at the true screen edge)
+  EDGE_PAN: 56,         // 화면 가장자리 감지 픽셀 (edge-scroll zone width; ramps up to CAM_SPEED)
 
   AGGRO_RANGE: 190,     // 유휴 유닛이 적을 자동 인식하는 거리
   BUILD_RANGE: 34,      // 일꾼이 건설하려고 접근하는 거리
+
+  // ── 플라즈마 실드 (Aether) ──
+  // Shields are a second HP pool that soaks damage BEFORE hit points and
+  // recharges quickly once the unit has been out of combat for SHIELD_DELAY.
+  SHIELD_REGEN: 16,     // 초당 실드 회복량
+  SHIELD_DELAY: 4.5,    // 마지막 피격 후 회복 시작까지 대기(초)
+  WARP_RANGE: 300,      // 워프 소환이 가능한 워프 도관 반경
 
   // ── 에너지 / 스킬 ──
   ENERGY_REGEN: 5,      // 초당 에너지 재생 (기본)
@@ -219,6 +226,65 @@ RC.UNITS = {
     desc: 'Drifting air unit that drops acid spores. Melts clumped enemies.'
   },
 
+  // ══ Aether faction units — Plasma Shields & Warp-in ════
+  // Shared identity: def.shield (a second HP pool that absorbs damage first and
+  // recharges fast out of combat). Fewer, costlier, stronger units than the other
+  // factions — and they warp in at any Warp Conduit instead of walking from base.
+  acolyte: {
+    id: 'acolyte', name: 'Acolyte', role: 'Worker',
+    hp: 50, dmg: 5, range: 18, cd: 1.2, speed: 102, r: 9,
+    cost: 55, time: 12, supply: 1, armor: 0, energy: 60,
+    worker: true, shield: 30, race: 'aether', key: 'Q',
+    ability: { id: 'weld', name: 'Restore Matrix', key: 'G', cost: 30, cd: 6, radius: 140, heal: 125, target: 'repair',
+               desc: 'Channels energy to instantly mend the most-damaged nearby ally.' },
+    desc: 'Mines shards and warps structures into place. Protected by a plasma shield.'
+  },
+  ardent: {
+    id: 'ardent', name: 'Ardent', role: 'Melee Vanguard',
+    hp: 105, dmg: 14, range: 22, cd: 0.8, speed: 96, r: 10,
+    cost: 75, time: 16, supply: 2, armor: 1, energy: 60,
+    shield: 70, race: 'aether', key: 'Q',
+    ability: { id: 'surge', name: 'Zeal', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 0, spd: 1.45, fire: 0.5,
+               desc: 'Blazing charge — big move and attack speed boost for 5s.' },
+    desc: 'Shielded melee warrior. Hits far harder than swarm infantry and charges with Zeal.'
+  },
+  lancer: {
+    id: 'lancer', name: 'Void Lancer', role: 'Ranged Support',
+    hp: 100, dmg: 16, range: 128, cd: 1.15, speed: 82, r: 11,
+    cost: 115, time: 22, supply: 2, armor: 1, energy: 80,
+    shield: 90, race: 'aether', key: 'W',
+    ability: { id: 'warp', name: 'Phase Step', key: 'X', cost: 20, cd: 6, dist: 235,
+               desc: 'Blinks a short distance — dive in or slip out of a fight.' },
+    desc: 'Long-range shielded striker. Phase Step makes it brutally hard to pin down.'
+  },
+  bastion: {
+    id: 'bastion', name: 'Bastion', role: 'Heavy Siege',
+    hp: 190, dmg: 34, range: 140, cd: 2.0, speed: 56, r: 13,
+    cost: 175, time: 32, supply: 3, armor: 3, energy: 70,
+    shield: 160, splash: 38, race: 'aether', key: 'E',
+    ability: { id: 'raillock', name: 'Anchor Field', key: 'V', cost: 35, cd: 8, dur: 5, rangeBonus: 75, dmgBonus: 18, splashBonus: 16,
+               desc: 'Locks down and unleashes vastly stronger long-range fire for 5s.' },
+    desc: 'Walking siege platform with an enormous shield bank. The Aether battering ram.'
+  },
+  seraph: {
+    id: 'seraph', name: 'Seraph', role: 'Air Superiority',
+    hp: 110, dmg: 19, range: 118, cd: 0.75, speed: 158, r: 11,
+    cost: 165, time: 26, supply: 3, armor: 0, energy: 80,
+    shield: 110, flying: true, sight: 300, race: 'aether', key: 'Q',
+    ability: { id: 'afterburn', name: 'Solar Wind', key: 'N', cost: 25, cd: 11, dur: 4, spd: 1.55, fire: 0.55,
+               desc: 'Rides a solar current — move and attack speed spike for 4s.' },
+    desc: 'Swift shielded interceptor. Strikes air and ground, then blazes back out.'
+  },
+  oracle: {
+    id: 'oracle', name: 'Oracle', role: 'Shield Support',
+    hp: 95, dmg: 8, range: 100, cd: 1.2, speed: 92, r: 10,
+    cost: 140, time: 24, supply: 2, armor: 0, energy: 140,
+    shield: 80, race: 'aether', key: 'W',
+    ability: { id: 'mend', name: 'Shield Overflow', key: 'Z', cost: 40, cd: 3, radius: 160, heal: 55, shieldHeal: 70,
+               desc: 'Floods nearby allies with energy, restoring shields and health.' },
+    desc: 'Support caster that recharges the whole army’s shields mid-fight.'
+  },
+
   // ══ Heroes — one per race. Gain XP from nearby enemy kills, level up (skills rank up
   //    automatically), and revive at your base after a delay + shard cost if slain. ══
   warden: {
@@ -254,6 +320,22 @@ RC.UNITS = {
         desc: 'Rapidly heals the most-wounded nearby ally.' },
     ],
     desc: 'Acid-spewing matriarch. Feeds on the fallen to grow — essential to victory.'
+  },
+  archon: {
+    id: 'archon', name: 'Radiant Archon', role: 'Hero', hero: true, race: 'aether',
+    hp: 420, dmg: 26, range: 95, cd: 0.95, speed: 88, r: 16,
+    cost: 0, time: 0, supply: 0, armor: 2, energy: 220, shield: 320, key: 'H',
+    grow: { hp: 45, dmg: 5, armor: 0.4, shield: 55 },
+    revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
+    skills: [
+      { id: 'salvo', name: 'Psionic Storm', key: 'F', cost: 45, cd: 9, radius: 130, dmg: 42, dmgPerRank: 27,
+        desc: 'Tears open a storm of psionic energy over an area.' },
+      { id: 'mend',  name: 'Shield Cascade', key: 'G', cost: 35, cd: 7, radius: 180, heal: 55, healPerRank: 35, shieldHeal: 90, shieldHealPerRank: 55,
+        desc: 'Recharges the shields and health of the Archon and nearby allies.' },
+      { id: 'warp',  name: 'Rift Walk', key: 'C', cost: 25, cd: 6, dist: 250, distPerRank: 45,
+        desc: 'Steps through the rift to reappear further ahead.' },
+    ],
+    desc: 'A being of pure energy wrapped in a colossal shield. Grows radiant with every kill.'
   },
 };
 
@@ -334,6 +416,41 @@ RC.BUILDINGS = {
     desc: 'Defensive turret that spits acid at ground and air.'
   },
 
+  // ══ Aether faction buildings ══════════════════════════
+  // Structures carry plasma shields too. The Warp Conduit doubles as both the
+  // population building AND the warp beacon combat units materialize at.
+  nexus: {
+    id: 'nexus', name: 'Aether Nexus', hp: 1000, shield: 500, w: 96, h: 96,
+    cost: 0, time: 0, supplyGiven: 10, produces: ['acolyte'], isCore: true, dropoff: true, race: 'aether',
+    desc: 'Aether base. Lose it and you lose.'
+  },
+  conduit: {
+    id: 'conduit', name: 'Warp Conduit', hp: 300, shield: 250, w: 56, h: 56,
+    cost: 90, time: 14, supplyGiven: 8, produces: [], race: 'aether', warpBeacon: true, key: 'E',
+    desc: '+8 population — and Aether combat units warp in here instead of walking from base. Build them forward.'
+  },
+  warpgate: {
+    id: 'warpgate', name: 'Warp Gate', hp: 550, shield: 350, w: 80, h: 80,
+    cost: 160, time: 22, supplyGiven: 0, produces: ['ardent', 'lancer', 'bastion'], race: 'aether', key: 'R',
+    desc: 'Warps in ground combat units at your furthest-forward Warp Conduit.'
+  },
+  astralgate: {
+    id: 'astralgate', name: 'Astral Gate', hp: 500, shield: 300, w: 72, h: 72,
+    cost: 200, time: 26, supplyGiven: 0, produces: ['seraph'], race: 'aether', key: 'T',
+    desc: 'Warps in Seraph air superiority fighters.'
+  },
+  conclave: {
+    id: 'conclave', name: 'Aether Conclave', hp: 520, shield: 320, w: 80, h: 80,
+    cost: 210, time: 28, supplyGiven: 0, produces: ['oracle'], research: true, race: 'aether', key: 'Y',
+    desc: 'Warps in Oracles and researches army-wide upgrades.'
+  },
+  photonprism: {
+    id: 'photonprism', name: 'Photon Prism', hp: 380, shield: 320, w: 52, h: 52,
+    cost: 140, time: 17, supplyGiven: 0, produces: [], race: 'aether', key: 'U',
+    tower: true, dmg: 20, range: 165, cd: 0.95, air: true,
+    desc: 'Shielded defensive turret. Hits ground and air, and its shield regrows between attacks.'
+  },
+
   // ── Survival objective ──
   crystal: {
     id: 'crystal', name: 'Rift Crystal', hp: 4000, w: 84, h: 84,
@@ -375,10 +492,30 @@ RC.RACES = {
       tower: 'acidtower',
     },
   },
+  aether: {
+    id: 'aether', name: 'Aether', tint: '#b98cff',
+    blurb: 'Alien ascendants — every unit carries a recharging plasma shield, and combat units warp in at forward Warp Conduits. Few, costly, devastating.',
+    core: 'nexus', worker: 'acolyte', hero: 'archon',
+    buildable: ['conduit', 'warpgate', 'astralgate', 'conclave', 'photonprism'],
+    ai: {
+      worker: 'acolyte', supply: 'conduit',
+      barracks: 'warpgate', barracksUnits: ['ardent', 'lancer', 'bastion'],
+      air: 'astralgate', airUnits: ['seraph'],
+      tech: 'conclave', techUnits: ['oracle'],
+      tower: 'photonprism',
+    },
+  },
 };
-RC.RACE_ORDER = ['forge', 'gloop'];
+RC.RACE_ORDER = ['forge', 'gloop', 'aether'];
 RC.buildableOf = function (race) {
   return (RC.RACES[race] || RC.RACES.forge).buildable;
+};
+// 상대 종족 하나를 무작위로 — 내 종족을 제외한 나머지 중에서 고른다.
+// (3종족이 되면서 "반대편 하나"가 성립하지 않으므로 중앙 집중 헬퍼로 뺐다.)
+RC.otherRace = function (mine) {
+  const pool = RC.RACE_ORDER.filter(r => r !== mine);
+  if (!pool.length) return mine;
+  return pool[Math.floor(Math.random() * pool.length)];
 };
 
 // ── Upgrades (research building) — each costs[] length = max tier ──

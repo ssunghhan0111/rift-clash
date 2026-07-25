@@ -43,13 +43,26 @@ RC.Input = (function () {
     mini.style.touchAction = 'none';
 
     cv.addEventListener('contextmenu', e => e.preventDefault());
-    cv.addEventListener('mouseenter', () => state.mouseInside = true);
-    cv.addEventListener('mouseleave', () => { state.mouseInside = false; });
 
     cv.addEventListener('pointerdown', onPointerDown);
     cv.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
+
+    // Track raw mouse position across the WHOLE window, not just the canvas,
+    // so edge-scroll keeps working while the cursor is over HUD overlays
+    // (bottom command panel, minimap, touchbar) instead of stopping dead the
+    // moment the pointer leaves the canvas element.
+    window.addEventListener('mousemove', e => {
+      const r = cv.getBoundingClientRect();
+      state.screen.x = e.clientX - r.left;
+      state.screen.y = e.clientY - r.top;
+      state.mouseInside = true;
+    });
+    // Only clear it once the mouse actually leaves the browser window.
+    window.addEventListener('mouseout', e => {
+      if (!e.relatedTarget && !e.toElement) state.mouseInside = false;
+    });
 
     // 미니맵 탭/클릭 = 카메라 이동
     const jump = e => {
@@ -393,25 +406,41 @@ RC.Input = (function () {
   }
 
   // 카메라 이동 — 키보드 + 화면 가장자리 (마우스만, 터치는 두 손가락 드래그로 팬)
+  // Keyboard moves at a flat CAM_SPEED. Edge-scroll ramps from EDGE_PAN_FLOOR
+  // (a strong starting speed, so it's already fast the instant the cursor
+  // enters the zone) up to full CAM_SPEED right at the screen edge.
+  const EDGE_PAN_FLOOR = 0.6;  // fraction of CAM_SPEED applied as soon as the zone is entered
   function updateCamera(dt) {
-    let vx = 0, vy = 0;
+    let dx = 0, dy = 0;
     const k = state.keys;
-    if (k['arrowleft']) vx -= 1;
-    if (k['arrowright']) vx += 1;
-    if (k['arrowup']) vy -= 1;
-    if (k['arrowdown']) vy += 1;
-
-    if (state.mouseInside) {
-      if (state.screen.x < CFG.EDGE_PAN) vx -= 1;
-      if (state.screen.x > cv.width - CFG.EDGE_PAN) vx += 1;
-      if (state.screen.y < CFG.EDGE_PAN) vy -= 1;
-      if (state.screen.y > cv.height - CFG.EDGE_PAN) vy += 1;
+    let kx = 0, ky = 0;
+    if (k['arrowleft']) kx -= 1;
+    if (k['arrowright']) kx += 1;
+    if (k['arrowup']) ky -= 1;
+    if (k['arrowdown']) ky += 1;
+    if (kx || ky) {
+      const len = Math.hypot(kx, ky) || 1;
+      dx += (kx / len) * CFG.CAM_SPEED * dt;
+      dy += (ky / len) * CFG.CAM_SPEED * dt;
     }
 
-    if (vx || vy) {
-      const len = Math.hypot(vx, vy) || 1;
-      g.camera.x += (vx / len) * CFG.CAM_SPEED * dt;
-      g.camera.y += (vy / len) * CFG.CAM_SPEED * dt;
+    if (state.mouseInside) {
+      const zone = CFG.EDGE_PAN;
+      const sx = state.screen.x, sy = state.screen.y;
+      let ex = 0, ey = 0;
+      if (sx < zone) ex = -(EDGE_PAN_FLOOR + (1 - EDGE_PAN_FLOOR) * (zone - sx) / zone);
+      else if (sx > cv.width - zone) ex = (EDGE_PAN_FLOOR + (1 - EDGE_PAN_FLOOR) * (sx - (cv.width - zone)) / zone);
+      if (sy < zone) ey = -(EDGE_PAN_FLOOR + (1 - EDGE_PAN_FLOOR) * (zone - sy) / zone);
+      else if (sy > cv.height - zone) ey = (EDGE_PAN_FLOOR + (1 - EDGE_PAN_FLOOR) * (sy - (cv.height - zone)) / zone);
+      ex = Math.max(-1, Math.min(1, ex));
+      ey = Math.max(-1, Math.min(1, ey));
+      dx += ex * CFG.CAM_SPEED * dt;
+      dy += ey * CFG.CAM_SPEED * dt;
+    }
+
+    if (dx || dy) {
+      g.camera.x += dx;
+      g.camera.y += dy;
       clampCam();
     }
   }

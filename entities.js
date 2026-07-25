@@ -30,6 +30,88 @@ window.RC = window.RC || {};
   }
   RC.applyAcid = applyAcid;
 
+  // ── 플라즈마 실드 (Aether) ────────────────────────────
+  // Single choke point for post-armor damage so units, buildings, towers and
+  // splash all obey the same rule: shields soak first, HP takes the remainder.
+  // Any hit resets the recharge delay, so shields only regrow out of combat.
+  function dealDamage(foe, dealt) {
+    if (!foe || dealt <= 0) return 0;
+    if (foe.maxShield > 0) {
+      foe.shieldT = RC.CFG.SHIELD_DELAY;
+      if (foe.shield > 0) {
+        const absorbed = Math.min(foe.shield, dealt);
+        foe.shield -= absorbed;
+        dealt -= absorbed;
+        foe.shieldFx = 0.18;                  // brief shield-flare for the renderer
+        if (dealt <= 0) return 0;
+      }
+    }
+    foe.hp -= dealt;
+    if (foe.hp <= 0) { foe.hp = 0; foe.dead = true; }
+    return dealt;
+  }
+  RC.dealDamage = dealDamage;
+
+  // 실드 회복 — 피격 후 SHIELD_DELAY 초가 지나야 재충전 시작
+  function tickShield(e, dt) {
+    if (!e.maxShield) return;
+    if (e.shieldFx > 0) e.shieldFx = Math.max(0, e.shieldFx - dt);
+    if (e.shieldT > 0) { e.shieldT = Math.max(0, e.shieldT - dt); return; }
+    if (e.shield < e.maxShield) e.shield = Math.min(e.maxShield, e.shield + RC.CFG.SHIELD_REGEN * dt);
+  }
+  RC.tickShield = tickShield;
+
+  // 실드 회복 스킬 (오라클 / 아콘) — 실드를 우선 채우고 남은 값을 반환
+  function restoreShield(e, amount) {
+    if (!e || !e.maxShield || amount <= 0) return amount;
+    const room = e.maxShield - e.shield;
+    const used = Math.min(room, amount);
+    e.shield += used;
+    if (used > 0) e.shieldFx = 0.18;
+    return amount - used;
+  }
+  RC.restoreShield = restoreShield;
+
+  // ── 워프 소환 지점 (Aether) ───────────────────────────
+  // Combat units produced by an Aether structure materialize at the owner's
+  // most FORWARD completed Warp Conduit (the one nearest the enemy) rather than
+  // walking out of the production building. Workers always spawn at home so the
+  // mining loop isn't broken. Returns null when the normal spawn should be used.
+  function warpSite(bld, unitType, game) {
+    if (!bld || !bld.def || bld.def.race !== 'aether') return null;
+    const ud = RC.UNITS[unitType];
+    if (!ud || ud.worker) return null;
+    if (!game || !game.buildings) return null;
+
+    const beacons = game.buildings.filter(b =>
+      !b.dead && b.done && b.owner === bld.owner && b.def && b.def.warpBeacon);
+    if (!beacons.length) return null;
+
+    // 적 본진 방향 = "앞". 적 코어를 못 찾으면 자기 코어에서 가장 먼 도관.
+    let ref = null;
+    for (const b of game.buildings) {
+      if (b.dead || !b.def.isCore) continue;
+      if (game.areEnemies && game.areEnemies(b.owner, bld.owner)) {
+        const d = RC.dist(bld.x, bld.y, b.x, b.y);
+        if (!ref || d < ref.d) ref = { x: b.x, y: b.y, d: d, toward: true };
+      }
+    }
+    if (!ref) {
+      const own = game.core ? game.core(bld.owner) : null;
+      if (!own) return beacons[0];
+      ref = { x: own.x, y: own.y, toward: false };
+    }
+
+    let best = null, bestScore = null;
+    for (const b of beacons) {
+      const d = RC.dist(b.x, b.y, ref.x, ref.y);
+      const score = ref.toward ? d : -d;      // 적 쪽이면 가까울수록, 아니면 멀수록 좋다
+      if (bestScore === null || score < bestScore) { bestScore = score; best = b; }
+    }
+    return best;
+  }
+  RC.warpSite = warpSite;
+
   // ── 샤드 결정 무더기 ────────────────────────────────
   class ShardNode {
     constructor(x, y) {
@@ -64,6 +146,10 @@ window.RC = window.RC || {};
       this.foe = null;          // 타워 현재 표적
       this.rally = { x: x, y: y + d.h / 2 + 50 };
       this.acidStacks = 0; this.acidT = 0; this.acidDmg = 0; this.acidShred = 0;  // 산성 중첩
+      // 플라즈마 실드 (Aether) — 건설이 끝나야 완충된다
+      this.maxShield = d.shield || 0;
+      this.shield = prebuilt ? this.maxShield : 0;
+      this.shieldT = 0; this.shieldFx = 0;
       this.dead = false;
     }
 
@@ -75,7 +161,7 @@ window.RC = window.RC || {};
       const rate = (1 / this.def.time) * (1 + (workers - 1) * 0.5);
       this.buildProgress = Math.min(1, this.buildProgress + rate * dt);
       this.hp = Math.max(this.hp, this.maxHp * (0.1 + 0.9 * this.buildProgress));
-      if (this.buildProgress >= 1) this.hp = this.maxHp;
+      if (this.buildProgress >= 1) { this.hp = this.maxHp; this.shield = this.maxShield; }
     }
 
     update(dt, game) {
@@ -85,6 +171,7 @@ window.RC = window.RC || {};
         this.damage(this.acidStacks * this.acidDmg * dt);
         if (this.acidT <= 0) this.acidStacks = 0;
       }
+      if (this.done) RC.tickShield(this, dt);   // 실드 재충전 (완공된 건물만)
       if (!this.done) return;
       // 연구 진행 (아크 랩)
       if (this.research) {
@@ -120,12 +207,22 @@ window.RC = window.RC || {};
       job.timeLeft -= dt;
       if (job.timeLeft <= 0) {
         this.queue.shift();
-        const u = new Unit(job.type, this.x, this.y + this.h / 2 + 24, this.owner);
+        // Aether 워프 소환 — 전투 유닛은 가장 앞선 워프 도관에서 나타난다.
+        // 일꾼은 항상 본진에서 (자원 채집 동선을 지키기 위해).
+        const site = RC.warpSite ? RC.warpSite(this, job.type, game) : null;
+        const from = site || this;
+        const u = new Unit(job.type, from.x, from.y + from.h / 2 + 24, this.owner);
         // 코어 밖으로 살짝 밀어내기
         u.x += (Math.random() - 0.5) * 40;
         if (game.initUnit) game.initUnit(u);      // 강화 골격 등 스폰 시 패시브 적용
         game.units.push(u);
-        u.moveTo(this.rally.x, this.rally.y);
+        if (site) {
+          // 워프 연출 + 도관 근처 집결 (멀리 있는 생산 건물 집결점으로 되돌아가지 않게)
+          game.fx.push({ abil: 'warp', ax: u.x, ay: u.y, t: 0.4, radius: u.r * 2, owner: this.owner });
+          u.moveTo(site.x + (Math.random() - 0.5) * 70, site.y + site.h / 2 + 60);
+        } else {
+          u.moveTo(this.rally.x, this.rally.y);
+        }
       }
     }
 
@@ -135,8 +232,7 @@ window.RC = window.RC || {};
     }
 
     damage(amount) {
-      this.hp -= amount;
-      if (this.hp <= 0) { this.hp = 0; this.dead = true; }
+      RC.dealDamage(this, amount);
     }
   }
 
@@ -189,6 +285,11 @@ window.RC = window.RC || {};
       this.hitFlash = 0;
       // 산성 중첩 (글룹 피격 시) — 방어 감소 + 지속 피해
       this.acidStacks = 0; this.acidT = 0; this.acidDmg = 0; this.acidShred = 0;
+      // 플라즈마 실드 (Aether) — 체력보다 먼저 소모되고 전투 이탈 후 빠르게 재충전
+      this.maxShield = d.shield || 0;
+      this.baseMaxShield = d.shield || 0;
+      this.shield = this.maxShield;
+      this.shieldT = 0; this.shieldFx = 0;
 
       // 영웅 — 경험치 / 레벨 / 스킬 쿨다운 / 부활 상태
       if (d.hero) {
@@ -219,6 +320,7 @@ window.RC = window.RC || {};
       if (sk.dmgPerRank) ab.dmg = (sk.dmg || 0) + (rank - 1) * sk.dmgPerRank;
       if (sk.healPerRank) ab.heal = (sk.heal || 0) + (rank - 1) * sk.healPerRank;
       if (sk.distPerRank) ab.dist = (sk.dist || 0) + (rank - 1) * sk.distPerRank;
+      if (sk.shieldHealPerRank) ab.shieldHeal = (sk.shieldHeal || 0) + (rank - 1) * sk.shieldHealPerRank;
       return ab;
     }
     gainXp(n) {
@@ -232,6 +334,11 @@ window.RC = window.RC || {};
         this.baseMaxHp = this.def.hp + (this.level - 1) * (g.hp || 0);
         this.maxHp = this.baseMaxHp;
         this.hp = Math.min(this.maxHp, this.maxHp * ratio + (g.hp || 0));   // small heal on level up
+        // Aether 영웅 — 실드 용량도 레벨마다 성장하고, 성장분만큼 즉시 충전
+        if (this.baseMaxShield && g.shield) {
+          this.maxShield = this.baseMaxShield + (this.level - 1) * g.shield;
+          this.shield = Math.min(this.maxShield, this.shield + g.shield);
+        }
       }
       if (this.level >= RC.HERO.maxLevel) this.xp = 0;
     }
@@ -362,6 +469,9 @@ window.RC = window.RC || {};
       if (tough > 0 && this.hp < this.maxHp && this.state !== 'attack' && !this.foe && this.hitFlash <= 0) {
         this.hp = Math.min(this.maxHp, this.hp + tough * RC.CFG.UP_TOUGH_REGEN * dt);
       }
+
+      // Aether — 플라즈마 실드 재충전 (마지막 피격 후 SHIELD_DELAY 초 경과 시)
+      RC.tickShield(this, dt);
 
       // 글룹 — 타고난 재생 (전투 중엔 절반). 산성에 타 죽는 중이면 멈춤
       if (this.def.regen && this.hp < this.maxHp && this.acidStacks <= 0) {
@@ -500,12 +610,11 @@ window.RC = window.RC || {};
       const dealt = Math.max(1, dmg - armor);
       if (this.def.acid) RC.applyAcid(foe, this.def.acid);   // 글룹 — 산성 중첩
       if (foe.kind === 'unit') {
-        foe.hp -= dealt;
+        RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
         foe.hitFlash = 0.12;
         // 동결 탄자 업그레이드 — 피격 시 둔화
         if (this._up(game, 'frost') > 0) foe.slow = Math.max(foe.slow, RC.CFG.FROST_DUR);
-        if (foe.hp <= 0) foe.dead = true;
-        else if (foe.state === 'idle' && !foe.def.worker && !foe.def.transport) foe.attackTarget(this);
+        if (!foe.dead && foe.state === 'idle' && !foe.def.worker && !foe.def.transport) foe.attackTarget(this);
       } else {
         foe.damage(dealt);
       }
@@ -636,14 +745,20 @@ window.RC = window.RC || {};
           game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.35, radius: this.r, owner: this.owner });
           return true;
         }
-        case 'mend': {   // 패치봇 — 나노 치유 (범위)
+        case 'mend': {   // 패치봇 나노 치유 / 오라클·아콘 실드 재충전 (범위)
           let any = false;
           for (const u of game.units) {
             if (u.dead || u.owner !== this.owner) continue;
-            if (u.hp >= u.maxHp) continue;
             if (RC.dist(this.x, this.y, u.x, u.y) > ab.radius) continue;
-            u.hp = Math.min(u.maxHp, u.hp + ab.heal);
-            any = true;
+            // Aether 계열 — 실드를 먼저 채우고, 체력이 빈 만큼 추가로 회복
+            if (ab.shieldHeal && u.maxShield && u.shield < u.maxShield) {
+              RC.restoreShield(u, ab.shieldHeal);
+              any = true;
+            }
+            if (u.hp < u.maxHp) {
+              u.hp = Math.min(u.maxHp, u.hp + ab.heal);
+              any = true;
+            }
           }
           if (!any) return false;
           game.fx.push({ abil: 'heal', ax: this.x, ay: this.y, t: 0.45, radius: ab.radius, owner: this.owner });

@@ -95,6 +95,7 @@ window.RC = window.RC || {};
       f: Math.round(u.facing * 128), s: u.state, c: u.carry, e: Math.round(u.energy),
       b: (u.surge > 0 ? 1 : 0) | (u.rail > 0 ? 2 : 0) | (u.bulwark > 0 ? 4 : 0) | (u.slow > 0 ? 8 : 0),
       a: u.acidStacks || 0, cg: (u.cargo ? u.cargo.length : 0), hf: u.hitFlash > 0 ? 1 : 0,
+      sh: u.maxShield ? Math.round(u.shield) : 0, sm: u.maxShield ? Math.round(u.maxShield) : 0,
     }));
     const B = game.buildings.map(b => ({
       i: b.id, t: b.type, o: b.owner, x: b.x, y: b.y,
@@ -103,6 +104,7 @@ window.RC = window.RC || {};
       r: b.research ? { k: b.research.kind, l: Math.round(b.research.timeLeft * 100), n: b.research.total } : null,
       fa: b.foe ? Math.round(Math.atan2(b.foe.y - b.y, b.foe.x - b.x) * 128) : null,
       rx: Math.round(b.rally.x), ry: Math.round(b.rally.y),
+      sh: b.maxShield ? Math.round(b.shield) : 0, sm: b.maxShield ? Math.round(b.maxShield) : 0,
     }));
     const N = game.nodes.map(n => ({ i: n.id, x: Math.round(n.x), y: Math.round(n.y), a: n.amount, m: n.max }));
     const FX = game.fx.map(f => Object.assign({}, f));
@@ -129,6 +131,8 @@ window.RC = window.RC || {};
       u.state = d.s; u.carry = d.c; u.energy = d.e;
       u.surge = (d.b & 1) ? 1 : 0; u.rail = (d.b & 2) ? 1 : 0; u.bulwark = (d.b & 4) ? 1 : 0; u.slow = (d.b & 8) ? 1 : 0;
       u.acidStacks = d.a; u.hitFlash = d.hf ? 0.12 : 0;
+      // 실드는 서버가 권위 — 클라이언트는 값만 반영하고 반짝임만 로컬로 연출
+      if (d.sm) { if (d.sh < u.shield) u.shieldFx = 0.18; u.shield = d.sh; u.maxShield = d.sm; }
       u.cargo = u.def.transport ? new Array(d.cg) : null;
       u.dead = false;
     }
@@ -146,6 +150,7 @@ window.RC = window.RC || {};
       b.research = d.r ? { kind: d.r.k, timeLeft: d.r.l / 100, total: d.r.n } : null;
       b.foe = (d.fa != null) ? { x: b.x + Math.cos(d.fa / 128) * 10, y: b.y + Math.sin(d.fa / 128) * 10 } : null;
       b.rally = { x: d.rx, y: d.ry };
+      if (d.sm) { if (d.sh < b.shield) b.shieldFx = 0.18; b.shield = d.sh; b.maxShield = d.sm; }
       b.dead = false;
     }
     for (const [id, b] of bmap) if (!bseen.has(id)) bmap.delete(id);

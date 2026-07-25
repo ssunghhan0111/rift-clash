@@ -29,8 +29,12 @@ RC.Survival = (function () {
     if (w >= 3 + u) pool.push('spitter');
     if (w >= 5 + u) pool.push('shielder');
     if (w >= 7 + u) pool.push('bloat');
+    if (w >= 8 + u) pool.push('ardent');     // Aether — shielded melee, needs sustained damage
     if (w >= 9 + u) pool.push('floater');    // air — the player now needs anti-air towers
+    if (w >= 11 + u) pool.push('lancer');    // shielded ranged
     if (w >= 12 + u) pool.push('heli');
+    if (w >= 15 + u) pool.push('seraph');    // shielded air
+    if (w >= 18 + u) pool.push('bastion');   // late-game shielded siege
     const count = Math.max(3, D.size + Math.round(w * D.sizeGrow));
     const list = [];
     for (let i = 0; i < count; i++) list.push(pool[(Math.random() * pool.length) | 0]);
@@ -45,6 +49,12 @@ RC.Survival = (function () {
     u.baseMaxHp = u.def.hp * f;
     u.maxHp = Math.round(u.def.hp * f);
     u.hp = u.maxHp;
+    // Aether 유닛은 실드도 같은 비율로 — 안 그러면 후반 웨이브에서 실드가 무의미해진다
+    if (u.maxShield) {
+      u.baseMaxShield = u.def.shield * f;
+      u.maxShield = Math.round(u.def.shield * f);
+      u.shield = u.maxShield;
+    }
   }
 
   function countEnemies(g) {

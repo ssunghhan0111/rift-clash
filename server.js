@@ -255,7 +255,9 @@ function startMatch(room) {
   seats.forEach(seat => {
     if (seat.ai) {
       const allyHuman = humans.find((h, i) => h && seats[i].team === seat.team);
-      racePick[seat.owner] = allyHuman ? allyHuman.race : (hostRace === 'forge' ? 'gloop' : 'forge');
+      // An AI seat mirrors its human ally's faction; a fully-AI enemy team takes any
+      // faction other than the host's (3 factions now, so "the opposite one" no longer exists).
+      racePick[seat.owner] = allyHuman ? allyHuman.race : RC.otherRace(hostRace);
     }
   });
   const customMode = { id: mode.id, name: mode.name, count: seats.length, players: seats };
