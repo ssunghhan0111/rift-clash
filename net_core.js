@@ -111,7 +111,12 @@ window.RC = window.RC || {};
     const res = {}, up = {};
     for (const o in game.res) res[o] = Math.round(game.res[o].shard);
     for (const o in game.upgrades) up[o] = game.upgrades[o];
-    return { tm: game.time, ov: game.over, res, up, U, B, N, FX };
+    // 생존 모드 상태 — 웨이브/처치수/크리스탈 식별자 (HUD와 종료 화면에 필요)
+    const sv = game.survival
+      ? { w: game.survivalWave || 0, k: game.survivalKills || 0,
+          d: game.survivalDiff || 'medium', c: game.crystal ? game.crystal.id : null }
+      : null;
+    return { tm: game.time, ov: game.over, res, up, U, B, N, FX, sv };
   }
 
   // ── Reconcile a client game to a snapshot (entities are real RC.Unit/Building instances) ──
@@ -166,6 +171,16 @@ window.RC = window.RC || {};
     }
     for (const [id, n] of nmap) if (!nseen.has(id)) nmap.delete(id);
     game.nodes = Array.from(nmap.values());
+
+    // 생존 모드 — 웨이브/처치수/크리스탈 참조를 서버 상태로 맞춘다.
+    // (건물 맵을 다시 만든 뒤여야 크리스탈을 id로 찾을 수 있다)
+    if (s.sv) {
+      game.survival = true;
+      game.survivalWave = s.sv.w;
+      game.survivalKills = s.sv.k;
+      game.survivalDiff = s.sv.d || game.survivalDiff || 'medium';
+      game.crystal = (s.sv.c != null) ? (bmap.get(s.sv.c) || null) : null;
+    }
 
     game.fx = s.FX || [];
   }

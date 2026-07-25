@@ -1583,5 +1583,66 @@ RC.Renderer = (function () {
     mctx.strokeRect(g.camera.x * sx, g.camera.y * sy, W * sx, H * sy);
   }
 
-  return { init, draw, drawPortrait };
+  // ── 종족 얼굴 (시작 화면 종족 선택용) ────────────────
+  // Draws a faction's hero as a neutral "face" so players can see who they're
+  // picking. Colours come from the RACE TINT rather than a player colour, so the
+  // three factions read as visually distinct on the picker.
+  function raceFaceColors(raceId) {
+    const r = RC.RACES[raceId] || RC.RACES.forge;
+    const base = r.tint;
+    const c = {
+      body:  base,
+      light: shade(base, 0.32),
+      dark:  shade(base, -0.46),
+      trim:  shade(base, 0.55),
+      steel: '#9fb1c6',
+      eye:   C.node,
+      psi:   PSI,
+    };
+    if (raceId === 'gloop')       { c.steel = mix(c.steel, GLOOP_TINT, 0.42);  c.eye = '#c9ff8f'; }
+    else if (raceId === 'aether') { c.steel = mix(c.steel, AETHER_TINT, 0.46); c.eye = PSI_HOT; }
+    else                          { c.steel = mix(c.steel, FORGE_TINT, 0.30); }
+    return c;
+  }
+
+  function drawRaceFace(canvas, raceId) {
+    const r = RC.RACES[raceId];
+    if (!canvas || !r) return;
+    const type = r.hero || r.worker;
+    const def = RC.UNITS[type];
+    if (!def) return;
+    const pctx = canvas.getContext('2d');
+    if (!pctx) return;
+    const W = canvas.width, H = canvas.height;
+    const saved = ctx;
+    ctx = pctx;                          // 스프라이트 함수들이 쓰는 모듈 ctx를 잠시 교체
+    try {
+      ctx.clearRect(0, 0, W, H);
+      // 종족색 방사 그라디언트 배경
+      const bg = ctx.createRadialGradient(W / 2, H * 0.44, 2, W / 2, H * 0.5, H * 0.85);
+      bg.addColorStop(0, mix(r.tint, '#05080e', 0.78));
+      bg.addColorStop(1, '#05080e');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+      const t = performance.now() / 1000;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+      ctx.translate(W / 2, H * 0.58 + Math.sin(t * 1.9) * H * 0.022);   // 숨쉬는 듯한 흔들림
+      const scale = (Math.min(W, H) * 0.33) / Math.max(7, def.r);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = 'rgba(0,0,0,0.32)';                                // 바닥 그림자
+      ctx.beginPath(); ctx.ellipse(0, def.r * 1.2, def.r * 1.15, def.r * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+      drawUnitSprite({ type: type, def: def, r: def.r }, raceFaceColors(raceId));
+      ctx.restore();
+
+      // 하단 비네트 — 이름표가 얹히는 자리
+      const vg = ctx.createLinearGradient(0, H * 0.55, 0, H);
+      vg.addColorStop(0, 'rgba(5,8,14,0)'); vg.addColorStop(1, 'rgba(5,8,14,0.85)');
+      ctx.fillStyle = vg; ctx.fillRect(0, H * 0.55, W, H * 0.45);
+    } finally {
+      ctx = saved;
+    }
+  }
+
+  return { init, draw, drawPortrait, drawRaceFace };
 })();

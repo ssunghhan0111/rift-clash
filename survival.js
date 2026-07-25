@@ -18,8 +18,14 @@ RC.Survival = (function () {
   };
   function diffOf(g) { return DIFF[g && g.survivalDiff] || DIFF.medium; }
 
-  let s = null;
-  function reset() { s = { wave: 0, timer: PREP, queue: [], spawnT: 0, clearing: false }; }
+  // Wave state lives on the GAME (g._sv), not in module scope, so the server can run
+  // many survival rooms at once without them sharing a wave counter. Cleared in
+  // game.reset(). reset() is kept for the offline caller but is a no-op now.
+  function st(g) {
+    if (!g._sv) g._sv = { wave: 0, timer: PREP, queue: [], spawnT: 0, clearing: false };
+    return g._sv;
+  }
+  function reset() { }
 
   // Which unit types make up wave w (tougher types unlock sooner on higher difficulty)
   function compose(w, g) {
@@ -64,6 +70,7 @@ RC.Survival = (function () {
   }
 
   function startWave(g) {
+    const s = st(g);
     s.wave++;
     g.survivalWave = s.wave;
     s.queue = compose(s.wave, g);
@@ -79,10 +86,12 @@ RC.Survival = (function () {
   }
 
   function spawnOne(g) {
+    const s = st(g);
     const type = s.queue.shift();
     const o = g.enemySpawn;
     const u = new RC.Unit(type, o.x + (Math.random() * 120 - 60), o.y + (Math.random() * 500 - 250), ENEMY);
     scaleHp(u, s.wave, g);
+    if (g.initUnit) g.initUnit(u);
     g.units.push(u);
     u.attackMoveTo(g.crystal.x, g.crystal.y);   // fight through defenders, but keep pressing the crystal
   }
@@ -97,8 +106,9 @@ RC.Survival = (function () {
   }
 
   function update(dt, g) {
-    if (!s) reset();
+    const s = st(g);
     if (g.over) return;
+    if (!g.crystal || g.crystal.dead) return;
 
     if (s.queue.length) {
       // still spawning the current wave

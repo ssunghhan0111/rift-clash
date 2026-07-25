@@ -6,6 +6,20 @@ RC.Input = (function () {
   let g, cv, mini;
   let amoveArmed = false;                      // next ground order is an attack-move
   function snd(n) { if (RC.Audio) RC.Audio.play(n); }
+
+  // ── Unit voices ───────────────────────────────────────────────────────────
+  // Selecting / ordering units answers in the FACTION's own timbre. The race is
+  // taken from whatever is actually selected (unit or building) so it's always
+  // the thing that "spoke"; defs with no .race belong to Forge.
+  function raceOfSel() {
+    const s = g && g.selection && g.selection[0];
+    if (s && s.def) return s.def.race || 'forge';
+    return (g && g.playerRace && g.playerRace[g.playerOwner]) || 'forge';
+  }
+  function vsnd(n) {
+    if (RC.Audio && RC.Audio.playRace) RC.Audio.playRace(raceOfSel(), n);
+    else snd(n);
+  }
   function mark(x, y, type) { if (g.marks) g.marks.push({ mark: type, x, y, t: 0.6 }); }
 
   const state = {
@@ -49,19 +63,19 @@ RC.Input = (function () {
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
 
-    // Track raw mouse position across the WHOLE window, not just the canvas,
-    // so edge-scroll keeps working while the cursor is over HUD overlays
-    // (bottom command panel, minimap, touchbar) instead of stopping dead the
-    // moment the pointer leaves the canvas element.
+    // Track the mouse from the window (so the position stays correct even while a
+    // drag runs off the canvas), but only ARM edge-scroll while the cursor is
+    // actually over the battlefield. Parking the mouse on the bottom command
+    // panel, the minimap or the touchbar must NOT keep scrolling the map.
     window.addEventListener('mousemove', e => {
       const r = cv.getBoundingClientRect();
-      state.screen.x = e.clientX - r.left;
-      state.screen.y = e.clientY - r.top;
-      state.mouseInside = true;
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      state.screen.x = x;
+      state.screen.y = y;
+      state.mouseInside = (x >= 0 && x <= r.width && y >= 0 && y <= r.height);
     });
-    // Only clear it once the mouse actually leaves the browser window.
     window.addEventListener('mouseout', e => {
-      if (!e.relatedTarget && !e.toElement) state.mouseInside = false;
+      if (!e.relatedTarget && !e.toElement) state.mouseInside = false;   // left the browser window
     });
 
     // 미니맵 탭/클릭 = 카메라 이동
@@ -237,11 +251,12 @@ RC.Input = (function () {
       } else {
         g.selection = [ent];
       }
+      if (ent.owner === me && g.selection.length) vsnd('select');   // your own units answer
       return;
     }
 
     // touch/pen — smart tap: select if it's mine, otherwise issue a command
-    if (ent && ent.owner === me) { g.selection = [ent]; snd('select'); return; }
+    if (ent && ent.owner === me) { g.selection = [ent]; vsnd('select'); return; }
     const mine = g.selection.some(s => s.owner === me);
     if (mine) { onRight(); return; }
     g.selection = [];
@@ -261,7 +276,7 @@ RC.Input = (function () {
 
     const hasFighter = g.selection.some(s => s.kind === 'unit' && !s.def.worker);
     if (hasFighter) g.selection = g.selection.filter(s => s.kind !== 'unit' || !s.def.worker);
-    if (g.selection.length) snd('select');
+    if (g.selection.length) vsnd('select');
   }
 
   function onRight() {
@@ -298,25 +313,25 @@ RC.Input = (function () {
     const node = g.nodeAt(wx, wy);
     const site = g.buildings.find(b => b.owner === me && !b.done && b.contains(wx, wy));
 
-    if (enemy) { RC.cmd(g, { t: 'attack', ids, tid: enemy.id }); mark(enemy.x, enemy.y, 'attack'); snd('attack'); amoveArmed = false; return; }
+    if (enemy) { RC.cmd(g, { t: 'attack', ids, tid: enemy.id }); mark(enemy.x, enemy.y, 'attack'); vsnd('attack'); amoveArmed = false; return; }
     if (site && workerIds.length) {
       RC.cmd(g, { t: 'buildSite', ids: workerIds, bid: site.id });
       if (otherIds.length) RC.cmd(g, { t: 'move', ids: otherIds, x: wx, y: wy });
-      mark(wx, wy, 'move'); snd('move'); amoveArmed = false; return;
+      mark(wx, wy, 'move'); vsnd('move'); amoveArmed = false; return;
     }
     if (node && workerIds.length) {
       RC.cmd(g, { t: 'gather', ids: workerIds, nid: node.id });
       if (otherIds.length) RC.cmd(g, { t: 'move', ids: otherIds, x: wx, y: wy });
-      mark(node.x, node.y, 'move'); snd('move'); amoveArmed = false; return;
+      mark(node.x, node.y, 'move'); vsnd('move'); amoveArmed = false; return;
     }
     // plain ground order — attack-move (armed) engages enemies on the way; workers still just move
     if (amoveArmed && otherIds.length) {
       RC.cmd(g, { t: 'amove', ids: otherIds, x: wx, y: wy });
       if (workerIds.length) RC.cmd(g, { t: 'move', ids: workerIds, x: wx, y: wy });
-      mark(wx, wy, 'amove'); snd('attack');
+      mark(wx, wy, 'amove'); vsnd('attack');
     } else {
       RC.cmd(g, { t: 'move', ids, x: wx, y: wy });
-      mark(wx, wy, 'move'); snd('move');
+      mark(wx, wy, 'move'); vsnd('move');
     }
     amoveArmed = false;
   }
@@ -342,14 +357,14 @@ RC.Input = (function () {
     // find an idle worker
     if (k === 'f') {
       const idle = g.units.find(u => u.owner === me && u.def.worker && u.state === 'idle');
-      if (idle) { g.selection = [idle]; centerOn(idle.x, idle.y); }
+      if (idle) { g.selection = [idle]; centerOn(idle.x, idle.y); vsnd('select'); }
       return;
     }
 
     // select your hero (and jump to it)
     if (k === 'h') {
       const hero = g.heroOf && g.heroOf[me];
-      if (hero && !hero.dead) { g.selection = [hero]; if (!hero.downed) centerOn(hero.x, hero.y); }
+      if (hero && !hero.dead) { g.selection = [hero]; if (!hero.downed) centerOn(hero.x, hero.y); vsnd('select'); }
       return;
     }
 
@@ -389,7 +404,7 @@ RC.Input = (function () {
         g.groups[k] = g.selection.slice();
       } else {
         const grp = (g.groups || {})[k];
-        if (grp) g.selection = grp.filter(u => !u.dead);
+        if (grp) { g.selection = grp.filter(u => !u.dead); if (g.selection.length) vsnd('select'); }
       }
     }
   }

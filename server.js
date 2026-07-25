@@ -17,6 +17,7 @@ require('./pathfind.js');
 require('./entities.js');
 require('./game.js');
 require('./ai.js');
+require('./survival.js');       // online co-op Survival wave director
 require('./net_core.js');
 const RC = global.RC;
 RC.CFG.FOG_ENABLED = false;               // server is omniscient; clients compute their own fog
@@ -136,7 +137,15 @@ function onClose(c) {
 }
 
 // ── Room lifecycle ──
-function createRoom(host, name, isPublic) {
+// 방 정원 — 대전은 모드 인원수, 생존은 방어자 최대 4명(맵의 base 수)
+const SURVIVAL_CAP = 4;
+const SURVIVAL_SEATS = [1, 3, 4, 5];       // owner 2 is reserved for the wave horde
+function roomCap(room) {
+  if (room.lobby.gameMode === 'survival') return SURVIVAL_CAP;
+  return (RC.MODES[room.lobby.modeId] || {}).count || 4;
+}
+
+function createRoom(host, name, isPublic, gameMode) {
   const room = {
     id: nextRoomId++, code: makeCode(),
     name: (String(name || '').slice(0, 20) || (host.name + "'s Game")),
@@ -144,7 +153,11 @@ function createRoom(host, name, isPublic) {
     clients: [],
     game: null, loop: null, tickN: 0, cmdQueue: [],
     ownerOf: new Map(), teamOf: {},
-    lobby: { mapId: RC.MAPS[0].id, modeId: '1v1', started: false },
+    // gameMode: 'vs' (map + 1v1/2v2) | 'survival' (co-op vs endless waves, difficulty instead of map)
+    lobby: {
+      mapId: RC.MAPS[0].id, modeId: '1v1', started: false,
+      gameMode: (gameMode === 'survival' ? 'survival' : 'vs'), diff: 'medium',
+    },
   };
   rooms.set(room.id, room);
   joinRoom(host, room);
@@ -185,6 +198,7 @@ function lobbyState(room) {
   return {
     t: 'lobby', roomId: room.id, code: room.code, name: room.name, public: room.public,
     mapId: room.lobby.mapId, modeId: room.lobby.modeId, started: room.lobby.started,
+    gameMode: room.lobby.gameMode, diff: room.lobby.diff, cap: roomCap(room),
     hostId: room.clients.length ? room.clients[0].id : null,
     players: room.clients.map(c => ({ id: c.id, name: c.name, race: c.race })),
   };
@@ -195,10 +209,10 @@ function roomListPayload() {
   const list = [];
   for (const room of rooms.values()) {
     if (room.public && !room.lobby.started) {
-      const mode = RC.MODES[room.lobby.modeId];
       list.push({
         id: room.id, name: room.name, players: room.clients.length,
-        cap: mode ? mode.count : 4, mapId: room.lobby.mapId, modeId: room.lobby.modeId,
+        cap: roomCap(room), mapId: room.lobby.mapId, modeId: room.lobby.modeId,
+        gameMode: room.lobby.gameMode, diff: room.lobby.diff,
       });
     }
   }
@@ -215,14 +229,13 @@ function onMsg(c, m) {
   switch (m.t) {
     case 'setName': c.name = String(m.name || '').slice(0, 16) || c.name; if (c.room) pushLobby(c.room); break;
     case 'list': sendRoomList(c); break;
-    case 'create': createRoom(c, m.name, m.public); break;
+    case 'create': createRoom(c, m.name, m.public, m.gameMode); break;
     case 'join': {
       const code = String(m.code || '').toUpperCase();
       const room = m.roomId ? rooms.get(m.roomId) : roomByCode(code);
       if (!room) { send(c, { t: 'joinError', msg: 'Game not found — check the code.' }); break; }
       if (room.lobby.started) { send(c, { t: 'joinError', msg: 'That game has already started.' }); break; }
-      const cap = (RC.MODES[room.lobby.modeId] || {}).count || 4;
-      if (room.clients.length >= cap) { send(c, { t: 'joinError', msg: 'That game is full.' }); break; }
+      if (room.clients.length >= roomCap(room)) { send(c, { t: 'joinError', msg: 'That game is full.' }); break; }
       joinRoom(c, room);
       break;
     }
@@ -232,6 +245,21 @@ function onMsg(c, m) {
     case 'race': if (c.room && RC.RACES[m.race]) { c.race = m.race; pushLobby(c.room); } break;
     case 'map': if (isHost(c) && RC.getMap(m.mapId)) { c.room.lobby.mapId = m.mapId; pushLobby(c.room); broadcastRoomList(); } break;
     case 'mode': if (isHost(c) && RC.MODES[m.modeId]) { c.room.lobby.modeId = m.modeId; pushLobby(c.room); broadcastRoomList(); } break;
+    // Survival co-op: host picks the difficulty instead of a map/mode.
+    case 'diff': if (isHost(c) && ['easy', 'medium', 'insane'].includes(m.diff)) { c.room.lobby.diff = m.diff; pushLobby(c.room); broadcastRoomList(); } break;
+    case 'gamemode': {
+      if (!isHost(c) || c.room.lobby.started) break;
+      const gm = (m.gameMode === 'survival') ? 'survival' : 'vs';
+      c.room.lobby.gameMode = gm;
+      // switching to a tighter cap could leave the room over-full — drop the newest joiners
+      while (c.room.clients.length > roomCap(c.room)) {
+        const evicted = c.room.clients[c.room.clients.length - 1];
+        send(evicted, { t: 'joinError', msg: 'The host switched game mode and the room got smaller.' });
+        leaveRoom(evicted);
+      }
+      pushLobby(c.room); broadcastRoomList();
+      break;
+    }
     case 'start': if (isHost(c) && c.room && !c.room.lobby.started) { startMatch(c.room); } break;
     case 'cmd': { const room = c.room; if (!room || !room.game || room.game.over) break; const owner = room.ownerOf.get(c.socket); if (owner != null) room.cmdQueue.push({ owner, cmd: m.c }); break; }
     case 'restart': if (isHost(c) && c.room && c.room.lobby.started) { stopMatch(c.room); pushLobby(c.room); } break;
@@ -240,6 +268,7 @@ function onMsg(c, m) {
 
 // ── Match run (per room) ──
 function startMatch(room) {
+  if (room.lobby.gameMode === 'survival') return startSurvivalMatch(room);
   const mode = RC.MODES[room.lobby.modeId];
   const seats = mode.players.map(p => ({ owner: p.owner, team: p.team }));
   const humans = room.clients.slice(0, seats.length);      // join order fills seats
@@ -288,6 +317,56 @@ function startMatch(room) {
     const alive = new Set(g.buildings.filter(b => b.def.isCore && !b.dead).map(b => room.teamOf[b.owner]));
     if (alive.size <= 1) {
       roomBroadcast(room, { t: 'over', team: alive.size === 1 ? [...alive][0] : null });
+      clearInterval(room.loop); room.loop = null;
+    }
+  }, 1000 / 30);
+}
+
+// ── Survival co-op (per room) ──
+// Every human is a DEFENDER on team 1; the endless horde is owner 2 on team 2 and is
+// driven by the shared wave director rather than the build-order AI. There is no "win":
+// the run ends when the Rift Crystal falls, and everyone gets the same wave/score.
+function startSurvivalMatch(room) {
+  const humans = room.clients.slice(0, SURVIVAL_CAP);
+  const seats = humans.map((h, i) => ({ owner: SURVIVAL_SEATS[i], race: h.race || 'forge', ai: false }));
+  // A solo host still gets one allied bot so the lane isn't hopeless; full rooms don't need it.
+  if (seats.length === 1) seats.push({ owner: SURVIVAL_SEATS[1], race: seats[0].race, ai: true });
+
+  room.ownerOf = new Map(); room.teamOf = {};
+  humans.forEach((h, i) => room.ownerOf.set(h.socket, seats[i].owner));
+  seats.forEach(s => { room.teamOf[s.owner] = 1; });
+  room.teamOf[2] = 2;
+
+  room.game = new RC.Game();
+  room.game.heroesEnabled = false;                 // online has no heroes (kept off the authoritative sim)
+  room.game.setupSurvival({ difficulty: room.lobby.diff, players: seats });
+  room.lobby.started = true;
+  room.cmdQueue = []; room.tickN = 0;
+
+  const rosters = seats.map(s => ({ owner: s.owner, team: 1, race: s.race, ai: s.ai }));
+  room.clients.forEach(cl => {
+    send(cl, {
+      t: 'start', survival: true, diff: room.lobby.diff,
+      owner: room.ownerOf.get(cl.socket), team: 1, rosters,
+    });
+  });
+  broadcastRoomList();
+
+  const DT = 1 / 30;
+  room.loop = setInterval(() => {
+    const g = room.game;
+    RC.CFG.WORLD_W = g.world.w; RC.CFG.WORLD_H = g.world.h;   // this room's world bounds for this tick
+    g.over = null;                                            // the server decides when the run ends
+    const q = room.cmdQueue; room.cmdQueue = [];
+    for (const item of q) RC.Net.applyCommand(g, item.owner, item.cmd);
+    g.update(DT);
+    room.tickN++;
+    if (room.tickN % 2 === 0) roomBroadcast(room, { t: 'snap', s: RC.Net.serialize(g) });
+    if (!g.crystal || g.crystal.dead) {
+      roomBroadcast(room, {
+        t: 'over', survival: true, team: null,
+        wave: g.survivalWave || 0, kills: g.survivalKills || 0, diff: g.survivalDiff,
+      });
       clearInterval(room.loop); room.loop = null;
     }
   }, 1000 / 30);

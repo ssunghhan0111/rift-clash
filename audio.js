@@ -46,6 +46,124 @@ RC.Audio = (function () {
   }
   function seq(list) { list.forEach(s => setTimeout(() => tone(s[0], s[1], s[2] || 'square', s[3] || 0.2, s[4]), s[5] || 0)); }
 
+  // ── Richer voice primitives (used by the per-race unit voices below) ───────
+  // vtone: an oscillator with an optional attack ramp, pitch slide, detune and
+  // scheduled start offset — enough to build bells, chirps and servo blips.
+  function vtone(o) {
+    if (!ctx || !enabled) return;
+    const t0 = ctx.currentTime + (o.delay || 0);
+    const dur = o.dur || 0.1;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(o.f, t0);
+    if (o.to) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.to), t0 + dur);
+    if (o.detune) osc.detune.setValueAtTime(o.detune, t0);
+    const vol = Math.max(0.0001, o.vol == null ? 0.1 : o.vol);
+    const atk = Math.min(o.attack || 0.004, dur * 0.5);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + atk);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    let tail = g;
+    if (o.lp) {                                   // optional tone-shaping filter
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(o.lp, t0);
+      if (o.lpTo) f.frequency.exponentialRampToValueAtTime(Math.max(40, o.lpTo), t0 + dur);
+      g.connect(f); tail = f;
+    }
+    osc.connect(g); tail.connect(master);
+    osc.start(t0); osc.stop(t0 + dur + 0.03);
+  }
+
+  // vnoise: filtered noise burst — the basis for servo clicks and wet squelches.
+  function vnoise(o) {
+    if (!ctx || !enabled) return;
+    const t0 = ctx.currentTime + (o.delay || 0);
+    const dur = o.dur || 0.08;
+    const src = ctx.createBufferSource();
+    const buf = ctx.createBuffer(1, Math.max(1, Math.ceil(ctx.sampleRate * dur)), ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    src.buffer = buf;
+    const g = ctx.createGain();
+    const vol = Math.max(0.0001, o.vol == null ? 0.1 : o.vol);
+    const atk = Math.min(o.attack || 0.003, dur * 0.5);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + atk);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    let node = src;
+    if (o.hp) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'highpass'; f.frequency.setValueAtTime(o.hp, t0);
+      node.connect(f); node = f;
+    }
+    if (o.lp) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(o.lp, t0);
+      if (o.lpTo) f.frequency.exponentialRampToValueAtTime(Math.max(40, o.lpTo), t0 + dur);
+      if (o.q) f.Q.setValueAtTime(o.q, t0);
+      node.connect(f); node = f;
+    }
+    node.connect(g); g.connect(master);
+    src.start(t0); src.stop(t0 + dur + 0.03);
+  }
+
+  // ── Per-race unit voices ──────────────────────────────────────────────────
+  // Each faction answers in its own timbre, StarCraft-style, so you can tell who
+  // you've grabbed without looking:
+  //   Forge  — machines: servo clicks and clean square-wave radio blips.
+  //   Gloop  — organic swarm: wet squelches and rising chitinous chirps.
+  //   Aether — psionic aliens: detuned crystal bells with a long shimmer.
+  const RACE_SFX = {
+    forge: {
+      select: () => {
+        vnoise({ dur: 0.03, vol: 0.09, hp: 1400, lp: 5200 });                       // servo click
+        vtone({ f: 880,  dur: 0.05, type: 'square', vol: 0.095, delay: 0.022 });
+        vtone({ f: 1320, dur: 0.07, type: 'square', vol: 0.075, delay: 0.072 });    // confirm chirp
+      },
+      move: () => {
+        vtone({ f: 620, to: 940, dur: 0.09, type: 'square', vol: 0.10 });
+        vnoise({ dur: 0.045, vol: 0.045, hp: 900, lp: 3000, delay: 0.02 });
+      },
+      attack: () => {
+        vtone({ f: 360, to: 190, dur: 0.12, type: 'sawtooth', vol: 0.13 });
+        vnoise({ dur: 0.07, vol: 0.07, hp: 500, lp: 2200, delay: 0.01 });
+      },
+    },
+    gloop: {
+      select: () => {
+        vnoise({ dur: 0.13, vol: 0.11, lp: 1700, lpTo: 300, q: 7 });                // wet squelch
+        vtone({ f: 300, to: 165, dur: 0.14, type: 'sine', vol: 0.10, lp: 1200 });
+        vtone({ f: 620, to: 430, dur: 0.07, type: 'triangle', vol: 0.05, delay: 0.05 });
+      },
+      move: () => {
+        vtone({ f: 240, to: 520, dur: 0.11, type: 'triangle', vol: 0.10, lp: 2200 });  // rising chirp
+        vnoise({ dur: 0.07, vol: 0.06, lp: 1100, lpTo: 480, q: 5 });
+      },
+      attack: () => {
+        vnoise({ dur: 0.16, vol: 0.13, lp: 2600, lpTo: 420, q: 4 });                // screech
+        vtone({ f: 520, to: 210, dur: 0.15, type: 'sawtooth', vol: 0.09, lp: 1800 });
+      },
+    },
+    aether: {
+      select: () => {
+        vtone({ f: 1046, dur: 0.52, type: 'sine', vol: 0.085, attack: 0.014 });     // crystal bell
+        vtone({ f: 1568, dur: 0.44, type: 'sine', vol: 0.05,  attack: 0.02,  delay: 0.028 });
+        vtone({ f: 2093, dur: 0.34, type: 'sine', vol: 0.028, attack: 0.03,  delay: 0.06, detune: 9 });
+      },
+      move: () => {
+        vtone({ f: 784,  dur: 0.30, type: 'sine', vol: 0.075, attack: 0.01 });
+        vtone({ f: 1175, dur: 0.34, type: 'sine', vol: 0.05,  attack: 0.014, delay: 0.05 });
+        vtone({ f: 1568, dur: 0.30, type: 'sine', vol: 0.03,  attack: 0.02,  delay: 0.10, detune: -7 });
+      },
+      attack: () => {
+        vtone({ f: 1320, to: 420, dur: 0.24, type: 'triangle', vol: 0.10, attack: 0.006 });
+        vtone({ f: 660,  to: 210, dur: 0.28, type: 'sine',     vol: 0.07, attack: 0.01, delay: 0.02 });
+      },
+    },
+  };
+
   const SFX = {
     select:  () => tone(680, 0.05, 'square', 0.12),
     move:    () => tone(440, 0.06, 'triangle', 0.11, 560),
@@ -67,10 +185,24 @@ RC.Audio = (function () {
     // throttle spammy combat sounds so many units don't create a wall of noise
     if (name === 'shoot' || name === 'explode' || name === 'attack' || name === 'move' || name === 'select') {
       const now = ctx.currentTime;
-      if (_last[name] && now - _last[name] < 0.06) return;
+      // != null, not truthiness — currentTime is legitimately 0 on the very first sound
+      if (_last[name] != null && now - _last[name] < 0.06) return;
       _last[name] = now;
     }
     const f = SFX[name]; if (f) f();
+  }
+
+  // Play a unit voice in the given faction's timbre. Falls back to the generic
+  // SFX for unknown races or sounds that have no racial variant.
+  function playRace(race, name) {
+    if (!ctx || !enabled) return;
+    const now = ctx.currentTime;
+    const key = 'r:' + name;
+    if (_last[key] != null && now - _last[key] < 0.09) return;   // voices are longer — throttle harder
+    _last[key] = now;
+    const set = RACE_SFX[race];
+    const f = set && set[name];
+    if (f) f(); else { const gsfx = SFX[name]; if (gsfx) gsfx(); }
   }
 
   // soft, slow arpeggio pad — low volume, easy to ignore
@@ -94,5 +226,6 @@ RC.Audio = (function () {
   }
   function toggle() { setEnabled(!enabled); return enabled; }
 
-  return { init, resume, play, startMusic, stopMusic, setEnabled, toggle, get enabled() { return enabled; } };
+  return { init, resume, play, playRace, startMusic, stopMusic, setEnabled, toggle,
+           get enabled() { return enabled; } };
 })();

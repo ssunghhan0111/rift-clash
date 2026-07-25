@@ -122,9 +122,11 @@ RC.SURVIVAL = {
   bg: '#101820', ground: '#16232b',
   enemySpawn: { x: 250, y: 800 },     // waves appear here and head for the crystal
   crystal: { x: 2430, y: 800 },       // the objective to protect
-  bases: [                            // defender start positions (player, then ally)
+  bases: [                            // defender start positions (up to 4 — online co-op)
     { x: 2960, y: 620 },
     { x: 2960, y: 980 },
+    { x: 3160, y: 800 },
+    { x: 2760, y: 800 },
   ],
   // shard clusters near the defender side so you can gather and build
   nodeClusters: [

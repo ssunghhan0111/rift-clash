@@ -30,17 +30,30 @@ window.RC = window.RC || {};
       this.reset();
     }
 
-    // 생존 모드 시작. opts = { race, ally(bool) }
+    // 생존 모드 시작.
+    //   오프라인: opts = { race, ally(bool), difficulty }
+    //   온라인 협동: opts = { difficulty, players: [{ owner, race, ai }] }  ← 방어자 전원
     setupSurvival(opts) {
       opts = opts || {};
       this.survival = true;
       this.survivalDiff = opts.difficulty || 'medium';
-      const race = opts.race || 'forge';
-      const players = [{ owner: 1, team: 1, ai: false }];
-      if (opts.ally) players.push({ owner: 3, team: 1, ai: true });
+      const pick = {};
+      let players;
+      if (opts.players && opts.players.length) {
+        // 온라인 — 서버가 좌석을 정해서 넘겨준다 (전원 팀 1의 방어자)
+        players = opts.players.map(p => ({ owner: p.owner, team: 1, ai: !!p.ai }));
+        opts.players.forEach(p => { pick[p.owner] = p.race || 'forge'; });
+      } else {
+        const race = opts.race || 'forge';
+        players = [{ owner: 1, team: 1, ai: false }];
+        if (opts.ally) players.push({ owner: 3, team: 1, ai: true });
+        pick[1] = race; pick[3] = race;
+      }
+      // 웨이브 호드는 항상 owner 2 — AI 빌드오더를 돌리지 않으므로 ai:false
       players.push({ owner: 2, team: 2, ai: false, waveEnemy: true });
+      pick[2] = 'forge';
       this.mode = { id: 'survival', name: 'Survival', survival: true, count: players.length, players };
-      this._racePick = { 1: race, 3: race, 2: 'forge' };
+      this._racePick = pick;
       this.survivalMap = RC.SURVIVAL;
       this.mapDef = { world: RC.SURVIVAL.world, terrain: RC.SURVIVAL.terrain, obstacles: RC.SURVIVAL.obstacles, spawns: [{ x: 0, y: 0 }] };
       this.reset();
@@ -65,7 +78,12 @@ window.RC = window.RC || {};
 
       // 플레이어 구성
       this.players = this.mode.players.map(p => ({ ...p }));
-      this.playerOwner = (this.players.find(p => !p.ai) || this.players[0]).owner;
+      // 기준 플레이어 — 웨이브 호드(owner 2)는 절대 고르지 않는다. 생존 모드에서
+      // 방어자가 전부 AI여도 킬 집계/적대 판정이 뒤집히지 않도록.
+      const ref = this.players.find(p => !p.ai && !p.waveEnemy)
+               || this.players.find(p => !p.waveEnemy)
+               || this.players[0];
+      this.playerOwner = ref.owner;
       this.teamMap = {};
       this.playerRace = {};
       this.res = {};
@@ -84,6 +102,7 @@ window.RC = window.RC || {};
       this.survivalKills = 0;
       this.heroOf = {};
       this._ai = {};              // per-game AI memory (see ai.js) — reset with the game
+      this._sv = null;            // per-game survival wave state (see survival.js) — same reason
       this._nav = null;           // pathfinding nav grid — rebuilt lazily for the new map
       this.marks = [];            // client-side visual feedback (command markers, damage numbers)
       if (this.survival) this._buildSurvivalMap();

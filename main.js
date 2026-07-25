@@ -31,6 +31,15 @@ window.RC = window.RC || {};
   let selDiff = 'medium';       // survival: 'easy' | 'medium' | 'insane'
   let practiceHints = null;
 
+  // 종족 얼굴 캔버스 목록 (시작 화면 + 온라인 로비). 메뉴가 떠 있는 동안만 다시 그린다.
+  const raceFaces = [];
+  function drawRaceFaces() {
+    if (!RC.Renderer.drawRaceFace) return;
+    for (const f of raceFaces) {
+      if (f.cv && f.cv.isConnected) RC.Renderer.drawRaceFace(f.cv, f.race);
+    }
+  }
+
   function drawMapPreview(canvas, map) {
     const g2 = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
@@ -86,16 +95,18 @@ window.RC = window.RC || {};
       modeWrap.appendChild(btn);
     });
 
-    // 종족 선택
+    // 종족 선택 — 각 종족의 영웅 얼굴을 함께 보여준다
     const raceWrap = document.getElementById('ss-races');
     if (raceWrap) {
       raceWrap.innerHTML = '';
+      raceFaces.length = 0;
       RC.RACE_ORDER.forEach(rid => {
         const r = RC.RACES[rid];
         const btn = document.createElement('div');
         btn.className = 'modebtn racebtn' + (rid === selRace ? ' sel' : '');
         btn.style.borderTopColor = r.tint;
-        btn.innerHTML = `<div class="mb-name" style="color:${r.tint}">${r.name}</div>` +
+        btn.innerHTML = `<canvas class="race-face" width="150" height="120"></canvas>` +
+                        `<div class="mb-name" style="color:${r.tint}">${r.name}</div>` +
                         `<div class="mb-sub">${r.blurb}</div>`;
         btn.addEventListener('click', () => {
           selRace = rid;
@@ -103,7 +114,9 @@ window.RC = window.RC || {};
           btn.classList.add('sel');
         });
         raceWrap.appendChild(btn);
+        raceFaces.push({ cv: btn.querySelector('canvas'), race: rid });
       });
+      drawRaceFaces();
     }
 
     buildGameModes();
@@ -185,8 +198,9 @@ window.RC = window.RC || {};
     show('sec-squad', m === 'survival');
     show('sec-race', m !== 'tutorial');
     show('act-vs', m === 'vs', 'flex');
-    show('act-survival', m === 'survival');
+    show('act-survival', m === 'survival', 'flex');
     show('ss-onlinehint', m === 'vs');
+    show('ss-survivalhint', m === 'survival');
     const rh = document.getElementById('race-h');
     if (rh) rh.textContent = m === 'survival' ? 'Your faction' : 'Faction (enemy AI takes the other)';
   }
@@ -376,6 +390,9 @@ window.RC = window.RC || {};
   const N = RC.NetClient;
   let myId = null, isHost = false, lobbyData = null, myRace = 'forge', myTeam = null, firstSnap = false;
   let roomCode = '', roomPublic = true;
+  // Which kind of online game the browser is currently creating ('vs' | 'survival').
+  // Set when you press Online from either the Versus or the Survival panel.
+  let onlineKind = 'vs';
 
   function showBrowser() { ss.classList.add('hidden'); overlay.classList.add('hidden'); lobbyEl.classList.add('hidden'); browserEl.classList.remove('hidden'); }
   function showLobby() { ss.classList.add('hidden'); overlay.classList.add('hidden'); browserEl.classList.add('hidden'); lobbyEl.classList.remove('hidden'); }
@@ -388,12 +405,19 @@ window.RC = window.RC || {};
     rl.innerHTML = '';
     if (!list || !list.length) { rl.innerHTML = '<div id="room-empty">No public games right now — create one above!</div>'; return; }
     list.forEach(r => {
-      const modeName = (RC.MODES[r.modeId] || {}).name || r.modeId;
-      const mapName = (RC.getMap(r.mapId) || {}).name || r.mapId;
       const cap = r.cap || 4, full = r.players >= cap;
+      let sub;
+      if (r.gameMode === 'survival') {
+        const dn = RC.Survival ? RC.Survival.diffName(r.diff) : (r.diff || 'Medium');
+        sub = `🛡️ Survival Co-op · ${dn} · ${r.players}/${cap} players`;
+      } else {
+        const modeName = (RC.MODES[r.modeId] || {}).name || r.modeId;
+        const mapName = (RC.getMap(r.mapId) || {}).name || r.mapId;
+        sub = `⚔️ ${mapName} · ${modeName} · ${r.players}/${cap} players`;
+      }
       const row = document.createElement('div');
       row.className = 'roomrow' + (full ? ' full' : '');
-      row.innerHTML = `<div><div class="rr-name">${r.name}</div><div class="rr-sub">${mapName} · ${modeName} · ${r.players}/${cap} players</div></div>`;
+      row.innerHTML = `<div><div class="rr-name">${r.name}</div><div class="rr-sub">${sub}</div></div>`;
       const btn = document.createElement('button');
       btn.textContent = full ? 'Full' : 'Join';
       if (!full) btn.addEventListener('click', () => N.send({ t: 'join', roomId: r.id }));
@@ -402,15 +426,24 @@ window.RC = window.RC || {};
     });
   }
 
-  document.getElementById('ss-online').addEventListener('click', () => {
+  function openBrowser(kind) {
+    onlineKind = kind;
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+    const title = document.getElementById('browser-title');
+    if (title) title.innerHTML = kind === 'survival'
+      ? 'RIFT<b>CLASH</b> · Online Co-op'
+      : 'RIFT<b>CLASH</b> · Online';
     showBrowser(); setBrowserStatus('Connecting…');
     RC.online = false;
     if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); }
     N.connect(url);
-  });
-  document.getElementById('create-public').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: true }));
-  document.getElementById('create-private').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: false }));
+  }
+  document.getElementById('ss-online').addEventListener('click', () => openBrowser('vs'));
+  const svOnlineBtn = document.getElementById('ss-survival-online');
+  if (svOnlineBtn) svOnlineBtn.addEventListener('click', () => openBrowser('survival'));
+
+  document.getElementById('create-public').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: true, gameMode: onlineKind }));
+  document.getElementById('create-private').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: false, gameMode: onlineKind }));
   document.getElementById('refresh-rooms').addEventListener('click', () => N.send({ t: 'list' }));
   document.getElementById('join-code-btn').addEventListener('click', () => {
     const code = (document.getElementById('join-code').value || '').trim().toUpperCase();
@@ -447,7 +480,18 @@ window.RC = window.RC || {};
       if (c) RC.Input.centerOn(c.x, c.y);
     }
   });
-  N.on('over', m => { game.over = (m.team === myTeam) ? 'win' : 'lose'; });
+  N.on('over', m => {
+    if (m.survival) {
+      // Co-op run ended — the crystal fell. Everyone sees the same wave/score.
+      game.survival = true;
+      game.survivalWave = m.wave || game.survivalWave || 0;
+      game.survivalKills = m.kills || game.survivalKills || 0;
+      game.survivalDiff = m.diff || game.survivalDiff || 'medium';
+      game.over = 'lose';
+      return;
+    }
+    game.over = (m.team === myTeam) ? 'win' : 'lose';
+  });
 
   function renderLobby() {
     if (!lobbyData) return;
@@ -463,43 +507,72 @@ window.RC = window.RC || {};
       el.innerHTML = `<div class="pn">${p.name}${p.id === lobbyData.hostId ? ' 👑' : ''}</div><div class="pr">${rn}</div>`;
       pw.appendChild(el);
     });
-    // my faction
+    // my faction — 시작 화면과 같은 얼굴 카드
     const rw = document.getElementById('lobby-races');
     rw.innerHTML = '';
+    raceFaces.length = 0;
     RC.RACE_ORDER.forEach(rid => {
       const r = RC.RACES[rid];
       const b = document.createElement('div');
       b.className = 'modebtn racebtn' + (rid === myRace ? ' sel' : '');
       b.style.borderTopColor = r.tint;
-      b.innerHTML = `<div class="mb-name" style="color:${r.tint}">${r.name}</div><div class="mb-sub">${r.blurb}</div>`;
+      b.innerHTML = `<canvas class="race-face" width="150" height="120"></canvas>` +
+                    `<div class="mb-name" style="color:${r.tint}">${r.name}</div><div class="mb-sub">${r.blurb}</div>`;
       b.addEventListener('click', () => { myRace = rid; N.send({ t: 'race', race: rid }); renderLobby(); });
       rw.appendChild(b);
+      raceFaces.push({ cv: b.querySelector('canvas'), race: rid });
     });
+    drawRaceFaces();
+    // Survival co-op lobbies swap the map/mode pickers for a difficulty picker.
+    const isSurvival = lobbyData.gameMode === 'survival';
+    const vsOpts = document.getElementById('lobby-vs-opts');
+    const svOpts = document.getElementById('lobby-sv-opts');
+    if (vsOpts) vsOpts.classList.toggle('hidden', isSurvival);
+    if (svOpts) svOpts.classList.toggle('hidden', !isSurvival);
+    const codeLine = document.getElementById('lobby-code');
+    if (codeLine && isSurvival) {
+      codeLine.textContent = (roomPublic ? '🌐 Public co-op' : ('🔒 Private co-op — share code: ' + (roomCode || ''))) +
+                             `  ·  ${(lobbyData.players || []).length}/${lobbyData.cap || 4} defenders`;
+    }
+
     // host controls
     const hostBox = document.getElementById('lobby-host');
     const startBtn = document.getElementById('lobby-start');
     if (isHost) {
       hostBox.classList.remove('hidden'); startBtn.classList.remove('hidden');
-      const mw = document.getElementById('lobby-maps'); mw.innerHTML = '';
-      RC.MAPS.forEach(map => {
-        const c = document.createElement('div');
-        c.className = 'modebtn' + (map.id === lobbyData.mapId ? ' sel' : '');
-        c.innerHTML = `<div class="mb-name">${map.name}</div>`;
-        c.addEventListener('click', () => N.send({ t: 'map', mapId: map.id }));
-        mw.appendChild(c);
-      });
-      const mo = document.getElementById('lobby-modes'); mo.innerHTML = '';
-      Object.values(RC.MODES).forEach(mm => {
-        const c = document.createElement('div');
-        c.className = 'modebtn' + (mm.id === lobbyData.modeId ? ' sel' : '');
-        c.innerHTML = `<div class="mb-name">${mm.name}</div>`;
-        c.addEventListener('click', () => N.send({ t: 'mode', modeId: mm.id }));
-        mo.appendChild(c);
-      });
-      setStatus('You are the host. Pick map/mode and press Start. Empty seats are filled by AI.');
+      startBtn.textContent = isSurvival ? 'Start Survival' : 'Start Match';
+      if (isSurvival) {
+        const dw = document.getElementById('lobby-diffs'); dw.innerHTML = '';
+        DIFFS.forEach(d => {
+          const c = document.createElement('div');
+          c.className = 'modebtn' + (d.id === lobbyData.diff ? ' sel' : '');
+          c.innerHTML = `<div class="mb-name">${d.name}</div><div class="mb-sub">${d.sub}</div>`;
+          c.addEventListener('click', () => N.send({ t: 'diff', diff: d.id }));
+          dw.appendChild(c);
+        });
+        setStatus('You are the host. Pick a difficulty and press Start. Everyone defends one shared crystal.');
+      } else {
+        const mw = document.getElementById('lobby-maps'); mw.innerHTML = '';
+        RC.MAPS.forEach(map => {
+          const c = document.createElement('div');
+          c.className = 'modebtn' + (map.id === lobbyData.mapId ? ' sel' : '');
+          c.innerHTML = `<div class="mb-name">${map.name}</div>`;
+          c.addEventListener('click', () => N.send({ t: 'map', mapId: map.id }));
+          mw.appendChild(c);
+        });
+        const mo = document.getElementById('lobby-modes'); mo.innerHTML = '';
+        Object.values(RC.MODES).forEach(mm => {
+          const c = document.createElement('div');
+          c.className = 'modebtn' + (mm.id === lobbyData.modeId ? ' sel' : '');
+          c.innerHTML = `<div class="mb-name">${mm.name}</div>`;
+          c.addEventListener('click', () => N.send({ t: 'mode', modeId: mm.id }));
+          mo.appendChild(c);
+        });
+        setStatus('You are the host. Pick map/mode and press Start. Empty seats are filled by AI.');
+      }
     } else {
       hostBox.classList.add('hidden'); startBtn.classList.add('hidden');
-      setStatus('Waiting for the host to start…');
+      setStatus(isSurvival ? 'Waiting for the host to start the run…' : 'Waiting for the host to start…');
     }
   }
 
@@ -508,13 +581,26 @@ window.RC = window.RC || {};
     goFullscreen();
     audioGo();
     game.heroesEnabled = false;      // online matches run on the server, which has no heroes
-    const map = RC.getMap(m.mapId);
-    const mode = RC.MODES[m.modeId] || RC.MODES['1v1'];
-    game.setup(map, mode);                 // builds world/terrain/obstacles + fog grid
+
+    if (m.survival) {
+      // Co-op Survival — build the survival map locally so terrain/fog/nav exist, then
+      // let snapshots drive every entity (the server owns the wave director and crystal).
+      game.setupSurvival({
+        difficulty: m.diff,
+        players: (m.rosters || []).map(r => ({ owner: r.owner, race: r.race, ai: r.ai })),
+      });
+    } else {
+      const map = RC.getMap(m.mapId);
+      const mode = RC.MODES[m.modeId] || RC.MODES['1v1'];
+      game.setup(map, mode);               // builds world/terrain/obstacles + fog grid
+    }
+
     game.units = []; game.buildings = []; game.nodes = [];
     game._umap = new Map(); game._bmap = new Map(); game._nmap = new Map();
+    game.crystal = null;                   // re-linked from the first snapshot by id
     game.playerOwner = m.owner;
     game.teamMap = {}; (m.rosters || []).forEach(r => { game.teamMap[r.owner] = r.team; });
+    if (m.survival) game.teamMap[2] = 2;   // the wave horde
     myTeam = m.team; firstSnap = true;
     game.over = null; overlayShown = false;
     resize();
@@ -528,6 +614,7 @@ window.RC = window.RC || {};
   // ── 루프 ──────────────────────────────────────────
   let last = performance.now();
   let overlayShown = false;
+  let faceAcc = 0;
 
   function frame(now) {
     let dt = (now - last) / 1000;
@@ -557,6 +644,10 @@ window.RC = window.RC || {};
         if (RC.Audio) RC.Audio.play(game.over === 'win' ? 'win' : 'lose');
       }
       if (!game.over) overlayShown = false;
+    } else {
+      // 메뉴 화면 — 종족 얼굴만 가볍게 애니메이션 (초당 ~20프레임)
+      faceAcc += dt;
+      if (faceAcc >= 0.05) { faceAcc = 0; drawRaceFaces(); }
     }
 
     requestAnimationFrame(frame);
