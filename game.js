@@ -97,6 +97,7 @@ window.RC = window.RC || {};
         this.upgrades[p.owner] = { atk: 0, arm: 0, eng: 0, spd: 0, crit: 0, frost: 0, tough: 0 };
       });
 
+      this.zones = this.zones || [];
       this.crystal = null;
       this.survivalWave = 0;
       this.survivalKills = 0;
@@ -162,12 +163,35 @@ window.RC = window.RC || {};
       return u;
     }
 
+    // ── 전술 지형 ─────────────────────────────────────
+    // Which tactical zones cover this point? Zones are static map data, so the client
+    // and the server always agree without anything crossing the wire.
+    terrainAt(x, y) {
+      const out = { high: false, forest: false, mud: false, vent: false, any: false };
+      const zs = this.zones;
+      if (!zs || !zs.length) return out;
+      for (const z of zs) {
+        let inside;
+        if (z.r) { const dx = x - z.x, dy = y - z.y; inside = dx * dx + dy * dy <= z.r * z.r; }
+        else inside = Math.abs(x - z.x) <= z.w / 2 && Math.abs(y - z.y) <= z.h / 2;
+        if (inside && out[z.t] === false) { out[z.t] = true; out.any = true; }
+      }
+      return out;
+    }
+    // Forest cover — a defender in the trees takes less damage. Flyers get nothing.
+    coverMul(e) {
+      if (!e || e.dead) return 1;
+      if (e.kind === 'unit' && e.def.flying) return 1;
+      const t = this.terrainAt(e.x, e.y);
+      return t.forest ? (CFG.TERRAIN.forest.taken || 1) : 1;
+    }
+
     // 타워/광역 피해 적용 (방어력·반격 처리)
     hurt(foe, dmg, owner, source) {
       if (!foe || foe.dead) return;
       if (source && source.def && source.def.acid) RC.applyAcid(foe, source.def.acid);  // 산성 포탑
       const armor = foe.kind === 'unit' ? foe.effArmor(this) : (foe.def && foe.def.armor ? foe.def.armor : 0);
-      const dealt = Math.max(1, dmg - armor);
+      const dealt = Math.max(1, (dmg - armor) * this.coverMul(foe));   // 숲 엄폐
       if (foe.kind === 'unit') {
         RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
         foe.hitFlash = 0.12;
@@ -283,6 +307,7 @@ window.RC = window.RC || {};
       CFG.WORLD_H = map.world.h;
       this.world = { w: map.world.w, h: map.world.h };
       this.terrain = (map.terrain || []).map(t => ({ ...t }));
+      this.zones = (map.zones || []).map(z => ({ ...z }));
       this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
 
       // 시작 지점을 무작위로 섞어 배정 (적 위치 랜덤)
@@ -346,6 +371,7 @@ window.RC = window.RC || {};
       CFG.WORLD_H = map.world.h;
       this.world = { w: map.world.w, h: map.world.h };
       this.terrain = (map.terrain || []).map(t => ({ ...t }));
+      this.zones = (map.zones || []).map(z => ({ ...z }));
       this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
 
       // 자원 무더기 (일꾼 채집 대상) — 유닛 생성 전에 먼저 만든다
@@ -417,6 +443,15 @@ window.RC = window.RC || {};
 
     // 엔티티 시야 반경
     _sightOf(e) {
+      return this._baseSight(e) * this._sightTerrainMul(e);
+    }
+    // 고지대에 서면 더 멀리 본다 (공중 유닛은 해당 없음)
+    _sightTerrainMul(e) {
+      if (e.kind === 'unit' && e.def.flying) return 1;
+      const t = this.terrainAt(e.x, e.y);
+      return t.high ? (CFG.TERRAIN.high.sight || 1) : 1;
+    }
+    _baseSight(e) {
       if (e.def.sight) return e.def.sight;
       if (e.kind === 'building') {
         if (e.def.isCore) return CFG.SIGHT_CORE;

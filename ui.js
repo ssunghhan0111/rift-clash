@@ -208,6 +208,14 @@ RC.UI = (function () {
         rows.unshift(['Level', `${e.level}${e.level >= RC.HERO.maxLevel ? ' (MAX)' : ''}`]);
         if (e.level < RC.HERO.maxLevel) rows.push(['XP', `${Math.floor(e.xp)} / ${e.xpToNext()}`]);
       }
+      // 서 있는 지형의 이점을 실시간으로 보여준다
+      const tz = g.terrainAt ? g.terrainAt(e.x, e.y) : null;
+      if (tz && tz.any && !e.def.flying) {
+        const names = ['high', 'forest', 'mud', 'vent']
+          .filter(k => tz[k])
+          .map(k => RC.CFG.TERRAIN[k].name);
+        if (names.length) rows.push(['Terrain', names.join(' + ')]);
+      }
       rows.push(['State', e.downed ? 'Reviving' : stateName(e)]);
     } else if (!e.done) {
       rows.push(['Building', `${Math.floor(e.buildProgress * 100)}%`]);

@@ -190,12 +190,15 @@ window.RC = window.RC || {};
         if (this.foe && this.cd <= 0) {
           this.cd = this.def.cd;
           const fx = this.foe.x, fy = this.foe.y;
-          game.hurt(this.foe, this.def.dmg, this.owner, this);
+          // 고지대에 세운 포탑도 화력 보너스를 받는다
+          const tz = game.terrainAt ? game.terrainAt(this.x, this.y) : null;
+          const tdmg = this.def.dmg * ((tz && tz.high) ? (RC.CFG.TERRAIN.high.atk || 1) : 1);
+          game.hurt(this.foe, tdmg, this.owner, this);
           if (this.def.splash) {
             for (const u of game.units) {
               if (u.dead || u === this.foe || !game.areEnemies(u.owner, this.owner)) continue;
               if (!this.def.air && u.def.flying) continue;
-              if (RC.dist(fx, fy, u.x, u.y) <= this.def.splash) game.hurt(u, this.def.dmg * 0.5, this.owner, this);
+              if (RC.dist(fx, fy, u.x, u.y) <= this.def.splash) game.hurt(u, tdmg * 0.5, this.owner, this);
             }
           }
           game.fx.push({ x: this.x, y: this.y - this.h * 0.3, tx: fx, ty: fy, t: 0.1, owner: this.owner, splash: this.def.splash || 0, tower: true });
@@ -449,12 +452,21 @@ window.RC = window.RC || {};
       const u = game && game.upgrades && game.upgrades[this.owner];
       return u ? (u[kind] || 0) : 0;
     }
+    // 서 있는 지형 (공중 유닛은 지형 영향을 받지 않는다)
+    terr(game) {
+      if (this.def.flying) return null;
+      if (this._terr) return this._terr;
+      return (game && game.terrainAt) ? game.terrainAt(this.x, this.y) : null;
+    }
+
     // ── 효과가 반영된 실효 스탯 ──
     effAtk(game) {
       let d = this.def.dmg + this._up(game, 'atk') * RC.CFG.UP_ATK_STEP;
       if (this.hero) d += (this.level - 1) * ((this.def.grow && this.def.grow.dmg) || 0);
       if (this.rail > 0 && this.def.ability) d += this.def.ability.dmgBonus || 0;
       if (this.surge > 0) d *= 1.5;
+      const t = this.terr(game);                                   // 고지대 = 화력 우위
+      if (t && t.high) d *= (RC.CFG.TERRAIN.high.atk || 1);
       return d;
     }
     effArmor(game) {
@@ -467,6 +479,8 @@ window.RC = window.RC || {};
     effRange(game) {
       let r = this.def.range;
       if (this.rail > 0 && this.def.ability) r += this.def.ability.rangeBonus || 0;
+      const t = this.terr(game);                                   // 고지대 = 사거리 우위
+      if (t && t.high) r *= (RC.CFG.TERRAIN.high.range || 1);
       return r;
     }
     effSplash(game) {
@@ -486,6 +500,8 @@ window.RC = window.RC || {};
       if (this.surge > 0 && this.def.ability) s *= (this.def.ability.spd || 1.3);
       if (this.slow > 0) s *= 0.5;
       s *= (1 + this._up(game, 'spd') * RC.CFG.UP_SPD_MOVE);  // 기동 강화 = 이속↑
+      const t = this.terr(game);                               // 늪 = 진창에 발이 묶인다
+      if (t && t.mud) s *= (RC.CFG.TERRAIN.mud.speed || 1);
       return s;
     }
     effMaxEnergy(game) { return this.maxEnergy + this._up(game, 'eng') * RC.CFG.UP_ENG_MAXE; }
@@ -516,6 +532,15 @@ window.RC = window.RC || {};
       const tough = this._up(game, 'tough');
       if (tough > 0 && this.hp < this.maxHp && this.state !== 'attack' && !this.foe && this.hitFlash <= 0) {
         this.hp = Math.min(this.maxHp, this.hp + tough * RC.CFG.UP_TOUGH_REGEN * dt);
+      }
+
+      // 전술 지형 — 이번 틱에 서 있는 지형을 한 번만 조회해 재사용
+      this._terr = (game.terrainAt && !this.def.flying) ? game.terrainAt(this.x, this.y) : null;
+      // 리프트 분출구 — 그 위에 서 있으면 에너지와 체력이 서서히 찬다
+      if (this._terr && this._terr.vent) {
+        const v = RC.CFG.TERRAIN.vent;
+        if (this.maxEnergy) this.energy = Math.min(this.effMaxEnergy(game), this.energy + (v.energy || 0) * dt);
+        if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + (v.heal || 0) * dt);
       }
 
       // Aether — 플라즈마 실드 재충전 (마지막 피격 후 SHIELD_DELAY 초 경과 시)
@@ -646,7 +671,8 @@ window.RC = window.RC || {};
     _hit(foe, dmg, game) {
       const armor = foe.kind === 'unit' ? foe.effArmor(game)
                   : (foe.def && foe.def.armor ? foe.def.armor : 0);
-      const dealt = Math.max(1, dmg - armor);
+      const cover = game.coverMul ? game.coverMul(foe) : 1;   // 숲에 숨은 대상은 덜 아프다
+      const dealt = Math.max(1, (dmg - armor) * cover);
       if (this.def.acid) RC.applyAcid(foe, this.def.acid);   // 글룹 — 산성 중첩
       if (foe.kind === 'unit') {
         RC.dealDamage(foe, dealt);                            // 실드 우선 흡수

@@ -64,6 +64,7 @@ RC.Renderer = (function () {
     ctx.translate(-Math.round(g.camera.x), -Math.round(g.camera.y));
 
     drawTerrain(g, W, H);
+    drawZones(g);                     // 전술 지형 (고지/숲/늪/분출구)
     (g.obstacles || []).forEach(o => drawObstacle(o));
     g.nodes.forEach(n => drawNode(n));
     g.buildings.forEach(b => drawBuilding(g, b));
@@ -78,6 +79,92 @@ RC.Renderer = (function () {
 
     drawDragBox(input);
     drawMinimap(g, W, H);
+  }
+
+  // ── 전술 지형 ────────────────────────────────────────
+  // Each zone type gets an unmistakable look, because a tactical advantage the player
+  // can't see at a glance may as well not exist.
+  const ZONE_STYLE = {
+    high:   { fill: 'rgba(196,168,110,0.16)', edge: '#c9a86a' },
+    forest: { fill: 'rgba(64,150,86,0.20)',   edge: '#3f8f57' },
+    mud:    { fill: 'rgba(120,88,54,0.26)',   edge: '#7b5a38' },
+    vent:   { fill: 'rgba(166,104,255,0.16)', edge: '#a668ff' },
+  };
+  function zonePath(z) {
+    ctx.beginPath();
+    if (z.r) ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2);
+    else ctx.rect(z.x - z.w / 2, z.y - z.h / 2, z.w, z.h);
+  }
+  function drawZones(g) {
+    const zs = g.zones;
+    if (!zs || !zs.length) return;
+    const t = performance.now() / 1000;
+    for (const z of zs) {
+      const st = ZONE_STYLE[z.t]; if (!st) continue;
+      ctx.save();
+      ctx.fillStyle = st.fill; zonePath(z); ctx.fill();
+      ctx.strokeStyle = st.edge; ctx.lineWidth = 3; ctx.globalAlpha = 0.75;
+      zonePath(z); ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      if (z.t === 'high') {
+        // 고지 — 안쪽 단차선 + 위로 솟은 삼각 표식
+        ctx.strokeStyle = st.edge; ctx.globalAlpha = 0.35; ctx.lineWidth = 2;
+        if (z.r) { ctx.beginPath(); ctx.arc(z.x, z.y, z.r - 13, 0, Math.PI * 2); ctx.stroke(); }
+        ctx.globalAlpha = 0.75; ctx.fillStyle = st.edge;
+        for (let i = 0; i < 3; i++) {
+          const a = -Math.PI / 2 + (i - 1) * 0.5;
+          const px = z.x + Math.cos(a) * (z.r ? z.r * 0.5 : 40);
+          const py = z.y + Math.sin(a) * (z.r ? z.r * 0.5 : 40);
+          ctx.beginPath();
+          ctx.moveTo(px, py - 11); ctx.lineTo(px + 9, py + 6); ctx.lineTo(px - 9, py + 6);
+          ctx.closePath(); ctx.fill();
+        }
+      } else if (z.t === 'forest') {
+        // 숲 — 나무 무리
+        const n = z.r ? 9 : 7;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + 0.6;
+          const rr = (z.r || Math.min(z.w, z.h) / 2) * (0.35 + (i % 3) * 0.22);
+          const px = z.x + Math.cos(a) * rr, py = z.y + Math.sin(a) * rr;
+          ctx.fillStyle = '#2c5a38';
+          ctx.fillRect(px - 2.5, py + 2, 5, 11);
+          ctx.fillStyle = i % 2 ? '#3f8f57' : '#4fa869';
+          ctx.beginPath();
+          ctx.moveTo(px, py - 18); ctx.lineTo(px + 13, py + 4); ctx.lineTo(px - 13, py + 4);
+          ctx.closePath(); ctx.fill();
+        }
+      } else if (z.t === 'mud') {
+        // 늪 — 느릿하게 번지는 웅덩이
+        ctx.globalAlpha = 0.5; ctx.strokeStyle = '#9a7448'; ctx.lineWidth = 2;
+        for (let i = 0; i < 4; i++) {
+          const a = t * 0.35 + i * 1.6;
+          const rr = (z.r || Math.min(z.w, z.h) / 2) * (0.3 + (i % 3) * 0.2);
+          ctx.beginPath();
+          ctx.ellipse(z.x + Math.cos(a) * rr * 0.7, z.y + Math.sin(a * 1.2) * rr * 0.6,
+                      20 + (i % 2) * 12, 11 + (i % 2) * 6, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      } else if (z.t === 'vent') {
+        // 분출구 — 맥동하는 고리 + 떠오르는 불티
+        const pulse = 0.45 + 0.35 * Math.abs(Math.sin(t * 1.5));
+        ctx.globalAlpha = pulse; ctx.strokeStyle = '#c79aff'; ctx.lineWidth = 2.5;
+        const rr = (z.r || 90);
+        ctx.beginPath(); ctx.arc(z.x, z.y, rr * (0.45 + 0.12 * Math.sin(t * 1.5)), 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#dcbcff';
+        for (let i = 0; i < 6; i++) {
+          const a = i * 1.05 + t * 0.5;
+          const rise = ((t * 40 + i * 33) % (rr * 0.9));
+          ctx.globalAlpha = pulse * (1 - rise / (rr * 0.9)) * 0.9;
+          ctx.beginPath();
+          ctx.arc(z.x + Math.cos(a) * rr * 0.35, z.y + Math.sin(a) * rr * 0.3 - rise * 0.5, 3.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
   }
 
   function drawTerrain(g, W, H) {

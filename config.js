@@ -45,6 +45,24 @@ RC.CFG = {
   UP_TOUGH_REGEN: 2.5,  // 골격 단계당 비전투 초당 체력회복
   UP_MAX_TIER: 3,       // (기본값; 실제 상한은 각 업그레이드 costs 길이)
 
+  // ── 전술 지형 (Tactical terrain) ──
+  // Map zones that actually change a fight, so WHERE you stand matters as much as what
+  // you build. Ground units only — flyers are above all of it.
+  TERRAIN: {
+    // 고지대 — 위에서 내려다보며 싸우면 유리
+    high:   { atk: 1.25, range: 1.15, sight: 1.35,
+              name: 'High Ground', blurb: '+25% attack · +15% range · sees further' },
+    // 숲 — 몸을 숨겨 피해를 덜 받는다
+    forest: { taken: 0.75,
+              name: 'Forest Cover', blurb: 'takes 25% less damage' },
+    // 늪 — 진창에 빠져 느려진다
+    mud:    { speed: 0.55,
+              name: 'Marsh', blurb: 'moves at 55% speed' },
+    // 리프트 분출구 — 에너지와 체력을 서서히 회복
+    vent:   { energy: 14, heal: 7,
+              name: 'Rift Vent', blurb: 'restores energy and health' },
+  },
+
   // ── 전장의 안개 (Fog of War) ──
   FOG_ENABLED: true,    // 안개 on/off (끄면 전맵이 보인다)
   VIS_CELL: 40,         // 시야 격자 한 칸 크기(px) — 작을수록 안개 경계가 곱다
