@@ -698,6 +698,8 @@ window.RC = window.RC || {};
       RC.Input.updateCamera(dt);
       if (!RC.online) {
         game.update(dt);
+        // Dev/test mode cheats + fast-forward (offline only; no-op if dev.js is absent)
+        if (RC.Dev) RC.Dev.tick(game, dt);
         if (game.practice && practiceHints) {
           for (const h of practiceHints) { if (!h.done && game.time >= h.t) { h.done = true; game.notify(h.msg); } }
         }
