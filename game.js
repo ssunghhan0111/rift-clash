@@ -14,6 +14,16 @@ window.RC = window.RC || {};
     return a;
   }
 
+  // 다각형 내부 판정 (ray casting) — 자연스러운 지형 외곽선을 위해
+  function pointInPoly(x, y, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
   class Game {
     constructor(mapDef, mode) {
       this.mapDef = mapDef || RC.MAPS[0];
@@ -172,7 +182,11 @@ window.RC = window.RC || {};
       if (!zs || !zs.length) return out;
       for (const z of zs) {
         let inside;
-        if (z.r) { const dx = x - z.x, dy = y - z.y; inside = dx * dx + dy * dy <= z.r * z.r; }
+        if (z.poly) {
+          // bounding box first — most points miss, and this is called every tick
+          if (x < z.bb[0] || x > z.bb[2] || y < z.bb[1] || y > z.bb[3]) continue;
+          inside = pointInPoly(x, y, z.poly);
+        } else if (z.r) { const dx = x - z.x, dy = y - z.y; inside = dx * dx + dy * dy <= z.r * z.r; }
         else inside = Math.abs(x - z.x) <= z.w / 2 && Math.abs(y - z.y) <= z.h / 2;
         if (inside && out[z.t] === false) { out[z.t] = true; out.any = true; }
       }
@@ -307,7 +321,7 @@ window.RC = window.RC || {};
       CFG.WORLD_H = map.world.h;
       this.world = { w: map.world.w, h: map.world.h };
       this.terrain = (map.terrain || []).map(t => ({ ...t }));
-      this.zones = (map.zones || []).map(z => ({ ...z }));
+      this.zones = (map.zones || []).map(z => RC.prepZone({ ...z }));
       this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
 
       // 시작 지점을 무작위로 섞어 배정 (적 위치 랜덤)
@@ -371,7 +385,7 @@ window.RC = window.RC || {};
       CFG.WORLD_H = map.world.h;
       this.world = { w: map.world.w, h: map.world.h };
       this.terrain = (map.terrain || []).map(t => ({ ...t }));
-      this.zones = (map.zones || []).map(z => ({ ...z }));
+      this.zones = (map.zones || []).map(z => RC.prepZone({ ...z }));
       this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
 
       // 자원 무더기 (일꾼 채집 대상) — 유닛 생성 전에 먼저 만든다
@@ -449,7 +463,9 @@ window.RC = window.RC || {};
     _sightTerrainMul(e) {
       if (e.kind === 'unit' && e.def.flying) return 1;
       const t = this.terrainAt(e.x, e.y);
-      return t.high ? (CFG.TERRAIN.high.sight || 1) : 1;
+      if (t.high) return CFG.TERRAIN.high.sight || 1;
+      if (t.low) return CFG.TERRAIN.low.sight || 1;
+      return 1;
     }
     _baseSight(e) {
       if (e.def.sight) return e.def.sight;

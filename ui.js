@@ -211,9 +211,10 @@ RC.UI = (function () {
       // 서 있는 지형의 이점을 실시간으로 보여준다
       const tz = g.terrainAt ? g.terrainAt(e.x, e.y) : null;
       if (tz && tz.any && !e.def.flying) {
-        const names = ['high', 'forest', 'mud', 'vent']
+        const bio = RC.CFG.BIOMES[(g.mapDef && g.mapDef.biome) || 'earth'] || {};
+        const names = ['high', 'low', 'forest', 'mud', 'vent']
           .filter(k => tz[k])
-          .map(k => RC.CFG.TERRAIN[k].name);
+          .map(k => bio[k] || RC.CFG.TERRAIN[k].name);
         if (names.length) rows.push(['Terrain', names.join(' + ')]);
       }
       rows.push(['State', e.downed ? 'Reviving' : stateName(e)]);

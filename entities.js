@@ -481,6 +481,7 @@ window.RC = window.RC || {};
       if (this.rail > 0 && this.def.ability) r += this.def.ability.rangeBonus || 0;
       const t = this.terr(game);                                   // 고지대 = 사거리 우위
       if (t && t.high) r *= (RC.CFG.TERRAIN.high.range || 1);
+      else if (t && t.low) r *= (RC.CFG.TERRAIN.low.range || 1);   // 저지대 = 사거리 손해
       return r;
     }
     effSplash(game) {

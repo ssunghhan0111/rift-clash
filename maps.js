@@ -1,123 +1,220 @@
 // RIFT CLASH — 맵 정의 / Maps
-// 각 맵: 4개의 시작 지점, 장애물(충돌), 지형 패치(시각), 자원 무더기 군집, 테마 색.
-// 시작 지점은 game.setup()에서 무작위로 섞여 배정된다 (적 위치 랜덤).
+// 세 개의 행성: 지구형(산·강·숲) / 작열 행성(사막·메사·용암) / 얼음 행성(빙벽·눈·온천).
+// 규칙은 어느 행성에서나 같고 (고지/저지/엄폐/감속/분출구), 겉모습과 이름만 바뀐다.
+// 지형 외곽선은 원이 아니라 흔들린 다각형이라 자연스럽게 보인다.
 window.RC = window.RC || {};
 
+// ── 자연스러운 외곽선 만들기 ───────────────────────────
+// 시드 기반이라 클라이언트와 서버가 항상 같은 모양을 만든다 (통신 불필요).
+function rng(seed) {
+  let s = seed >>> 0 || 1;
+  return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+}
+// 울퉁불퉁한 덩어리 — 언덕, 숲, 바위밭 등
+function blob(cx, cy, r, seed, wob, n) {
+  const rnd = rng(seed);
+  const pts = [];
+  n = n || 13; wob = wob == null ? 0.34 : wob;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const rr = r * (1 - wob * 0.5 + rnd() * wob);
+    pts.push([Math.round(cx + Math.cos(a) * rr), Math.round(cy + Math.sin(a) * rr)]);
+  }
+  return pts;
+}
+// 구불구불한 띠 — 강, 모래 능선, 눈길 등 (중심선을 따라 폭을 흔든다)
+function ribbon(line, halfW, seed, wob) {
+  const rnd = rng(seed);
+  const left = [], right = [];
+  wob = wob == null ? 0.4 : wob;
+  for (let i = 0; i < line.length; i++) {
+    const p = line[i];
+    const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L, ny = dx / L;
+    const w = halfW * (1 - wob * 0.5 + rnd() * wob);
+    left.push([Math.round(p[0] + nx * w), Math.round(p[1] + ny * w)]);
+    right.unshift([Math.round(p[0] - nx * w), Math.round(p[1] - ny * w)]);
+  }
+  return left.concat(right);
+}
+// 흩어진 바위 — 자연스럽게 어질러진 장애물 무리
+function rocks(cx, cy, spread, count, size, seed) {
+  const rnd = rng(seed);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const a = rnd() * Math.PI * 2, d = rnd() * spread;
+    const s = size * (0.6 + rnd() * 0.8);
+    out.push({
+      x: Math.round(cx + Math.cos(a) * d), y: Math.round(cy + Math.sin(a) * d),
+      w: Math.round(s), h: Math.round(s * (0.7 + rnd() * 0.6)),
+    });
+  }
+  return out;
+}
+// 지형 다각형에 바운딩 박스를 붙인다 (game이 매 틱 조회하므로 미리 계산)
+RC.prepZone = function (z) {
+  if (z.poly && !z.bb) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of z.poly) {
+      if (p[0] < x0) x0 = p[0];
+      if (p[1] < y0) y0 = p[1];
+      if (p[0] > x1) x1 = p[0];
+      if (p[1] > y1) y1 = p[1];
+    }
+    z.bb = [x0, y0, x1, y1];
+  }
+  return z;
+};
+
 RC.MAPS = [
+  // ══ 1. 지구형 행성 — 초록 들판, 푸른 강, 산등성이 ══════
   {
-    id: 'basin',
-    name: 'Clash Basin',
-    desc: 'Open ground with a central rock ring; four corners clash. Beginner-friendly.',
+    id: 'verdant',
+    biome: 'earth',
+    name: 'Verdant Reach',
+    desc: 'A green world of hills, woods and a winding river. Cross the water slowly — or hold the high ground.',
     world: { w: 3200, h: 2400 },
-    bg: '#141d26', ground: '#18232f',
+    bg: '#0c1a18', ground: '#1b3a2c',
     spawns: [
       { x: 460, y: 1940 }, { x: 2740, y: 460 },
       { x: 460, y: 460 }, { x: 2740, y: 1940 },
     ],
+    // 배경 얼룩 — 풀밭과 얕은 못
     terrain: [
-      { x: 1600, y: 1200, r: 380, color: '#1c2a39' },
-      { x: 1600, y: 1200, r: 210, color: '#213244' },
+      { poly: blob(900, 700, 420, 101, 0.5), color: '#20452f' },
+      { poly: blob(2350, 1750, 460, 102, 0.5), color: '#20452f' },
+      { poly: blob(2500, 620, 260, 103, 0.55), color: '#1d4a45' },
+      { poly: blob(700, 1800, 240, 104, 0.55), color: '#1d4a45' },
     ],
-    // 전술 지형 — 어디에 서느냐가 전투 결과를 바꾼다
     zones: [
-      { t: 'vent',   x: 1600, y: 1200, r: 150 },   // 중앙 리프트 — 버티면 회복
-      { t: 'high',   x: 1600, y: 700,  r: 250 },   // 중앙을 내려다보는 고지 두 곳
-      { t: 'high',   x: 1600, y: 1700, r: 250 },
-      { t: 'forest', x: 830,  y: 1580, r: 240 },   // 측면 우회로의 숲 (엄폐)
-      { t: 'forest', x: 2370, y: 820,  r: 240 },
-      { t: 'mud',    x: 1050, y: 640,  r: 215 },   // 최단 대각선을 늦추는 늪
-      { t: 'mud',    x: 2150, y: 1760, r: 215 },
+      // 지도를 남북으로 가르는 강 — 건너려면 느려진다
+      { t: 'mud', poly: ribbon([[1600, -60], [1500, 500], [1670, 1000], [1560, 1500], [1680, 2000], [1580, 2460]], 130, 11) },
+      // 강 양쪽의 산등성이 (고지)
+      { t: 'high', poly: blob(1000, 1000, 250, 21, 0.36) },
+      { t: 'high', poly: blob(2200, 1420, 250, 22, 0.36) },
+      // 움푹 팬 골짜기 (저지)
+      { t: 'low', poly: blob(2180, 760, 200, 23, 0.4) },
+      { t: 'low', poly: blob(1020, 1660, 200, 24, 0.4) },
+      // 측면의 숲
+      { t: 'forest', poly: blob(640, 1450, 250, 25, 0.42) },
+      { t: 'forest', poly: blob(2560, 1000, 250, 26, 0.42) },
+      // 강 한가운데의 리프트 샘
+      { t: 'vent', poly: blob(1600, 1200, 165, 27, 0.3) },
     ],
-    // 중앙 바위 고리 (사이 간격을 둬서 유닛이 통과 가능)
-    obstacles: [
-      { x: 1600, y: 980, w: 150, h: 90 },
-      { x: 1600, y: 1420, w: 150, h: 90 },
-      { x: 1360, y: 1200, w: 90, h: 150 },
-      { x: 1840, y: 1200, w: 90, h: 150 },
-    ],
-    // 자원 군집 (game이 각 지점에 부채꼴 무더기를 만든다)
+    // 산비탈의 바위 — 자연스럽게 흩어진 장애물
+    obstacles: [].concat(
+      rocks(1010, 1010, 150, 4, 105, 31),
+      rocks(2210, 1430, 150, 4, 105, 32),
+      rocks(1600, 560, 120, 3, 90, 33),
+      rocks(1600, 1860, 120, 3, 90, 34)
+    ),
     midNodes: [
-      { x: 1600, y: 1200, n: 4, rad: 120 },
-      { x: 900, y: 900, n: 3, rad: 90 },
-      { x: 2300, y: 1500, n: 3, rad: 90 },
+      { x: 1600, y: 1200, n: 4, rad: 130 },
+      { x: 880, y: 1000, n: 3, rad: 95 },
+      { x: 2320, y: 1420, n: 3, rad: 95 },
     ],
   },
+
+  // ══ 2. 작열 행성 — 붉은 사막, 메사, 용암 분출구 ════════
   {
-    id: 'canyon',
-    name: 'Fourway Canyon',
-    desc: 'Rock walls split the map into quadrants. Battles rage over the chokes.',
-    world: { w: 3600, h: 2600 },
-    bg: '#1a1720', ground: '#241d2b',
-    spawns: [
-      { x: 500, y: 500 }, { x: 3100, y: 2100 },
-      { x: 3100, y: 500 }, { x: 500, y: 2100 },
-    ],
-    terrain: [
-      { x: 1800, y: 1300, r: 300, color: '#2a2033' },
-    ],
-    // 전술 지형 — 통로(choke)를 지키는 고지가 핵심
-    zones: [
-      { t: 'vent',   x: 1800, y: 1300, r: 160 },
-      { t: 'high',   x: 1800, y: 430,  r: 240 },   // 남북 통로를 내려다보는 고지
-      { t: 'high',   x: 1800, y: 2170, r: 240 },
-      { t: 'high',   x: 560,  y: 1300, r: 230 },   // 동서 통로 쪽 고지
-      { t: 'high',   x: 3040, y: 1300, r: 230 },
-      { t: 'forest', x: 1150, y: 640,  r: 250 },   // 사분면 안쪽 숲
-      { t: 'forest', x: 2450, y: 1960, r: 250 },
-      { t: 'forest', x: 1150, y: 1960, r: 210 },
-      { t: 'forest', x: 2450, y: 640,  r: 210 },
-      { t: 'mud',    x: 1800, y: 1300, w: 900, h: 170 },   // 중앙을 가로지르는 진창
-    ],
-    // 십자 벽 — 중앙과 각 변 중앙에 통로(간격)를 남김
-    obstacles: [
-      { x: 1800, y: 720, w: 130, h: 420 },
-      { x: 1800, y: 1880, w: 130, h: 420 },
-      { x: 980, y: 1300, w: 460, h: 130 },
-      { x: 2620, y: 1300, w: 460, h: 130 },
-    ],
-    midNodes: [
-      { x: 1800, y: 1300, n: 4, rad: 130 },
-      { x: 1120, y: 620, n: 3, rad: 90 },
-      { x: 2480, y: 1980, n: 3, rad: 90 },
-    ],
-  },
-  {
-    id: 'archipelago',
-    name: 'Rift Archipelago',
-    desc: 'Wide lanes open between scattered rock clusters. Great for mobile play.',
+    id: 'cinder',
+    biome: 'ember',
+    name: 'Cinder Waste',
+    desc: 'A blazing desert world. No water anywhere — climb the mesas and stay out of the deep sand.',
     world: { w: 3400, h: 2400 },
-    bg: '#101c1e', ground: '#152829',
+    bg: '#3a1a10', ground: '#7a4028',
     spawns: [
-      { x: 480, y: 1200 }, { x: 2920, y: 1200 },
-      { x: 1700, y: 440 }, { x: 1700, y: 1960 },
+      { x: 520, y: 520 }, { x: 2880, y: 1880 },
+      { x: 2880, y: 520 }, { x: 520, y: 1880 },
     ],
     terrain: [
-      { x: 1700, y: 1200, r: 340, color: '#173234' },
-      { x: 850, y: 700, r: 150, color: '#173234' },
-      { x: 2550, y: 1700, r: 150, color: '#173234' },
+      { poly: blob(1700, 1200, 520, 201, 0.45), color: '#8c4b2c' },
+      { poly: blob(900, 1700, 330, 202, 0.5), color: '#8a4d2e' },
+      { poly: blob(2500, 700, 330, 203, 0.5), color: '#8a4d2e' },
+      { poly: blob(1700, 400, 280, 204, 0.5), color: '#6d3620' },
+      { poly: blob(1700, 2000, 280, 205, 0.5), color: '#6d3620' },
     ],
-    // 전술 지형 — 넓은 레인 사이사이에 이점 지대를 흩어 놓았다
     zones: [
-      { t: 'vent',   x: 1700, y: 1200, r: 155 },
-      { t: 'high',   x: 1700, y: 880,  r: 210 },    // 중앙 레인을 굽어보는 고지
-      { t: 'high',   x: 1700, y: 1520, r: 210 },   // (시작 기지와 충분히 떨어뜨림)
-      { t: 'forest', x: 880,  y: 700,  r: 235 },
-      { t: 'forest', x: 2520, y: 1700, r: 235 },
-      { t: 'mud',    x: 1080, y: 1650, r: 200 },
-      { t: 'mud',    x: 2320, y: 750,  r: 200 },
+      // 사막을 가로지르는 깊은 모래 — 발이 푹푹 빠진다
+      { t: 'mud', poly: ribbon([[-60, 1500], [700, 1380], [1500, 1560], [2300, 1380], [3060, 1520], [3460, 1440]], 150, 41) },
+      { t: 'mud', poly: ribbon([[-60, 820], [800, 900], [1600, 720], [2400, 900], [3460, 800]], 120, 42) },
+      // 평평한 꼭대기의 메사 (고지)
+      { t: 'high', poly: blob(1700, 760, 245, 43, 0.3) },
+      { t: 'high', poly: blob(1700, 1640, 245, 44, 0.3) },
+      { t: 'high', poly: blob(700, 1200, 215, 45, 0.32) },
+      { t: 'high', poly: blob(2700, 1200, 215, 46, 0.32) },
+      // 꺼진 웅덩이 (저지)
+      { t: 'low', poly: blob(1150, 480, 200, 47, 0.42) },
+      { t: 'low', poly: blob(2250, 1920, 200, 48, 0.42) },
+      // 바위밭 — 사막의 엄폐물
+      { t: 'forest', poly: blob(1120, 1180, 235, 49, 0.46) },
+      { t: 'forest', poly: blob(2280, 1220, 235, 50, 0.46) },
+      // 한가운데의 마그마 분출구
+      { t: 'vent', poly: blob(1700, 1200, 170, 51, 0.28) },
     ],
-    // 흩어진 바위섬들
-    obstacles: [
-      { x: 1700, y: 1200, w: 130, h: 130 },
-      { x: 1200, y: 780, w: 100, h: 100 },
-      { x: 2200, y: 1620, w: 100, h: 100 },
-      { x: 1150, y: 1650, w: 100, h: 100 },
-      { x: 2250, y: 750, w: 100, h: 100 },
-    ],
+    obstacles: [].concat(
+      rocks(1120, 1180, 170, 5, 100, 61),
+      rocks(2280, 1220, 170, 5, 100, 62),
+      rocks(1700, 760, 130, 3, 115, 63),
+      rocks(1700, 1640, 130, 3, 115, 64),
+      rocks(700, 1200, 110, 3, 95, 65),
+      rocks(2700, 1200, 110, 3, 95, 66)
+    ),
     midNodes: [
-      { x: 1700, y: 1200, n: 4, rad: 120 },
-      { x: 1050, y: 1200, n: 3, rad: 90 },
-      { x: 2350, y: 1200, n: 3, rad: 90 },
+      { x: 1700, y: 1200, n: 4, rad: 140 },
+      { x: 1150, y: 1650, n: 3, rad: 95 },
+      { x: 2250, y: 750, n: 3, rad: 95 },
+    ],
+  },
+
+  // ══ 3. 얼음 행성 — 검푸른 하늘, 빙벽, 온천 ═════════════
+  {
+    id: 'glacier',
+    biome: 'ice',
+    name: 'Glacier Rift',
+    desc: 'A frozen dark world. Deep snow drags you down; the ice ridges and hot springs are worth the fight.',
+    world: { w: 3400, h: 2400 },
+    bg: '#050a12', ground: '#101d2e',
+    spawns: [
+      { x: 520, y: 1200 }, { x: 2880, y: 1200 },
+      { x: 1700, y: 480 }, { x: 1700, y: 1920 },
+    ],
+    terrain: [
+      { poly: blob(1700, 1200, 500, 301, 0.45), color: '#16293e' },
+      { poly: blob(760, 620, 320, 302, 0.5), color: '#1b3348' },
+      { poly: blob(2640, 1780, 320, 303, 0.5), color: '#1b3348' },
+      { poly: blob(760, 1780, 300, 304, 0.5), color: '#14263a' },
+      { poly: blob(2640, 620, 300, 305, 0.5), color: '#14263a' },
+    ],
+    zones: [
+      // 깊은 눈 — 허벅지까지 빠진다
+      { t: 'mud', poly: ribbon([[-60, 1200], [600, 1080], [1150, 1260], [1700, 1080], [2250, 1260], [2800, 1100], [3460, 1220]], 140, 71) },
+      // 솟아오른 빙벽 (고지)
+      { t: 'high', poly: blob(1180, 700, 240, 72, 0.34) },
+      { t: 'high', poly: blob(2220, 1700, 240, 73, 0.34) },
+      { t: 'high', poly: blob(2220, 700, 215, 74, 0.34) },
+      { t: 'high', poly: blob(1180, 1700, 215, 75, 0.34) },
+      // 크레바스 (저지)
+      { t: 'low', poly: ribbon([[820, 1560], [1200, 1720], [1560, 1600]], 110, 76) },
+      { t: 'low', poly: ribbon([[2580, 840], [2200, 680], [1840, 800]], 110, 77) },
+      // 얼음 첨탑 숲 — 몸을 숨길 수 있다
+      { t: 'forest', poly: blob(700, 1200, 235, 78, 0.44) },
+      { t: 'forest', poly: blob(2700, 1200, 235, 79, 0.44) },
+      // 얼음 한가운데의 온천
+      { t: 'vent', poly: blob(1700, 1200, 168, 80, 0.3) },
+    ],
+    obstacles: [].concat(
+      rocks(1180, 700, 150, 4, 100, 91),
+      rocks(2220, 1700, 150, 4, 100, 92),
+      rocks(2220, 700, 130, 3, 95, 93),
+      rocks(1180, 1700, 130, 3, 95, 94),
+      rocks(1700, 1200, 210, 4, 85, 95)
+    ),
+    midNodes: [
+      { x: 1700, y: 1200, n: 4, rad: 140 },
+      { x: 1000, y: 1200, n: 3, rad: 95 },
+      { x: 2400, y: 1200, n: 3, rad: 95 },
     ],
   },
 ];
@@ -147,12 +244,12 @@ RC.MODES = {
   },
 };
 
-// ── Survival map — a horizontal lane. Enemy waves march left→right toward the
-//    Rift Crystal; the defender base(s) sit behind it. Endless, escalating waves.
+// ── Survival map — 얼음 협곡. 웨이브가 왼쪽에서 크리스탈로 진군한다.
 RC.SURVIVAL = {
   id: 'sv_gorge', name: 'Crystal Gorge',
+  biome: 'ice',
   world: { w: 3400, h: 1600 },
-  bg: '#101820', ground: '#16232b',
+  bg: '#060c14', ground: '#132133',
   enemySpawn: { x: 250, y: 800 },     // waves appear here and head for the crystal
   crystal: { x: 2430, y: 800 },       // the objective to protect
   bases: [                            // defender start positions (up to 4 — online co-op)
@@ -161,7 +258,6 @@ RC.SURVIVAL = {
     { x: 3160, y: 800 },
     { x: 2760, y: 800 },
   ],
-  // shard clusters near the defender side so you can gather and build
   nodeClusters: [
     { x: 3120, y: 400, n: 4, rad: 90 },
     { x: 3120, y: 1200, n: 4, rad: 90 },
@@ -169,25 +265,24 @@ RC.SURVIVAL = {
     { x: 2560, y: 1280, n: 3, rad: 80 },
   ],
   terrain: [
-    { x: 2430, y: 800, r: 300, color: '#123038' },
-    { x: 1500, y: 800, r: 220, color: '#1a2630' },
+    { poly: blob(2430, 800, 340, 401, 0.42), color: '#17304a' },
+    { poly: blob(1500, 800, 260, 402, 0.5), color: '#152a40' },
   ],
-  // 전술 지형 — 크리스탈 앞 고지에 포탑을 세우는 게 핵심 전략이 된다
+  // 크리스탈 앞 빙벽에 포탑을 세우는 게 핵심 전략
   zones: [
-    { t: 'high',   x: 2180, y: 560,  r: 230 },     // 크리스탈 앞을 굽어보는 방어 고지
-    { t: 'high',   x: 2180, y: 1040, r: 230 },
-    { t: 'mud',    x: 1180, y: 800,  w: 300, h: 620 },  // 호드의 진격을 늦추는 진창
-    { t: 'forest', x: 1720, y: 380,  r: 210 },     // 측면 교전용 숲
-    { t: 'forest', x: 1720, y: 1220, r: 210 },
-    { t: 'vent',   x: 2900, y: 800,  r: 150 },     // 본진 옆 회복 지대
+    { t: 'high', poly: blob(2180, 520, 225, 411, 0.34) },
+    { t: 'high', poly: blob(2180, 1080, 225, 412, 0.34) },
+    { t: 'mud', poly: ribbon([[1180, 180], [1120, 800], [1200, 1420]], 165, 413) },
+    { t: 'forest', poly: blob(1700, 360, 205, 414, 0.44) },
+    { t: 'forest', poly: blob(1700, 1240, 205, 415, 0.44) },
+    { t: 'low', poly: blob(1500, 800, 190, 416, 0.4) },
+    { t: 'vent', poly: blob(2900, 800, 155, 417, 0.3) },
   ],
-  // Rock walls only near the top/bottom edges — they frame a wide, always-clear
-  // central lane (y ~400–1200) so the horde has an unobstructed straight path to the
-  // crystal. (Units walk in straight lines, so nothing may block the lane itself.)
-  obstacles: [
-    { x: 1480, y: 200, w: 150, h: 380 },
-    { x: 1480, y: 1400, w: 150, h: 380 },
-    { x: 900, y: 210, w: 130, h: 340 },
-    { x: 900, y: 1390, w: 130, h: 340 },
-  ],
+  // 위/아래 가장자리의 얼음 바위 — 가운데 통로(y ~400–1200)는 항상 열려 있다
+  obstacles: [].concat(
+    rocks(1480, 190, 130, 4, 105, 421),
+    rocks(1480, 1410, 130, 4, 105, 422),
+    rocks(900, 200, 110, 3, 95, 423),
+    rocks(900, 1400, 110, 3, 95, 424)
+  ),
 };

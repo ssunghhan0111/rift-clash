@@ -57,7 +57,8 @@ RC.Renderer = (function () {
 
   function draw(g, input) {
     const W = cv.width, H = cv.height;
-    ctx.fillStyle = C.bg;
+    // 행성마다 하늘/땅 색이 다르다 (지구=초록, 작열=붉음, 얼음=검푸름)
+    ctx.fillStyle = (g.mapDef && g.mapDef.ground) || C.bg;
     ctx.fillRect(0, 0, W, H);
 
     ctx.save();
@@ -82,87 +83,195 @@ RC.Renderer = (function () {
   }
 
   // ── 전술 지형 ────────────────────────────────────────
-  // Each zone type gets an unmistakable look, because a tactical advantage the player
-  // can't see at a glance may as well not exist.
-  const ZONE_STYLE = {
-    high:   { fill: 'rgba(196,168,110,0.16)', edge: '#c9a86a' },
-    forest: { fill: 'rgba(64,150,86,0.20)',   edge: '#3f8f57' },
-    mud:    { fill: 'rgba(120,88,54,0.26)',   edge: '#7b5a38' },
-    vent:   { fill: 'rgba(166,104,255,0.16)', edge: '#a668ff' },
+  // 같은 규칙, 다른 행성. 색과 장식만 바이옴별로 갈린다.
+  const BIOME = {
+    earth: {
+      high:   { fill: 'rgba(122,158,96,0.20)',  edge: '#8fbf6a', deco: 'peaks',  cap: '#dfe9d2' },
+      low:    { fill: 'rgba(22,44,36,0.34)',    edge: '#3d6b52', deco: 'basin' },
+      forest: { fill: 'rgba(46,120,68,0.24)',   edge: '#3f9b58', deco: 'trees' },
+      mud:    { fill: 'rgba(58,132,180,0.30)',  edge: '#5aa9dd', deco: 'water' },
+      vent:   { fill: 'rgba(120,220,200,0.18)', edge: '#7ce0c6', deco: 'spring' },
+    },
+    ember: {
+      high:   { fill: 'rgba(214,142,74,0.24)',  edge: '#e8a760', deco: 'mesa',   cap: '#f2c48b' },
+      low:    { fill: 'rgba(80,32,18,0.36)',    edge: '#8c4a2c', deco: 'basin' },
+      forest: { fill: 'rgba(128,80,52,0.30)',   edge: '#a9704a', deco: 'rocks' },
+      mud:    { fill: 'rgba(226,178,104,0.26)', edge: '#e8c67d', deco: 'dunes' },
+      vent:   { fill: 'rgba(255,120,40,0.24)',  edge: '#ff8b3c', deco: 'lava' },
+    },
+    ice: {
+      high:   { fill: 'rgba(150,205,238,0.20)', edge: '#9fd8f5', deco: 'ridge',  cap: '#e8f6ff' },
+      low:    { fill: 'rgba(10,26,46,0.42)',    edge: '#2f5f86', deco: 'basin' },
+      forest: { fill: 'rgba(120,180,220,0.18)', edge: '#8fc6e8', deco: 'spires' },
+      mud:    { fill: 'rgba(214,232,248,0.22)', edge: '#cfe6f7', deco: 'snow' },
+      vent:   { fill: 'rgba(120,230,220,0.20)', edge: '#79e6dc', deco: 'steam' },
+    },
   };
+  function styleOf(g, t) {
+    const b = BIOME[(g.mapDef && g.mapDef.biome) || g.biome || 'earth'] || BIOME.earth;
+    return b[t];
+  }
+
   function zonePath(z) {
     ctx.beginPath();
-    if (z.r) ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2);
+    if (z.poly) {
+      // smooth the polygon with midpoint curves so edges read as natural, not faceted
+      const p = z.poly, n = p.length;
+      let mx = (p[n - 1][0] + p[0][0]) / 2, my = (p[n - 1][1] + p[0][1]) / 2;
+      ctx.moveTo(mx, my);
+      for (let i = 0; i < n; i++) {
+        const cur = p[i], nx = p[(i + 1) % n];
+        ctx.quadraticCurveTo(cur[0], cur[1], (cur[0] + nx[0]) / 2, (cur[1] + nx[1]) / 2);
+      }
+      ctx.closePath();
+    } else if (z.r) ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2);
     else ctx.rect(z.x - z.w / 2, z.y - z.h / 2, z.w, z.h);
   }
+  // deterministic scatter of points inside a zone, for placing trees/rocks/peaks
+  function scatter(z, count, seed) {
+    const bb = z.bb || (z.r ? [z.x - z.r, z.y - z.r, z.x + z.r, z.y + z.r]
+                            : [z.x - z.w / 2, z.y - z.h / 2, z.x + z.w / 2, z.y + z.h / 2]);
+    let s = seed >>> 0 || 7;
+    const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    const out = [];
+    for (let i = 0; i < count * 5 && out.length < count; i++) {
+      const x = bb[0] + rnd() * (bb[2] - bb[0]);
+      const y = bb[1] + rnd() * (bb[3] - bb[1]);
+      const cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
+      const rx = (bb[2] - bb[0]) / 2, ry = (bb[3] - bb[1]) / 2;
+      const dx = (x - cx) / (rx || 1), dy = (y - cy) / (ry || 1);
+      if (dx * dx + dy * dy <= 0.72) out.push([x, y, rnd()]);
+    }
+    return out;
+  }
+
   function drawZones(g) {
     const zs = g.zones;
     if (!zs || !zs.length) return;
     const t = performance.now() / 1000;
     for (const z of zs) {
-      const st = ZONE_STYLE[z.t]; if (!st) continue;
+      const st = styleOf(g, z.t); if (!st) continue;
+      const seed = ((z.bb ? z.bb[0] + z.bb[1] * 7 : z.x + z.y * 7) | 0) + 13;
       ctx.save();
       ctx.fillStyle = st.fill; zonePath(z); ctx.fill();
-      ctx.strokeStyle = st.edge; ctx.lineWidth = 3; ctx.globalAlpha = 0.75;
-      zonePath(z); ctx.stroke();
+
+      // 고지/저지는 단차선을 그려 "오르막·내리막"이 보이게 한다
+      if (z.t === 'high' || z.t === 'low') {
+        ctx.save(); zonePath(z); ctx.clip();
+        ctx.strokeStyle = st.edge; ctx.globalAlpha = 0.30; ctx.lineWidth = 2;
+        const bb = z.bb || [z.x - 200, z.y - 200, z.x + 200, z.y + 200];
+        for (let k = 1; k <= 3; k++) {          // 등고선
+          ctx.save();
+          ctx.translate((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2);
+          ctx.scale(1 - k * 0.17, 1 - k * 0.17);
+          ctx.translate(-(bb[0] + bb[2]) / 2, -(bb[1] + bb[3]) / 2);
+          zonePath(z); ctx.stroke();
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+
+      ctx.strokeStyle = st.edge; ctx.lineWidth = z.t === 'high' ? 4 : 3;
+      ctx.globalAlpha = 0.8; zonePath(z); ctx.stroke();
       ctx.globalAlpha = 1;
 
-      if (z.t === 'high') {
-        // 고지 — 안쪽 단차선 + 위로 솟은 삼각 표식
-        ctx.strokeStyle = st.edge; ctx.globalAlpha = 0.35; ctx.lineWidth = 2;
-        if (z.r) { ctx.beginPath(); ctx.arc(z.x, z.y, z.r - 13, 0, Math.PI * 2); ctx.stroke(); }
-        ctx.globalAlpha = 0.75; ctx.fillStyle = st.edge;
-        for (let i = 0; i < 3; i++) {
-          const a = -Math.PI / 2 + (i - 1) * 0.5;
-          const px = z.x + Math.cos(a) * (z.r ? z.r * 0.5 : 40);
-          const py = z.y + Math.sin(a) * (z.r ? z.r * 0.5 : 40);
+      ctx.save(); zonePath(z); ctx.clip();      // 장식은 지형 안쪽에만
+      const pts = scatter(z, st.deco === 'trees' || st.deco === 'rocks' || st.deco === 'spires' ? 12 : 7, seed);
+
+      if (st.deco === 'peaks' || st.deco === 'ridge' || st.deco === 'mesa') {
+        // 산봉우리 / 빙벽 / 메사 — 위로 솟은 실루엣 + 밝은 꼭대기
+        pts.slice(0, 6).forEach(([px, py, r], i) => {
+          const h = 26 + r * 26, w = 20 + r * 20;
+          ctx.fillStyle = st.edge; ctx.globalAlpha = 0.55;
           ctx.beginPath();
-          ctx.moveTo(px, py - 11); ctx.lineTo(px + 9, py + 6); ctx.lineTo(px - 9, py + 6);
+          if (st.deco === 'mesa') {             // 평평한 꼭대기
+            ctx.moveTo(px - w, py + h * 0.5); ctx.lineTo(px - w * 0.55, py - h * 0.5);
+            ctx.lineTo(px + w * 0.55, py - h * 0.5); ctx.lineTo(px + w, py + h * 0.5);
+          } else {                              // 뾰족한 봉우리
+            ctx.moveTo(px - w, py + h * 0.5); ctx.lineTo(px, py - h * 0.6); ctx.lineTo(px + w, py + h * 0.5);
+          }
           ctx.closePath(); ctx.fill();
-        }
-      } else if (z.t === 'forest') {
-        // 숲 — 나무 무리
-        const n = z.r ? 9 : 7;
-        for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2 + 0.6;
-          const rr = (z.r || Math.min(z.w, z.h) / 2) * (0.35 + (i % 3) * 0.22);
-          const px = z.x + Math.cos(a) * rr, py = z.y + Math.sin(a) * rr;
-          ctx.fillStyle = '#2c5a38';
-          ctx.fillRect(px - 2.5, py + 2, 5, 11);
-          ctx.fillStyle = i % 2 ? '#3f8f57' : '#4fa869';
+          ctx.globalAlpha = 0.85; ctx.fillStyle = st.cap || '#fff';
           ctx.beginPath();
-          ctx.moveTo(px, py - 18); ctx.lineTo(px + 13, py + 4); ctx.lineTo(px - 13, py + 4);
+          ctx.moveTo(px - w * 0.34, py - h * 0.16);
+          ctx.lineTo(px, py - h * (st.deco === 'mesa' ? 0.5 : 0.6));
+          ctx.lineTo(px + w * 0.34, py - h * 0.16);
           ctx.closePath(); ctx.fill();
-        }
-      } else if (z.t === 'mud') {
-        // 늪 — 느릿하게 번지는 웅덩이
-        ctx.globalAlpha = 0.5; ctx.strokeStyle = '#9a7448'; ctx.lineWidth = 2;
-        for (let i = 0; i < 4; i++) {
-          const a = t * 0.35 + i * 1.6;
-          const rr = (z.r || Math.min(z.w, z.h) / 2) * (0.3 + (i % 3) * 0.2);
+          ctx.globalAlpha = 1;
+        });
+      } else if (st.deco === 'trees') {
+        pts.forEach(([px, py, r]) => {
+          ctx.fillStyle = '#2c5a38'; ctx.fillRect(px - 2.5, py + 3, 5, 12);
+          ctx.fillStyle = r > 0.5 ? '#3f9b58' : '#4fb069';
           ctx.beginPath();
-          ctx.ellipse(z.x + Math.cos(a) * rr * 0.7, z.y + Math.sin(a * 1.2) * rr * 0.6,
-                      20 + (i % 2) * 12, 11 + (i % 2) * 6, 0, 0, Math.PI * 2);
+          ctx.moveTo(px, py - 20 - r * 6); ctx.lineTo(px + 14, py + 5); ctx.lineTo(px - 14, py + 5);
+          ctx.closePath(); ctx.fill();
+        });
+      } else if (st.deco === 'spires') {
+        pts.forEach(([px, py, r]) => {
+          ctx.fillStyle = 'rgba(190,228,250,0.75)';
+          ctx.beginPath();
+          ctx.moveTo(px, py - 24 - r * 12); ctx.lineTo(px + 8, py + 8); ctx.lineTo(px - 8, py + 8);
+          ctx.closePath(); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.55)';
+          ctx.beginPath();
+          ctx.moveTo(px, py - 24 - r * 12); ctx.lineTo(px + 3, py + 8); ctx.lineTo(px - 1, py + 8);
+          ctx.closePath(); ctx.fill();
+        });
+      } else if (st.deco === 'rocks') {
+        pts.forEach(([px, py, r]) => {
+          const w = 13 + r * 14;
+          ctx.fillStyle = '#7b4a30';
+          ctx.beginPath(); ctx.ellipse(px, py + 3, w, w * 0.66, r * 2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#a9704a';
+          ctx.beginPath(); ctx.ellipse(px - w * 0.2, py - w * 0.18, w * 0.6, w * 0.4, r * 2, 0, Math.PI * 2); ctx.fill();
+        });
+      } else if (st.deco === 'water') {
+        // 강 — 흐르는 물결
+        ctx.strokeStyle = 'rgba(190,230,255,0.55)'; ctx.lineWidth = 2.4;
+        pts.forEach(([px, py, r], i) => {
+          const off = ((t * 34 + i * 40) % 90) - 45;
+          ctx.beginPath();
+          ctx.moveTo(px - 26, py + off * 0.24);
+          ctx.quadraticCurveTo(px, py + off * 0.24 - 9, px + 26, py + off * 0.24);
           ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      } else if (z.t === 'vent') {
-        // 분출구 — 맥동하는 고리 + 떠오르는 불티
-        const pulse = 0.45 + 0.35 * Math.abs(Math.sin(t * 1.5));
-        ctx.globalAlpha = pulse; ctx.strokeStyle = '#c79aff'; ctx.lineWidth = 2.5;
-        const rr = (z.r || 90);
-        ctx.beginPath(); ctx.arc(z.x, z.y, rr * (0.45 + 0.12 * Math.sin(t * 1.5)), 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = '#dcbcff';
-        for (let i = 0; i < 6; i++) {
-          const a = i * 1.05 + t * 0.5;
-          const rise = ((t * 40 + i * 33) % (rr * 0.9));
-          ctx.globalAlpha = pulse * (1 - rise / (rr * 0.9)) * 0.9;
+        });
+      } else if (st.deco === 'dunes') {
+        ctx.strokeStyle = 'rgba(255,226,170,0.5)'; ctx.lineWidth = 2.6;
+        pts.forEach(([px, py, r]) => {
           ctx.beginPath();
-          ctx.arc(z.x + Math.cos(a) * rr * 0.35, z.y + Math.sin(a) * rr * 0.3 - rise * 0.5, 3.4, 0, Math.PI * 2);
+          ctx.moveTo(px - 30, py + 8);
+          ctx.quadraticCurveTo(px, py - 12 - r * 8, px + 30, py + 8);
+          ctx.stroke();
+        });
+      } else if (st.deco === 'snow') {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        pts.forEach(([px, py, r]) => {
+          ctx.beginPath(); ctx.ellipse(px, py, 20 + r * 16, 8 + r * 6, 0, 0, Math.PI * 2); ctx.fill();
+        });
+      } else if (st.deco === 'basin') {
+        // 저지대 — 안쪽으로 파인 그림자
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        zonePath(z); ctx.fill();
+      } else if (st.deco === 'lava' || st.deco === 'spring' || st.deco === 'steam') {
+        const pulse = 0.45 + 0.35 * Math.abs(Math.sin(t * 1.5));
+        const bb = z.bb || [z.x - 100, z.y - 100, z.x + 100, z.y + 100];
+        const cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
+        const rr = Math.max(bb[2] - bb[0], bb[3] - bb[1]) / 2;
+        ctx.globalAlpha = pulse; ctx.strokeStyle = st.edge; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(cx, cy, rr * (0.42 + 0.12 * Math.sin(t * 1.5)), 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = st.edge;
+        for (let i = 0; i < 7; i++) {
+          const a = i * 0.9 + t * 0.5;
+          const rise = ((t * 46 + i * 29) % (rr * 0.95));
+          ctx.globalAlpha = pulse * (1 - rise / (rr * 0.95)) * 0.9;
+          ctx.beginPath();
+          ctx.arc(cx + Math.cos(a) * rr * 0.34, cy + Math.sin(a) * rr * 0.3 - rise * 0.55, 3.6, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.globalAlpha = 1;
       }
+      ctx.restore();
       ctx.restore();
     }
   }
@@ -171,14 +280,17 @@ RC.Renderer = (function () {
     // 맵 지형 패치 (원형 색 얼룩) — 그리드 아래
     (g.terrain || []).forEach(p => {
       ctx.fillStyle = p.color;
-      if (p.r) { ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
+      if (p.poly) { zonePath(p); ctx.fill(); }
+      else if (p.r) { ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
       else if (p.w) { ctx.fillRect(p.x - p.w / 2, p.y - p.h / 2, p.w, p.h); }
     });
 
     const t = CFG.TILE;
     const x0 = Math.floor(g.camera.x / t) * t;
     const y0 = Math.floor(g.camera.y / t) * t;
-    ctx.strokeStyle = C.grid;
+    // 격자선은 행성 땅색에서 파생 — 고정 파란 격자는 붉은 사막에서 튄다
+    ctx.strokeStyle = (g.mapDef && g.mapDef.ground) ? shade(g.mapDef.ground, -0.28) : C.grid;
+    ctx.globalAlpha = 0.55;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = x0; x < g.camera.x + W + t; x += t) {

@@ -58,9 +58,22 @@ RC.CFG = {
     // 늪 — 진창에 빠져 느려진다
     mud:    { speed: 0.55,
               name: 'Marsh', blurb: 'moves at 55% speed' },
+    // 저지대 — 움푹 팬 곳. 시야가 막히고 사거리가 짧아진다 (고지대의 반대)
+    low:    { range: 0.9, sight: 0.72,
+              name: 'Hollow', blurb: '-10% range · poor visibility' },
     // 리프트 분출구 — 에너지와 체력을 서서히 회복
     vent:   { energy: 14, heal: 7,
               name: 'Rift Vent', blurb: 'restores energy and health' },
+  },
+
+  // 행성별 지형 이름 — 규칙은 어느 맵에서나 같고, 겉모습과 이름만 달라진다.
+  BIOMES: {
+    earth: { high: 'Hilltop',   low: 'Valley Floor', forest: 'Woods',
+             mud: 'River Shallows', vent: 'Rift Spring' },
+    ember: { high: 'Mesa',      low: 'Sink',         forest: 'Boulder Field',
+             mud: 'Deep Sand',      vent: 'Magma Vent' },
+    ice:   { high: 'Ice Ridge', low: 'Crevasse',     forest: 'Frozen Spires',
+             mud: 'Deep Snow',      vent: 'Hot Spring' },
   },
 
   // ── 전장의 안개 (Fog of War) ──
