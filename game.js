@@ -600,10 +600,19 @@ window.RC = window.RC || {};
       const d = RC.BUILDINGS[type];
       if (!this.canAfford(owner, d.cost)) { if (owner === this.playerOwner) this.notify('Not enough shards'); return null; }
       if (!this.canPlace(type, x, y, owner)) { if (owner === this.playerOwner) this.notify('Can’t build here'); return null; }
+      // Refuse a spot no assigned worker can actually walk to — otherwise the worker
+      // would trudge toward it forever and the shards would already be spent.
+      const crew = (workers || []).filter(w => w && !w.dead);
+      if (crew.length && RC.Path && RC.Path.reachable &&
+          !crew.some(w => RC.Path.reachable(this, w.x, w.y, x, y))) {
+        if (owner === this.playerOwner) this.notify('No way through — pick a reachable spot');
+        return null;
+      }
       this.res[owner].shard -= d.cost;
       const b = new RC.Building(type, x, y, owner, false);
       this.buildings.push(b);
-      (workers || []).forEach(w => w.buildAt(b));
+      if (RC.Path && RC.Path.invalidate) RC.Path.invalidate(this);   // new blocker on the map
+      crew.forEach(w => w.buildAt(b));
       return b;
     }
 

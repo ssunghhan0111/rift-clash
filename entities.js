@@ -396,6 +396,54 @@ window.RC = window.RC || {};
       return false;
     }
 
+    // ── 길찾기 이동 (지상 유닛 공용) ────────────────────
+    // Every ground order — move, gather, drop off, build, board, chase — goes through
+    // here so obstacles and buildings are routed AROUND instead of walked into. Plain
+    // step() is a straight line and would just grind against a wall until separate()
+    // shoved the unit sideways, which is what made units look like they were struggling.
+    // Re-plans when the goal moves or when we stop making progress.
+    navigate(dt, game, tx, ty, stopDist) {
+      if (this.def.flying || !RC.Path) return this.step(dt, tx, ty, stopDist);
+
+      const gl = this._pathGoal;
+      if (!gl || Math.abs(gl.x - tx) > 30 || Math.abs(gl.y - ty) > 30) {
+        this._pathGoal = { x: tx, y: ty };     // goal moved → the old route is stale
+        this.path = null; this._planT = 0; this._stuckT = 0; this._blockedN = 0;
+      }
+
+      this._planT = (this._planT || 0) - dt;
+      if (this.path == null && this._planT <= 0) {
+        this.path = RC.Path.find(game, this.x, this.y, tx, ty) || [];   // [] = straight line is fine
+        this._planT = 0.4;                      // never run A* every frame
+      }
+
+      let aim = null;
+      if (this.path && this.path.length) {
+        // drop waypoints already reached
+        while (this.path.length && RC.dist(this.x, this.y, this.path[0].x, this.path[0].y) <= this.r + 10) this.path.shift();
+        if (this.path.length) aim = this.path[0];
+      }
+      const final = !aim;
+      if (final) aim = { x: tx, y: ty };
+
+      const px = this.x, py = this.y;
+      const arrived = this.step(dt, aim.x, aim.y, final ? stopDist : 4);
+
+      // Stuck? Something is in the way that the current route didn't account for
+      // (another unit, a building that just went up) — throw the route away and re-plan.
+      const moved = Math.hypot(this.x - px, this.y - py);
+      if (!arrived && this.curSpeed > 0 && moved < this.curSpeed * dt * 0.35) {
+        this._stuckT = (this._stuckT || 0) + dt;
+        if (this._stuckT > 0.45) {
+          this._stuckT = 0; this.path = null; this._planT = 0;
+          this._blockedN = (this._blockedN || 0) + 1;    // consecutive failures to progress
+        }
+      } else if (moved > 1.5) {
+        this._stuckT = 0; this._blockedN = 0;
+      }
+      return arrived && final;
+    }
+
     // ── 업그레이드 단계 조회 ──
     _up(game, kind) {
       const u = game && game.upgrades && game.upgrades[this.owner];
@@ -532,17 +580,8 @@ window.RC = window.RC || {};
         const e = game.findNearestEnemy(this, CFG.AGGRO_RANGE);
         if (e) { this.attackTarget(e); return; }   // attackMove/amoveGoal persist → resumes after the kill
       }
-      // 길찾기 — 직선 경로가 막혔을 때만 경유점을 따라간다 (지상 유닛). 공중은 직진.
-      let aim = this.target;
-      if (!this.def.flying && RC.Path) {
-        if (this.path == null) this.path = RC.Path.find(game, this.x, this.y, this.target.x, this.target.y);
-        if (this.path && this.path.length) {
-          aim = this.path[0];
-          if (RC.dist(this.x, this.y, aim.x, aim.y) <= this.r + 8) { this.path.shift(); aim = this.path[0] || this.target; }
-        }
-      }
-      const atGoal = (aim === this.target);
-      if (this.step(dt, aim.x, aim.y, 4) && atGoal) this.stop();
+      // 길찾기 — 장애물/건물을 우회한다 (지상). 공중은 직진.
+      if (this.navigate(dt, game, this.target.x, this.target.y, 4)) this.stop();
     }
 
     _toBoard(dt, game) {
@@ -556,7 +595,7 @@ window.RC = window.RC || {};
         this.state = 'idle';
         this.transportTarget = null;
       } else {
-        this.step(dt, ship.x, ship.y, ship.r + this.r + 4);
+        this.navigate(dt, game, ship.x, ship.y, ship.r + this.r + 4);
       }
     }
 
@@ -568,7 +607,7 @@ window.RC = window.RC || {};
       const reach = this.effRange(game) + (this.foe.kind === 'building' ? this.foe.r * 0.8 : this.foe.r);
       const d = dist(this.x, this.y, this.foe.x, this.foe.y);
       if (d > reach) {
-        this.step(dt, this.foe.x, this.foe.y, reach - 2);
+        this.navigate(dt, game, this.foe.x, this.foe.y, reach - 2);
         return;
       }
       this.facing = Math.atan2(this.foe.y - this.y, this.foe.x - this.x);
@@ -623,7 +662,7 @@ window.RC = window.RC || {};
     _toNode(dt, game) {
       if (!this.node) { this.node = game.findNearestNode(this.x, this.y); }
       if (!this.node) { this.state = 'idle'; return; }
-      if (this.step(dt, this.node.x, this.node.y, this.node.r + this.r)) {
+      if (this.navigate(dt, game, this.node.x, this.node.y, this.node.r + this.r)) {
         this.state = 'gather';
         this.gatherTimer = CFG.GATHER_TIME;
       }
@@ -643,7 +682,7 @@ window.RC = window.RC || {};
     _toDrop(dt, game) {
       const drop = game.findDropoff(this);
       if (!drop) { this.state = 'idle'; return; }
-      this.step(dt, drop.x, drop.y, 0);
+      this.navigate(dt, game, drop.x, drop.y, 0);
       if (touching(this, drop, 5)) {
         game.addShard(this.owner, this.carry);
         this.carry = 0;
@@ -659,9 +698,27 @@ window.RC = window.RC || {};
     _build(dt, game) {
       if (!this.site) { this.state = 'idle'; return; }
       if (!touching(this, this.site, 6)) {
-        this.step(dt, this.site.x, this.site.y, 0);
+        this.navigate(dt, game, this.site.x, this.site.y, 0);
+        // The worker used to walk in a dead straight line here, so a rock or building in
+        // the way meant grinding against it forever with the worker locked — the "freeze".
+        // Now it routes around, and if it genuinely can't get there it gives up rather
+        // than standing still, refunding an untouched site so no shards are lost.
+        this._buildT = (this._buildT || 0) + dt;
+        const cutOff = (this._blockedN || 0) >= 4 || this._buildT > 25;
+        if (cutOff) {
+          const site = this.site;
+          this.site = null; this.state = 'idle';
+          this._buildT = 0; this._blockedN = 0; this.path = null; this._pathGoal = null;
+          if (site && !site.dead && !site.done && site.buildProgress < 0.05 && game.cancelBuild) {
+            game.cancelBuild(site);
+            if (site.owner === game.playerOwner) game.notify('Can’t reach that spot — build cancelled, shards refunded');
+          } else if (site && site.owner === game.playerOwner) {
+            game.notify('Worker couldn’t reach the building site');
+          }
+        }
         return;
       }
+      this._buildT = 0; this._blockedN = 0;
       this.site.__builders = (this.site.__builders || 0) + 1;
     }
 
