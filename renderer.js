@@ -421,7 +421,9 @@ RC.Renderer = (function () {
 
   // 유닛 스프라이트 본체 — 원점 기준으로 그림(+x 방향을 바라봄). drawUnit / drawPortrait 공용
   function drawUnitSprite(u, c) {
-    const R = u.r;
+    // Draw the body slightly larger than the collision radius so units read as solid
+    // shapes rather than small blobs sitting on their owner disc. Purely cosmetic.
+    const R = u.r * 1.18;
     if (u.type === 'wrench') drawWrench(R, c);
     else if (u.type === 'volt') drawVolt(R, c);
     else if (u.type === 'shielder') drawShielder(R, c);
@@ -443,6 +445,9 @@ RC.Renderer = (function () {
     else if (u.type === 'bastion') drawBastion(R, c);
     else if (u.type === 'seraph') drawSeraph(R, c);
     else if (u.type === 'oracle') drawOracle(R, c);
+    else if (u.type === 'chaingunner') drawChaingunner(R, c);
+    else if (u.type === 'hydra') drawHydra(R, c);
+    else if (u.type === 'bladesworn') drawBladesworn(R, c);
     else if (u.type === 'warden') drawWarden(R, c);
     else if (u.type === 'matriarch') drawMatriarch(R, c);
     else if (u.type === 'archon') drawArchon(R, c);
@@ -670,6 +675,107 @@ RC.Renderer = (function () {
     oct(x + 2, y + 2, b.w - 4, b.h - 4, 0.2); ctx.stroke();
   }
 
+  // ── 체인거너 (포지) — 쌍열 기관총 보병 ──
+  // 실루엣 포인트: 넓은 어깨 + 앞으로 뻗은 두 개의 총열 + 옆구리 탄약 드럼.
+  function drawChaingunner(R, c) {
+    ctx.fillStyle = c.dark; rrect(-R * 0.62, -R * 0.6, R * 1.2, R * 1.2, 4); ctx.fill();
+    ctx.fillStyle = c.body; rrect(-R * 0.52, -R * 0.52, R * 1.0, R * 1.04, 4); ctx.fill();
+    ctx.fillStyle = c.light; rrect(-R * 0.52, -R * 0.52, R * 1.0, R * 0.32, 4); ctx.fill();
+    // 어깨 패드 (위/아래로 크게 벌려 실루엣을 넓힌다)
+    ctx.fillStyle = c.dark;
+    rrect(-R * 0.34, -R * 0.98, R * 0.7, R * 0.42, 4); ctx.fill();
+    rrect(-R * 0.34, R * 0.56, R * 0.7, R * 0.42, 4); ctx.fill();
+    // 쌍열 총신
+    ctx.fillStyle = c.steel;
+    ctx.fillRect(R * 0.3, -R * 0.42, R * 1.15, R * 0.26);
+    ctx.fillRect(R * 0.3, R * 0.16, R * 1.15, R * 0.26);
+    ctx.fillStyle = c.trim;
+    ctx.fillRect(R * 1.38, -R * 0.48, R * 0.2, R * 0.38);
+    ctx.fillRect(R * 1.38, R * 0.1, R * 0.2, R * 0.38);
+    // 탄약 드럼
+    ctx.fillStyle = c.dark;
+    ctx.beginPath(); ctx.arc(-R * 0.5, 0, R * 0.36, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.trim;
+    ctx.beginPath(); ctx.arc(-R * 0.5, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
+    // 바이저
+    ctx.fillStyle = c.eye; ctx.fillRect(R * 0.16, -R * 0.12, R * 0.3, R * 0.24);
+  }
+
+  // ── 베놈 하이드라 (글룹) — 세 개의 머리를 가진 독사 ──
+  // 실루엣 포인트: 굵은 몸통에서 뻗어 나온 세 개의 목 + 뚝뚝 떨어지는 독액.
+  function drawHydra(R, c) {
+    const t = performance.now() / 420;
+    ctx.fillStyle = c.dark; blob(R * 0.92, 0.08, 5); ctx.fill();
+    ctx.fillStyle = c.body; blob(R * 0.76, 0.08, 5); ctx.fill();
+    ctx.fillStyle = c.light;
+    ctx.beginPath(); ctx.ellipse(-R * 0.2, -R * 0.24, R * 0.3, R * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+    // 세 개의 목 + 머리 (살짝 흔들린다)
+    for (let i = -1; i <= 1; i++) {
+      const sway = Math.sin(t + i * 1.7) * 0.16;
+      const a = i * 0.52 + sway;
+      const nx = Math.cos(a), ny = Math.sin(a);
+      ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.24; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(nx * R * 0.32, ny * R * 0.32);
+      ctx.lineTo(nx * R * 1.02, ny * R * 1.02);
+      ctx.stroke();
+      ctx.fillStyle = c.body;
+      ctx.beginPath(); ctx.ellipse(nx * R * 1.12, ny * R * 1.12, R * 0.26, R * 0.19, a, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = ACID;                                   // 벌어진 아가리
+      ctx.beginPath(); ctx.arc(nx * R * 1.28, ny * R * 1.28, R * 0.11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = c.eye;
+      ctx.beginPath(); ctx.arc(nx * R * 1.06, ny * R * 1.06, R * 0.07, 0, Math.PI * 2); ctx.fill();
+    }
+    // 독액 방울
+    ctx.fillStyle = ACID; ctx.globalAlpha = 0.55;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.8 + i * 2.1;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * R * 0.55, Math.sin(a * 1.3) * R * 0.5 + R * 0.3, R * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ── 블레이드스원 (Aether) — 쌍검 암살자 ──
+  // 실루엣 포인트: 가느다란 몸 + 앞으로 길게 뻗은 두 자루의 빛나는 칼날.
+  function drawBladesworn(R, c) {
+    // 낮게 웅크린 마름모 몸통
+    ctx.fillStyle = c.dark;
+    ctx.beginPath();
+    ctx.moveTo(R * 0.62, 0); ctx.lineTo(-R * 0.1, -R * 0.56);
+    ctx.lineTo(-R * 0.66, 0); ctx.lineTo(-R * 0.1, R * 0.56);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.body;
+    ctx.beginPath();
+    ctx.moveTo(R * 0.48, 0); ctx.lineTo(-R * 0.08, -R * 0.42);
+    ctx.lineTo(-R * 0.5, 0); ctx.lineTo(-R * 0.08, R * 0.42);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.light;
+    ctx.beginPath();
+    ctx.moveTo(R * 0.3, -R * 0.06); ctx.lineTo(-R * 0.06, -R * 0.32);
+    ctx.lineTo(-R * 0.32, -R * 0.04); ctx.closePath(); ctx.fill();
+    // 두 자루 장검 — 교차하며 앞으로
+    [-1, 1].forEach(s => {
+      ctx.fillStyle = c.psi;
+      ctx.globalAlpha = 0.95;
+      ctx.beginPath();
+      ctx.moveTo(R * 0.2, s * R * 0.3);       // 손잡이
+      ctx.lineTo(R * 1.65, s * R * 0.12);     // 칼끝
+      ctx.lineTo(R * 1.62, s * R * 0.3);
+      ctx.lineTo(R * 0.22, s * R * 0.48);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = c.steel;                 // 손잡이 가드
+      ctx.fillRect(R * 0.12, s * R * 0.24, R * 0.16, R * 0.3);
+    });
+    // 발광 코어 + 눈
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.17, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = PSI_HOT;
+    ctx.beginPath(); ctx.arc(R * 0.26, 0, R * 0.08, 0, Math.PI * 2); ctx.fill();
+  }
+
   // ── 영웅: 아이언클래드 워든 (포지) — 거대 전투 메카 ──
   function drawWarden(R, c) {
     ctx.fillStyle = c.dark; rrect(-R * 0.72, -R * 0.5, R * 1.44, R * 1.1, 5); ctx.fill();
@@ -764,13 +870,25 @@ RC.Renderer = (function () {
     ctx.fillStyle = alt ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.28)';
     ctx.beginPath(); ctx.ellipse(2, u.r * 0.8 + alt * 0.5, u.r * 1.05, u.r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
 
-    // 팀 링 (아군=파랑, 적군=주황) — 내 유닛엔 없음
+    // 소유자 원반 — 모든 유닛 발밑에 주인 색 디스크를 항상 깐다.
+    // 유닛 스프라이트만으로는 난전에서 누가 누구인지 알아보기 어려워서, 색 원반이
+    // 가장 확실한 식별 수단이 된다 (내 유닛에도 그린다).
+    const op = pal(u.owner);
+    ctx.save();
+    const rx = u.r * 1.12, ry = u.r * 0.5, oy = u.r * 0.72;
+    ctx.globalAlpha = 0.26;
+    ctx.fillStyle = op.body;
+    ctx.beginPath(); ctx.ellipse(0, oy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.95;
+    ctx.strokeStyle = op.body; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.ellipse(0, oy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    // 팀 구분 보조 링 (아군=파랑 / 적군=주황) — 내 유닛엔 없음
     const tc = teamColor(g, u.owner);
     if (tc) {
-      ctx.strokeStyle = tc; ctx.lineWidth = 2; ctx.globalAlpha = 0.85;
-      ctx.beginPath(); ctx.ellipse(0, u.r * 0.55, u.r * 1.18, u.r * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
-      ctx.globalAlpha = 1;
+      ctx.strokeStyle = tc; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.ellipse(0, oy, rx * 1.2, ry * 1.2, 0, 0, Math.PI * 2); ctx.stroke();
     }
+    ctx.restore();
 
     ctx.translate(0, -alt);
     ctx.rotate(u.facing);
@@ -1281,13 +1399,25 @@ RC.Renderer = (function () {
     ctx.closePath();
   }
   function drawSlug(R, c) {
-    ctx.fillStyle = c.dark; blob(R * 0.95, 0.08, 0); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.82, 0.08, 0); ctx.fill();
-    ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.24, R * 0.34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.dark; blob(R * 0.9, 0.08, 0); ctx.fill();
+    ctx.fillStyle = c.body; blob(R * 0.76, 0.08, 0); ctx.fill();
+    // 등껍질 — 일꾼만의 실루엣 (전투 유닛과 확실히 구분된다)
+    ctx.fillStyle = c.dark;
+    ctx.beginPath(); ctx.ellipse(-R * 0.24, -R * 0.3, R * 0.58, R * 0.42, -0.35, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.light;
+    ctx.beginPath(); ctx.ellipse(-R * 0.28, -R * 0.36, R * 0.36, R * 0.24, -0.35, 0, Math.PI * 2); ctx.fill();
+    // 더듬이 두 가닥
+    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.09; ctx.lineCap = 'round';
+    [-1, 1].forEach(k => {
+      ctx.beginPath(); ctx.moveTo(R * 0.34, k * R * 0.2);
+      ctx.lineTo(R * 0.78, k * R * 0.55); ctx.stroke();
+      ctx.fillStyle = ACID;
+      ctx.beginPath(); ctx.arc(R * 0.8, k * R * 0.58, R * 0.09, 0, Math.PI * 2); ctx.fill();
+    });
     // 채집 촉수
-    ctx.strokeStyle = ACID; ctx.lineWidth = R * 0.16; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(R * 0.4, 0); ctx.lineTo(R * 1.05, -R * 0.1); ctx.stroke();
-    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.28, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = ACID; ctx.lineWidth = R * 0.15; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(R * 0.36, 0); ctx.lineTo(R * 1.02, -R * 0.08); ctx.stroke();
+    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.26, 0, R * 0.15, 0, Math.PI * 2); ctx.fill();
   }
   function drawGlobling(R, c) {
     ctx.fillStyle = c.dark; blob(R * 0.98, 0.14, 7); ctx.fill();
@@ -1302,16 +1432,39 @@ RC.Renderer = (function () {
       ctx.lineTo(R * (0.42 + i * 0.16), R * 0.05);
       ctx.closePath(); ctx.fill();
     }
+    // 앞으로 뻗은 두 개의 집게발 — 근접 돌격형 실루엣
+    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.17; ctx.lineCap = 'round';
+    [-1, 1].forEach(k => {
+      ctx.beginPath();
+      ctx.moveTo(R * 0.3, k * R * 0.34);
+      ctx.lineTo(R * 0.92, k * R * 0.62);
+      ctx.lineTo(R * 1.22, k * R * 0.3);
+      ctx.stroke();
+    });
+    // 등 가시
+    ctx.fillStyle = c.dark;
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-R * (0.2 + i * 0.22), -R * 0.5);
+      ctx.lineTo(-R * (0.32 + i * 0.22), -R * 1.0);
+      ctx.lineTo(-R * (0.04 + i * 0.22), -R * 0.56);
+      ctx.closePath(); ctx.fill();
+    }
     ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.05, -R * 0.28, R * 0.14, 0, Math.PI * 2); ctx.fill();
   }
   function drawSpitter(R, c) {
     ctx.fillStyle = c.dark; blob(R * 0.95, 0.1, 3); ctx.fill();
     ctx.fillStyle = c.body; blob(R * 0.8, 0.1, 3); ctx.fill();
     ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.22, R * 0.3, 0, Math.PI * 2); ctx.fill();
-    // 분사 주둥이
+    // 위로 치켜든 목 + 긴 분사 주둥이 — 원거리형 실루엣
+    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.26; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(R * 0.1, -R * 0.1); ctx.lineTo(R * 0.62, -R * 0.62); ctx.stroke();
     ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.moveTo(R * 0.4, -R * 0.26); ctx.lineTo(R * 1.05, 0); ctx.lineTo(R * 0.4, R * 0.26); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = ACID; ctx.beginPath(); ctx.arc(R * 1.0, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(R * 0.42, -R * 0.86); ctx.lineTo(R * 1.32, -R * 0.44);
+    ctx.lineTo(R * 0.5, -R * 0.28); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = ACID;
+    ctx.beginPath(); ctx.arc(R * 1.26, -R * 0.46, R * 0.17, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.15, 0, Math.PI * 2); ctx.fill();
   }
   function drawBloat(R, c) {

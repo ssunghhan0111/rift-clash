@@ -99,7 +99,7 @@ RC.COLORS = {
 RC.UNITS = {
   wrench: {
     id: 'wrench', name: 'Wrench Bot', role: 'Worker',
-    hp: 60, dmg: 4, range: 18, cd: 1.2, speed: 100, r: 9,
+    hp: 60, dmg: 4, range: 18, cd: 1.2, speed: 100, r: 12,
     cost: 50, time: 11, supply: 1, armor: 0, energy: 60,
     worker: true, key: 'Q',
     ability: { id: 'weld', name: 'Emergency Weld', key: 'G', cost: 30, cd: 6, radius: 140, heal: 130, target: 'repair',
@@ -108,7 +108,7 @@ RC.UNITS = {
   },
   volt: {
     id: 'volt', name: 'Volt Trooper', role: 'Infantry',
-    hp: 110, dmg: 9, range: 78, cd: 0.85, speed: 88, r: 10,
+    hp: 110, dmg: 9, range: 78, cd: 0.85, speed: 88, r: 14,
     cost: 60, time: 15, supply: 1, armor: 0, energy: 60, key: 'Q',
     ability: { id: 'surge', name: 'Overcharge', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 15, spd: 1.3, fire: 0.5,
                desc: 'Greatly boosts attack and move speed for 5s (costs some HP).' },
@@ -116,7 +116,7 @@ RC.UNITS = {
   },
   shielder: {
     id: 'shielder', name: 'Shieldbearer', role: 'Shield Tank',
-    hp: 260, dmg: 7, range: 24, cd: 1.1, speed: 64, r: 13,
+    hp: 260, dmg: 7, range: 24, cd: 1.1, speed: 64, r: 18,
     cost: 110, time: 24, supply: 2, armor: 3, energy: 70, key: 'W',
     ability: { id: 'bulwark', name: 'Bulwark', key: 'C', cost: 30, cd: 12, dur: 6, armorBonus: 6, radius: 210,
                desc: 'Sharply raises armor for 6s and taunts nearby enemies.' },
@@ -124,7 +124,7 @@ RC.UNITS = {
   },
   spark: {
     id: 'spark', name: 'Spark Cannon', role: 'Siege',
-    hp: 90, dmg: 26, range: 150, cd: 2.2, speed: 52, r: 12,
+    hp: 90, dmg: 26, range: 150, cd: 2.2, speed: 52, r: 16,
     cost: 150, time: 30, supply: 2, armor: 0, energy: 70, splash: 42, key: 'E',
     ability: { id: 'raillock', name: 'Focus Fire', key: 'V', cost: 35, cd: 8, dur: 5, rangeBonus: 80, dmgBonus: 14, splashBonus: 18,
                desc: 'Range and power surge for 5s, but cannot move.' },
@@ -132,7 +132,7 @@ RC.UNITS = {
   },
   hover: {
     id: 'hover', name: 'Hoverwing', role: 'Air',
-    hp: 90, dmg: 12, range: 90, cd: 0.8, speed: 130, r: 10,
+    hp: 90, dmg: 12, range: 90, cd: 0.8, speed: 130, r: 14,
     cost: 120, time: 22, supply: 2, armor: 0, energy: 60, flying: true, sight: 300, key: 'Q',
     ability: { id: 'warp', name: 'Blink Booster', key: 'X', cost: 20, cd: 5, dist: 230,
                desc: 'Teleports in the direction it is facing.' },
@@ -140,7 +140,7 @@ RC.UNITS = {
   },
   patch: {
     id: 'patch', name: 'Patch Bot', role: 'Repair Support',
-    hp: 100, dmg: 5, range: 60, cd: 1.0, speed: 96, r: 10,
+    hp: 100, dmg: 5, range: 60, cd: 1.0, speed: 96, r: 14,
     cost: 90, time: 20, supply: 2, armor: 1, energy: 110, key: 'Q',
     ability: { id: 'mend', name: 'Nano Heal', key: 'Z', cost: 40, cd: 3, radius: 155, heal: 45,
                desc: 'Heals all nearby allied units at once.' },
@@ -148,16 +148,24 @@ RC.UNITS = {
   },
   pulse: {
     id: 'pulse', name: 'Pulse Coil', role: 'Disruptor',
-    hp: 85, dmg: 6, range: 105, cd: 1.3, speed: 82, r: 11,
+    hp: 85, dmg: 6, range: 105, cd: 1.3, speed: 82, r: 15,
     cost: 130, time: 24, supply: 2, armor: 0, energy: 130, key: 'W',
     ability: { id: 'nova', name: 'Static Pulse', key: 'A', cost: 45, cd: 9, radius: 170, dmg: 22, drain: 60, slowDur: 4,
                desc: 'Drains enemy energy, deals damage, and slows nearby foes.' },
     desc: 'Caster that disrupts enemies. Static Pulse neutralizes packed groups.'
   },
+  chaingunner: {
+    id: 'chaingunner', name: 'Chaingunner', role: 'Heavy Gunner',
+    hp: 145, dmg: 6, range: 100, cd: 0.32, speed: 78, r: 15,
+    cost: 95, time: 19, supply: 2, armor: 1, energy: 70, key: 'R',
+    ability: { id: 'surge', name: 'Full Auto', key: 'D', cost: 30, cd: 11, dur: 5, hpCost: 0, spd: 0.9, fire: 0.45,
+               desc: 'Opens up with both barrels — a huge burst of fire rate for 5s.' },
+    desc: 'Twin-gun trooper that shreds groups with a stream of rapid fire. Slow, but relentless.'
+  },
   // ── 신규 항공 ──
   heli: {
     id: 'heli', name: 'Rattler Heli', role: 'Gunship',
-    hp: 150, dmg: 17, range: 105, cd: 1.0, speed: 118, r: 12,
+    hp: 150, dmg: 17, range: 105, cd: 1.0, speed: 118, r: 16,
     cost: 150, time: 24, supply: 3, armor: 1, energy: 80, flying: true, splash: 20, key: 'W',
     ability: { id: 'salvo', name: 'Rocket Salvo', key: 'B', cost: 40, cd: 9, radius: 95, dmg: 34,
                desc: 'Rains rockets around a target point for area damage.' },
@@ -165,7 +173,7 @@ RC.UNITS = {
   },
   jet: {
     id: 'jet', name: 'Falcon Jet', role: 'Air Superiority',
-    hp: 120, dmg: 20, range: 120, cd: 0.7, speed: 170, r: 11,
+    hp: 120, dmg: 20, range: 120, cd: 0.7, speed: 170, r: 15,
     cost: 175, time: 26, supply: 3, armor: 0, energy: 70, flying: true, sight: 300, key: 'E',
     ability: { id: 'afterburn', name: 'Afterburner', key: 'N', cost: 25, cd: 11, dur: 4, spd: 1.6, fire: 0.55,
                desc: 'Move and attack speed spike for 4s.' },
@@ -173,7 +181,7 @@ RC.UNITS = {
   },
   dropship: {
     id: 'dropship', name: 'Ferry Dropship', role: 'Transport',
-    hp: 220, dmg: 0, range: 0, cd: 1, speed: 130, r: 14,
+    hp: 220, dmg: 0, range: 0, cd: 1, speed: 130, r: 19,
     cost: 150, time: 24, supply: 3, armor: 1, energy: 0, flying: true, transport: 8, key: 'R',
     ability: { id: 'unload', name: 'Unload All', key: 'U', cost: 0, cd: 1,
                desc: 'Drops off every unit aboard.' },
@@ -184,7 +192,7 @@ RC.UNITS = {
   // Shared identity: def.regen (HP/sec self-heal) + def.acid (attacks stack acid: -armor + damage over time)
   slug: {
     id: 'slug', name: 'Slug', role: 'Worker',
-    hp: 60, dmg: 4, range: 18, cd: 1.2, speed: 104, r: 9,
+    hp: 60, dmg: 4, range: 18, cd: 1.2, speed: 104, r: 12,
     cost: 50, time: 11, supply: 1, armor: 0, energy: 60,
     worker: true, regen: 2, race: 'gloop', key: 'Q',
     ability: { id: 'weld', name: 'Slime Patch', key: 'G', cost: 30, cd: 6, radius: 140, heal: 120, target: 'repair',
@@ -193,7 +201,7 @@ RC.UNITS = {
   },
   globling: {
     id: 'globling', name: 'Globling', role: 'Swarm Melee',
-    hp: 70, dmg: 7, range: 20, cd: 0.7, speed: 120, r: 9,
+    hp: 70, dmg: 7, range: 20, cd: 0.7, speed: 120, r: 12,
     cost: 45, time: 9, supply: 1, armor: 0, energy: 50, regen: 4, race: 'gloop',
     acid: { dmg: 2, dur: 4, shred: 1, max: 5 }, key: 'Q',
     ability: { id: 'surge', name: 'Frenzy', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 0, spd: 1.4, fire: 0.55,
@@ -202,7 +210,7 @@ RC.UNITS = {
   },
   spitter: {
     id: 'spitter', name: 'Spitter', role: 'Acid Ranged',
-    hp: 90, dmg: 11, range: 120, cd: 1.0, speed: 80, r: 10,
+    hp: 90, dmg: 11, range: 120, cd: 1.0, speed: 80, r: 14,
     cost: 80, time: 16, supply: 2, armor: 0, energy: 80, regen: 3, race: 'gloop',
     acid: { dmg: 4, dur: 5, shred: 2, max: 5 }, key: 'W',
     ability: { id: 'nova', name: 'Corrosive Spray', key: 'A', cost: 40, cd: 9, radius: 150, dmg: 16, drain: 0, slowDur: 2,
@@ -211,14 +219,23 @@ RC.UNITS = {
   },
   bloat: {
     id: 'bloat', name: 'Bloat', role: 'Acid Tank',
-    hp: 300, dmg: 10, range: 22, cd: 1.3, speed: 58, r: 13,
+    hp: 300, dmg: 10, range: 22, cd: 1.3, speed: 58, r: 18,
     cost: 120, time: 24, supply: 3, armor: 2, energy: 0, regen: 6, race: 'gloop',
     acid: { dmg: 3, dur: 4, shred: 1, max: 5 }, deathBurst: { radius: 110, dmg: 40 }, key: 'E',
     desc: 'Giant slime that soaks damage. Regenerates fast and bursts with acid on death.'
   },
+  hydra: {
+    id: 'hydra', name: 'Venom Hydra', role: 'Venom Artillery',
+    hp: 165, dmg: 15, range: 150, cd: 1.35, speed: 72, r: 17,
+    cost: 135, time: 26, supply: 3, armor: 1, energy: 90, regen: 4, race: 'gloop',
+    acid: { dmg: 7, dur: 6, shred: 3, max: 6 }, key: 'R',
+    ability: { id: 'nova', name: 'Venom Burst', key: 'A', cost: 45, cd: 9, radius: 165, dmg: 24, drain: 0, slowDur: 3,
+               desc: 'Every head spits at once — a wide cloud that damages and slows.' },
+    desc: 'Three-headed serpent that hurls venom from far away. Its bite melts armour faster than anything else in the swarm.'
+  },
   floater: {
     id: 'floater', name: 'Floater', role: 'Air Bomber',
-    hp: 130, dmg: 16, range: 100, cd: 1.1, speed: 120, r: 12,
+    hp: 130, dmg: 16, range: 100, cd: 1.1, speed: 120, r: 16,
     cost: 150, time: 24, supply: 3, armor: 0, energy: 80, regen: 3, race: 'gloop',
     flying: true, sight: 300, splash: 18, acid: { dmg: 3, dur: 4, shred: 1, max: 4 }, key: 'Q',
     ability: { id: 'salvo', name: 'Spore Barrage', key: 'B', cost: 40, cd: 9, radius: 95, dmg: 30,
@@ -232,7 +249,7 @@ RC.UNITS = {
   // factions — and they warp in at any Warp Conduit instead of walking from base.
   acolyte: {
     id: 'acolyte', name: 'Acolyte', role: 'Worker',
-    hp: 50, dmg: 5, range: 18, cd: 1.2, speed: 102, r: 9,
+    hp: 50, dmg: 5, range: 18, cd: 1.2, speed: 102, r: 12,
     cost: 55, time: 12, supply: 1, armor: 0, energy: 60,
     worker: true, shield: 30, race: 'aether', key: 'Q',
     ability: { id: 'weld', name: 'Restore Matrix', key: 'G', cost: 30, cd: 6, radius: 140, heal: 125, target: 'repair',
@@ -241,7 +258,7 @@ RC.UNITS = {
   },
   ardent: {
     id: 'ardent', name: 'Ardent', role: 'Melee Vanguard',
-    hp: 105, dmg: 14, range: 22, cd: 0.8, speed: 96, r: 10,
+    hp: 105, dmg: 14, range: 22, cd: 0.8, speed: 96, r: 14,
     cost: 75, time: 16, supply: 2, armor: 1, energy: 60,
     shield: 70, race: 'aether', key: 'Q',
     ability: { id: 'surge', name: 'Zeal', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 0, spd: 1.45, fire: 0.5,
@@ -250,7 +267,7 @@ RC.UNITS = {
   },
   lancer: {
     id: 'lancer', name: 'Void Lancer', role: 'Ranged Support',
-    hp: 100, dmg: 16, range: 128, cd: 1.15, speed: 82, r: 11,
+    hp: 100, dmg: 16, range: 128, cd: 1.15, speed: 82, r: 15,
     cost: 115, time: 22, supply: 2, armor: 1, energy: 80,
     shield: 90, race: 'aether', key: 'W',
     ability: { id: 'warp', name: 'Phase Step', key: 'X', cost: 20, cd: 6, dist: 235,
@@ -259,7 +276,7 @@ RC.UNITS = {
   },
   bastion: {
     id: 'bastion', name: 'Bastion', role: 'Heavy Siege',
-    hp: 190, dmg: 34, range: 140, cd: 2.0, speed: 56, r: 13,
+    hp: 190, dmg: 34, range: 140, cd: 2.0, speed: 56, r: 18,
     cost: 175, time: 32, supply: 3, armor: 3, energy: 70,
     shield: 160, splash: 38, race: 'aether', key: 'E',
     ability: { id: 'raillock', name: 'Anchor Field', key: 'V', cost: 35, cd: 8, dur: 5, rangeBonus: 75, dmgBonus: 18, splashBonus: 16,
@@ -268,16 +285,25 @@ RC.UNITS = {
   },
   seraph: {
     id: 'seraph', name: 'Seraph', role: 'Air Superiority',
-    hp: 110, dmg: 19, range: 118, cd: 0.75, speed: 158, r: 11,
+    hp: 110, dmg: 19, range: 118, cd: 0.75, speed: 158, r: 15,
     cost: 165, time: 26, supply: 3, armor: 0, energy: 80,
     shield: 110, flying: true, sight: 300, race: 'aether', key: 'Q',
     ability: { id: 'afterburn', name: 'Solar Wind', key: 'N', cost: 25, cd: 11, dur: 4, spd: 1.55, fire: 0.55,
                desc: 'Rides a solar current — move and attack speed spike for 4s.' },
     desc: 'Swift shielded interceptor. Strikes air and ground, then blazes back out.'
   },
+  bladesworn: {
+    id: 'bladesworn', name: 'Bladesworn', role: 'Blade Assassin',
+    hp: 95, dmg: 21, range: 24, cd: 0.55, speed: 122, r: 13,
+    cost: 100, time: 18, supply: 2, armor: 0, energy: 70,
+    shield: 65, race: 'aether', key: 'R',
+    ability: { id: 'warp', name: 'Shadow Step', key: 'X', cost: 20, cd: 5, dist: 260,
+               desc: 'Flickers forward in a blink to land on a target — or slip away.' },
+    desc: 'Lightning-fast duellist with two razor knives. Fragile, but nothing cuts faster.'
+  },
   oracle: {
     id: 'oracle', name: 'Oracle', role: 'Shield Support',
-    hp: 95, dmg: 8, range: 100, cd: 1.2, speed: 92, r: 10,
+    hp: 95, dmg: 8, range: 100, cd: 1.2, speed: 92, r: 14,
     cost: 140, time: 24, supply: 2, armor: 0, energy: 140,
     shield: 80, race: 'aether', key: 'W',
     ability: { id: 'mend', name: 'Shield Overflow', key: 'Z', cost: 40, cd: 3, radius: 160, heal: 55, shieldHeal: 70,
@@ -289,7 +315,7 @@ RC.UNITS = {
   //    automatically), and revive at your base after a delay + shard cost if slain. ══
   warden: {
     id: 'warden', name: 'Ironclad Warden', role: 'Hero', hero: true,
-    hp: 600, dmg: 22, range: 30, cd: 1.0, speed: 80, r: 16,
+    hp: 600, dmg: 22, range: 30, cd: 1.0, speed: 80, r: 22,
     cost: 0, time: 0, supply: 0, armor: 3, energy: 200, key: 'H',
     grow: { hp: 70, dmg: 4, armor: 0.5 },
     revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
@@ -306,7 +332,7 @@ RC.UNITS = {
   },
   matriarch: {
     id: 'matriarch', name: 'Brood Matriarch', role: 'Hero', hero: true, race: 'gloop', regen: 4,
-    hp: 480, dmg: 18, range: 120, cd: 1.0, speed: 84, r: 15,
+    hp: 480, dmg: 18, range: 120, cd: 1.0, speed: 84, r: 21,
     cost: 0, time: 0, supply: 0, armor: 1, energy: 220, key: 'H',
     acid: { dmg: 4, dur: 5, shred: 2, max: 6 },
     grow: { hp: 55, dmg: 4, armor: 0.4 },
@@ -323,7 +349,7 @@ RC.UNITS = {
   },
   archon: {
     id: 'archon', name: 'Radiant Archon', role: 'Hero', hero: true, race: 'aether',
-    hp: 420, dmg: 26, range: 95, cd: 0.95, speed: 88, r: 16,
+    hp: 420, dmg: 26, range: 95, cd: 0.95, speed: 88, r: 22,
     cost: 0, time: 0, supply: 0, armor: 2, energy: 220, shield: 320, key: 'H',
     grow: { hp: 45, dmg: 5, armor: 0.4, shield: 55 },
     revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
@@ -356,7 +382,7 @@ RC.BUILDINGS = {
   },
   factory: {
     id: 'factory', name: 'Bolt Factory', hp: 700, w: 80, h: 80,
-    cost: 150, time: 21, supplyGiven: 0, produces: ['volt', 'shielder', 'spark'], key: 'R',
+    cost: 150, time: 21, supplyGiven: 0, produces: ['volt', 'shielder', 'spark', 'chaingunner'], key: 'R',
     desc: 'Produces ground combat units.'
   },
   hoverpad: {
@@ -396,7 +422,7 @@ RC.BUILDINGS = {
   },
   hatchery: {
     id: 'hatchery', name: 'Hatchery', hp: 700, w: 80, h: 80,
-    cost: 150, time: 21, supplyGiven: 0, produces: ['globling', 'spitter', 'bloat'], race: 'gloop', key: 'R',
+    cost: 150, time: 21, supplyGiven: 0, produces: ['globling', 'spitter', 'bloat', 'hydra'], race: 'gloop', key: 'R',
     desc: 'Hatches ground swarm units.'
   },
   spire: {
@@ -431,7 +457,7 @@ RC.BUILDINGS = {
   },
   warpgate: {
     id: 'warpgate', name: 'Warp Gate', hp: 550, shield: 350, w: 80, h: 80,
-    cost: 160, time: 22, supplyGiven: 0, produces: ['ardent', 'lancer', 'bastion'], race: 'aether', key: 'R',
+    cost: 160, time: 22, supplyGiven: 0, produces: ['ardent', 'lancer', 'bastion', 'bladesworn'], race: 'aether', key: 'R',
     desc: 'Warps in ground combat units at your furthest-forward Warp Conduit.'
   },
   astralgate: {
@@ -473,7 +499,7 @@ RC.RACES = {
     buildable: ['cell', 'factory', 'hoverpad', 'arclab', 'guardtower', 'arcbattery'],
     ai: {
       worker: 'wrench', supply: 'cell',
-      barracks: 'factory', barracksUnits: ['volt', 'shielder', 'spark'],
+      barracks: 'factory', barracksUnits: ['volt', 'shielder', 'spark', 'chaingunner'],
       air: 'hoverpad', airUnits: ['hover', 'heli', 'jet'],
       tech: 'arclab', techUnits: ['patch', 'pulse'],
       tower: 'guardtower',
@@ -486,7 +512,7 @@ RC.RACES = {
     buildable: ['membrane', 'hatchery', 'spire', 'evochamber', 'acidtower'],
     ai: {
       worker: 'slug', supply: 'membrane',
-      barracks: 'hatchery', barracksUnits: ['globling', 'spitter', 'bloat'],
+      barracks: 'hatchery', barracksUnits: ['globling', 'spitter', 'bloat', 'hydra'],
       air: 'spire', airUnits: ['floater'],
       tech: 'evochamber', techUnits: [],
       tower: 'acidtower',
@@ -499,7 +525,7 @@ RC.RACES = {
     buildable: ['conduit', 'warpgate', 'astralgate', 'conclave', 'photonprism'],
     ai: {
       worker: 'acolyte', supply: 'conduit',
-      barracks: 'warpgate', barracksUnits: ['ardent', 'lancer', 'bastion'],
+      barracks: 'warpgate', barracksUnits: ['ardent', 'lancer', 'bastion', 'bladesworn'],
       air: 'astralgate', airUnits: ['seraph'],
       tech: 'conclave', techUnits: ['oracle'],
       tower: 'photonprism',

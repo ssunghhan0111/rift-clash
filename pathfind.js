@@ -6,8 +6,11 @@ window.RC = window.RC || {};
 
 RC.Path = (function () {
   const TILE = 40;          // nav cell size — fine enough to find gaps between buildings
-  const PAD = 14;           // clearance around terrain rocks so units don't clip corners
-  const PAD_B = 8;          // clearance around BUILDINGS (they sit closer together than rocks)
+  // Clearance must be at least the biggest ground unit's radius (heroes are 22), or a
+  // unit's body overlaps the wall it is hugging and separate() shoves it back out each
+  // frame — the jitter this pathfinder exists to prevent.
+  const PAD = 22;           // clearance around terrain rocks
+  const PAD_B = 15;         // clearance around BUILDINGS (they sit closer together than rocks)
 
   // Buildings block movement exactly like terrain does (game.separate() pushes units out
   // of them), so they MUST be in the nav grid — otherwise a unit sees a "clear" straight
