@@ -70,10 +70,10 @@ RC.prepZone = function (z) {
 RC.MAPS = [
   // ══ 1. 지구형 행성 — 초록 들판, 푸른 강, 산등성이 ══════
   {
-    id: 'verdant',
+    id: 'earth',
     biome: 'earth',
-    name: 'Verdant Reach',
-    desc: 'A green world of hills, woods and a winding river. Cross the water slowly — or hold the high ground.',
+    name: 'Earth',
+    desc: 'Home. Green hills, deep woods and a winding river — cross the water slowly, or hold the high ground.',
     world: { w: 3200, h: 2400 },
     bg: '#0c1a18', ground: '#1b3a2c',
     spawns: [
@@ -118,10 +118,10 @@ RC.MAPS = [
 
   // ══ 2. 작열 행성 — 붉은 사막, 메사, 용암 분출구 ════════
   {
-    id: 'cinder',
+    id: 'venus',
     biome: 'ember',
-    name: 'Cinder Waste',
-    desc: 'A blazing desert world. No water anywhere — climb the mesas and stay out of the deep sand.',
+    name: 'Venus',
+    desc: 'The hottest planet. Scorched orange rock and not a drop of water — climb the mesas, avoid the deep sand.',
     world: { w: 3400, h: 2400 },
     bg: '#3a1a10', ground: '#7a4028',
     spawns: [
@@ -170,10 +170,10 @@ RC.MAPS = [
 
   // ══ 3. 얼음 행성 — 검푸른 하늘, 빙벽, 온천 ═════════════
   {
-    id: 'glacier',
+    id: 'pluto',
     biome: 'ice',
-    name: 'Glacier Rift',
-    desc: 'A frozen dark world. Deep snow drags you down; the ice ridges and hot springs are worth the fight.',
+    name: 'Pluto',
+    desc: 'Frozen and far from the sun. Deep snow drags you down; the ice ridges and hot springs are worth fighting for.',
     world: { w: 3400, h: 2400 },
     bg: '#050a12', ground: '#101d2e',
     spawns: [
@@ -246,7 +246,7 @@ RC.MODES = {
 
 // ── Survival map — 얼음 협곡. 웨이브가 왼쪽에서 크리스탈로 진군한다.
 RC.SURVIVAL = {
-  id: 'sv_gorge', name: 'Crystal Gorge',
+  id: 'sv_gorge', name: 'Pluto — Crystal Gorge',
   biome: 'ice',
   world: { w: 3400, h: 1600 },
   bg: '#060c14', ground: '#132133',

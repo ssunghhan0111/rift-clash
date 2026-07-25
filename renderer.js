@@ -60,6 +60,17 @@ RC.Renderer = (function () {
     // 행성마다 하늘/땅 색이 다르다 (지구=초록, 작열=붉음, 얼음=검푸름)
     ctx.fillStyle = (g.mapDef && g.mapDef.ground) || C.bg;
     ctx.fillRect(0, 0, W, H);
+    // 표면 질감 (카메라를 따라 흘러가도록 패턴 원점을 이동)
+    const tex = groundTexture(g);
+    if (tex) {
+      ctx.save();
+      ctx.translate(-Math.round(g.camera.x) % 128, -Math.round(g.camera.y) % 128);
+      ctx.fillStyle = tex;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(0, 0, W + 128, H + 128);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
 
     ctx.save();
     ctx.translate(-Math.round(g.camera.x), -Math.round(g.camera.y));
@@ -78,6 +89,7 @@ RC.Renderer = (function () {
 
     ctx.restore();
 
+    drawAmbient(g, W, H);          // 대기 입자 (꽃가루 / 불티 / 눈발)
     drawDragBox(input);
     drawMinimap(g, W, H);
   }
@@ -127,20 +139,41 @@ RC.Renderer = (function () {
     } else if (z.r) ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2);
     else ctx.rect(z.x - z.w / 2, z.y - z.h / 2, z.w, z.h);
   }
+  function zoneBB(z) {
+    return z.bb || (z.r ? [z.x - z.r, z.y - z.r, z.x + z.r, z.y + z.r]
+                        : [z.x - z.w / 2, z.y - z.h / 2, z.x + z.w / 2, z.y + z.h / 2]);
+  }
+  function inPoly(x, y, poly) {
+    let hit = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit;
+    }
+    return hit;
+  }
+  // 지형 넓이에 맞춰 장식 개수를 정한다 (넓은 지형일수록 더 촘촘하게)
+  // one prop per `per` square pixels, clamped — so a 3500px river gets a river's worth of ripples
+  function decoCount(z, per, min, max) {
+    const bb = zoneBB(z);
+    const area = Math.max(0, bb[2] - bb[0]) * Math.max(0, bb[3] - bb[1]) * 0.72;
+    return Math.max(min, Math.min(max, Math.round(area / per)));
+  }
   // deterministic scatter of points inside a zone, for placing trees/rocks/peaks
   function scatter(z, count, seed) {
-    const bb = z.bb || (z.r ? [z.x - z.r, z.y - z.r, z.x + z.r, z.y + z.r]
-                            : [z.x - z.w / 2, z.y - z.h / 2, z.x + z.w / 2, z.y + z.h / 2]);
+    const bb = zoneBB(z);
     let s = seed >>> 0 || 7;
     const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    const cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
+    const rx = (bb[2] - bb[0]) / 2, ry = (bb[3] - bb[1]) / 2;
     const out = [];
-    for (let i = 0; i < count * 5 && out.length < count; i++) {
+    for (let i = 0; i < count * 8 && out.length < count; i++) {
       const x = bb[0] + rnd() * (bb[2] - bb[0]);
       const y = bb[1] + rnd() * (bb[3] - bb[1]);
-      const cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
-      const rx = (bb[2] - bb[0]) / 2, ry = (bb[3] - bb[1]) / 2;
-      const dx = (x - cx) / (rx || 1), dy = (y - cy) / (ry || 1);
-      if (dx * dx + dy * dy <= 0.72) out.push([x, y, rnd()]);
+      const r = rnd();
+      // polygon zones get an exact containment test; circles/rects fall back to the inscribed ellipse
+      if (z.poly ? inPoly(x, y, z.poly) : (((x - cx) / (rx || 1)) ** 2 + ((y - cy) / (ry || 1)) ** 2 <= 0.92)) {
+        out.push([x, y, r]);
+      }
     }
     return out;
   }
@@ -176,13 +209,22 @@ RC.Renderer = (function () {
       ctx.globalAlpha = 1;
 
       ctx.save(); zonePath(z); ctx.clip();      // 장식은 지형 안쪽에만
-      const pts = scatter(z, st.deco === 'trees' || st.deco === 'rocks' || st.deco === 'spires' ? 12 : 7, seed);
+      const DENS = {
+        peaks: [15000, 6, 26], ridge: [15000, 6, 26], mesa: [15000, 6, 26],
+        trees: [7000, 10, 60], spires: [8000, 10, 52], rocks: [11000, 8, 40],
+        water: [13000, 8, 110], dunes: [17000, 8, 80], snow: [14000, 8, 90],
+      };
+      const dn = DENS[st.deco] || [18000, 6, 30];
+      const pts = scatter(z, decoCount(z, dn[0], dn[1], dn[2]), seed);
 
       if (st.deco === 'peaks' || st.deco === 'ridge' || st.deco === 'mesa') {
         // 산봉우리 / 빙벽 / 메사 — 위로 솟은 실루엣 + 밝은 꼭대기
-        pts.slice(0, 6).forEach(([px, py, r], i) => {
+        // 뒤쪽(위)부터 그려야 앞의 봉우리가 겹쳐 보인다
+        pts.sort((a, b) => a[1] - b[1]).forEach(([px, py, r], i) => {
           const h = 26 + r * 26, w = 20 + r * 20;
-          ctx.fillStyle = st.edge; ctx.globalAlpha = 0.55;
+          ctx.fillStyle = 'rgba(0,0,0,0.28)';   // 바닥 그림자로 입체감
+          ctx.beginPath(); ctx.ellipse(px + w * 0.22, py + h * 0.48, w * 0.95, w * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = st.edge; ctx.globalAlpha = 0.72;
           ctx.beginPath();
           if (st.deco === 'mesa') {             // 평평한 꼭대기
             ctx.moveTo(px - w, py + h * 0.5); ctx.lineTo(px - w * 0.55, py - h * 0.5);
@@ -200,15 +242,22 @@ RC.Renderer = (function () {
           ctx.globalAlpha = 1;
         });
       } else if (st.deco === 'trees') {
-        pts.forEach(([px, py, r]) => {
-          ctx.fillStyle = '#2c5a38'; ctx.fillRect(px - 2.5, py + 3, 5, 12);
+        pts.sort((a, b) => a[1] - b[1]).forEach(([px, py, r]) => {
+          const s2 = 0.8 + r * 0.5;               // 나무마다 크기를 달리해 숲처럼
+          ctx.fillStyle = 'rgba(0,0,0,0.26)';
+          ctx.beginPath(); ctx.ellipse(px + 5, py + 12, 13 * s2, 4.5 * s2, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#2c5a38'; ctx.fillRect(px - 2.5 * s2, py + 3, 5 * s2, 12 * s2);
           ctx.fillStyle = r > 0.5 ? '#3f9b58' : '#4fb069';
           ctx.beginPath();
-          ctx.moveTo(px, py - 20 - r * 6); ctx.lineTo(px + 14, py + 5); ctx.lineTo(px - 14, py + 5);
+          ctx.moveTo(px, py - (20 + r * 6) * s2); ctx.lineTo(px + 14 * s2, py + 5); ctx.lineTo(px - 14 * s2, py + 5);
+          ctx.closePath(); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.16)';   // 햇빛 받는 쪽
+          ctx.beginPath();
+          ctx.moveTo(px, py - (20 + r * 6) * s2); ctx.lineTo(px + 14 * s2, py + 5); ctx.lineTo(px + 2 * s2, py + 5);
           ctx.closePath(); ctx.fill();
         });
       } else if (st.deco === 'spires') {
-        pts.forEach(([px, py, r]) => {
+        pts.sort((a, b) => a[1] - b[1]).forEach(([px, py, r]) => {
           ctx.fillStyle = 'rgba(190,228,250,0.75)';
           ctx.beginPath();
           ctx.moveTo(px, py - 24 - r * 12); ctx.lineTo(px + 8, py + 8); ctx.lineTo(px - 8, py + 8);
@@ -219,12 +268,16 @@ RC.Renderer = (function () {
           ctx.closePath(); ctx.fill();
         });
       } else if (st.deco === 'rocks') {
-        pts.forEach(([px, py, r]) => {
-          const w = 13 + r * 14;
-          ctx.fillStyle = '#7b4a30';
-          ctx.beginPath(); ctx.ellipse(px, py + 3, w, w * 0.66, r * 2, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = '#a9704a';
-          ctx.beginPath(); ctx.ellipse(px - w * 0.2, py - w * 0.18, w * 0.6, w * 0.4, r * 2, 0, Math.PI * 2); ctx.fill();
+        pts.sort((a, b) => a[1] - b[1]).forEach(([px, py, r]) => {
+          const w = 15 + r * 18;
+          ctx.fillStyle = 'rgba(0,0,0,0.30)';    // 바위 그림자
+          ctx.beginPath(); ctx.ellipse(px + w * 0.28, py + w * 0.42, w * 1.05, w * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#6b3f28';
+          ctx.beginPath(); ctx.ellipse(px, py + 3, w, w * 0.72, r * 2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#95633f';
+          ctx.beginPath(); ctx.ellipse(px - w * 0.16, py - w * 0.1, w * 0.74, w * 0.5, r * 2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(226,176,124,0.75)';   // 위쪽 하이라이트
+          ctx.beginPath(); ctx.ellipse(px - w * 0.28, py - w * 0.26, w * 0.36, w * 0.22, r * 2, 0, Math.PI * 2); ctx.fill();
         });
       } else if (st.deco === 'water') {
         // 강 — 흐르는 물결
@@ -245,9 +298,17 @@ RC.Renderer = (function () {
           ctx.stroke();
         });
       } else if (st.deco === 'snow') {
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        // 눈더미 — 가장자리가 흐릿해야 눈처럼 보인다 (딱딱한 타원은 얼룩처럼 보임)
         pts.forEach(([px, py, r]) => {
-          ctx.beginPath(); ctx.ellipse(px, py, 20 + r * 16, 8 + r * 6, 0, 0, Math.PI * 2); ctx.fill();
+          const rw = 24 + r * 26, rh = rw * 0.42;
+          const gr = ctx.createRadialGradient(px, py, 0, px, py, rw);
+          gr.addColorStop(0, 'rgba(255,255,255,0.42)');
+          gr.addColorStop(0.55, 'rgba(238,248,255,0.22)');
+          gr.addColorStop(1, 'rgba(238,248,255,0)');
+          ctx.save(); ctx.translate(px, py); ctx.scale(1, rh / rw); ctx.translate(-px, -py);
+          ctx.fillStyle = gr;
+          ctx.beginPath(); ctx.arc(px, py, rw, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
         });
       } else if (st.deco === 'basin') {
         // 저지대 — 안쪽으로 파인 그림자
@@ -274,6 +335,58 @@ RC.Renderer = (function () {
       ctx.restore();
       ctx.restore();
     }
+  }
+
+  // 땅 표면 질감 — 바이옴 색에서 만든 반점 타일을 한 번만 굽고 패턴으로 재사용
+  let _texKey = null, _texPat = null;
+  function groundTexture(g) {
+    const ground = (g.mapDef && g.mapDef.ground) || '#18232f';
+    const biome = (g.mapDef && g.mapDef.biome) || 'earth';
+    const key = ground + '|' + biome;
+    if (key === _texKey && _texPat) return _texPat;
+    const S = 128;
+    const c = document.createElement('canvas'); c.width = S; c.height = S;
+    const t = c.getContext('2d');
+    t.fillStyle = ground; t.fillRect(0, 0, S, S);
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const light = shade(ground, biome === 'ice' ? 0.16 : 0.13);
+    const dark = shade(ground, -0.17);
+    for (let i = 0; i < 340; i++) {
+      const x = rnd() * S, y = rnd() * S, r = 0.7 + rnd() * (biome === 'ember' ? 2.6 : 1.9);
+      t.fillStyle = rnd() > 0.5 ? light : dark;
+      t.globalAlpha = 0.2 + rnd() * 0.3;
+      t.beginPath(); t.ellipse(x, y, r, r * (0.6 + rnd() * 0.6), rnd() * 3, 0, Math.PI * 2); t.fill();
+    }
+    t.globalAlpha = 1;
+    _texKey = key; _texPat = ctx.createPattern(c, 'repeat');
+    return _texPat;
+  }
+
+  // 대기 입자 — 지구는 꽃가루, 금성은 불티와 먼지, 명왕성은 눈발
+  const AMB = {
+    earth: { n: 34, col: '#cde89a', size: 2.2, vx: 14, vy: -7, wob: 16, alpha: 0.5 },
+    ember: { n: 40, col: '#ffb066', size: 2.4, vx: 26, vy: -20, wob: 14, alpha: 0.55 },
+    ice:   { n: 52, col: '#eaf6ff', size: 2.6, vx: 16, vy: 26, wob: 22, alpha: 0.6 },
+  };
+  function drawAmbient(g, W, H) {
+    const a = AMB[(g.mapDef && g.mapDef.biome) || 'earth'];
+    if (!a) return;
+    const t = performance.now() / 1000;
+    ctx.save();
+    ctx.fillStyle = a.col;
+    for (let i = 0; i < a.n; i++) {
+      const seed = i * 97.13;
+      const spanX = W + 200, spanY = H + 200;
+      let x = ((seed * 37 + t * a.vx) % spanX + spanX) % spanX - 100;
+      let y = ((seed * 61 + t * a.vy) % spanY + spanY) % spanY - 100;
+      x += Math.sin(t * 0.8 + seed) * a.wob;
+      y += Math.cos(t * 0.6 + seed * 1.3) * a.wob * 0.5;
+      ctx.globalAlpha = a.alpha * (0.35 + 0.65 * Math.abs(Math.sin(t * 0.7 + seed)));
+      const r = a.size * (0.5 + (i % 3) * 0.35);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
   }
 
   function drawTerrain(g, W, H) {
@@ -339,6 +452,10 @@ RC.Renderer = (function () {
 
   // 바위 장애물 — 각진 돌덩이
   function drawObstacle(o) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.34)';
+    rrect(o.x - o.w / 2 + 5, o.y - o.h / 2 + 7, o.w, o.h, 7); ctx.fill();
+    ctx.restore();
     const x = o.x - o.w / 2, y = o.y - o.h / 2;
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
     rrect(x + 4, y + 5, o.w, o.h, 8); ctx.fill();
@@ -1818,7 +1935,21 @@ RC.Renderer = (function () {
     if (!CFG.FOG_ENABLED || !g.fogCanvas) return;
     ctx.save();
     ctx.imageSmoothingEnabled = true;
+    // soft pass — dims ground you have explored but cannot currently see
     ctx.drawImage(g.fogCanvas, 0, 0, g.visCols, g.visRows, 0, 0, CFG.WORLD_W, CFG.WORLD_H);
+    // hard pass — solid black over ground never discovered, drawn twice so the
+    // smoothed upscale can't leave terrain faintly showing through
+    if (g.fogHard) {
+      ctx.drawImage(g.fogHard, 0, 0, g.visCols, g.visRows, 0, 0, CFG.WORLD_W, CFG.WORLD_H);
+      ctx.drawImage(g.fogHard, 0, 0, g.visCols, g.visRows, 0, 0, CFG.WORLD_W, CFG.WORLD_H);
+    }
+    // beyond the map edge is unknown too — keep it black rather than bare ground
+    ctx.fillStyle = '#000';
+    const cx = g.camera.x, cy = g.camera.y;
+    if (cx < 0) ctx.fillRect(cx, cy, -cx, H);
+    if (cy < 0) ctx.fillRect(cx, cy, W, -cy);
+    if (cx + W > CFG.WORLD_W) ctx.fillRect(CFG.WORLD_W, cy, cx + W - CFG.WORLD_W, H);
+    if (cy + H > CFG.WORLD_H) ctx.fillRect(cx, CFG.WORLD_H, W, cy + H - CFG.WORLD_H);
     ctx.restore();
   }
 

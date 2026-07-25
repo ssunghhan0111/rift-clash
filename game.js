@@ -451,6 +451,14 @@ window.RC = window.RC || {};
         this.fogCanvas.height = this.visRows;
         this.fogCtx = this.fogCanvas.getContext('2d');
         this.fogImg = this.fogCtx.createImageData(this.visCols, this.visRows);
+        // Second, HARD mask: solid black over anything never explored. The soft fog
+        // gets smoothed when it is scaled up, which let terrain bleed through in
+        // undiscovered ground — this pass guarantees it stays hidden.
+        this.fogHard = document.createElement('canvas');
+        this.fogHard.width = this.visCols;
+        this.fogHard.height = this.visRows;
+        this.fogHardCtx = this.fogHard.getContext('2d');
+        this.fogHardImg = this.fogHardCtx.createImageData(this.visCols, this.visRows);
       }
       this.updateVision();
     }
@@ -518,12 +526,18 @@ window.RC = window.RC || {};
       if (!this.fogImg) return;
       const d = this.fogImg.data, n = this.visCols * this.visRows;
       const now = this.visNow, seen = this.visSeen;
+      const hd = this.fogHardImg ? this.fogHardImg.data : null;
       for (let i = 0; i < n; i++) {
         const j = i << 2;
-        d[j] = 4; d[j + 1] = 8; d[j + 2] = 12;
-        d[j + 3] = now[i] ? 0 : (seen[i] ? 130 : 255);   // 보임=투명 / 탐사=반투명 / 미탐사=검정
+        d[j] = 3; d[j + 1] = 6; d[j + 2] = 10;
+        d[j + 3] = now[i] ? 0 : (seen[i] ? 158 : 255);   // 보임=투명 / 탐사=기억(어둡게) / 미탐사=검정
+        if (hd) {
+          hd[j] = 0; hd[j + 1] = 0; hd[j + 2] = 0;
+          hd[j + 3] = seen[i] ? 0 : 255;                 // 한 번도 못 본 곳만 완전 차단
+        }
       }
       this.fogCtx.putImageData(this.fogImg, 0, 0);
+      if (this.fogHardCtx) this.fogHardCtx.putImageData(this.fogHardImg, 0, 0);
     }
 
     _cellIdx(x, y) {
