@@ -302,10 +302,37 @@ RC.Voice = (function () {
     fire();
   }
 
+  // ── Auto-join ────────────────────────────────────────
+  // Voice comes up by itself when you enter a room: mic live, speaker live. The
+  // one thing that must NOT happen is dragging someone back onto a call they
+  // deliberately left, so pressing Leave Voice is remembered and turns auto-join
+  // off until they press Join Voice again.
+  const AUTO_KEY = 'rc_voice_auto';
+  function autoWanted() {
+    try { return window.localStorage.getItem(AUTO_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function setAutoWanted(on) {
+    try { window.localStorage.setItem(AUTO_KEY, on ? '1' : '0'); } catch (e) {}
+  }
+  let autoTried = false;
+  function resetAuto() { autoTried = false; }      // called when entering a new room
+  // Returns false without fuss when it can't or shouldn't fire — the Join button
+  // stays there as the manual path.
+  async function autoJoin() {
+    if (joined || autoTried || !autoWanted() || unavailableReason()) return false;
+    autoTried = true;
+    const okJoin = await join(true);
+    // A failed automatic attempt must not leave a red error sitting on screen —
+    // the player never asked for anything yet. The button explains itself.
+    if (!okJoin && lastError && /permission/i.test(lastError)) lastError = '';
+    fire();
+    return okJoin;
+  }
+
   // ── Public controls ──────────────────────────────────
   function init(id, sendFn) { myId = id; send = sendFn; }
 
-  async function join() {
+  async function join(isAuto) {
     lastError = '';
     const why = unavailableReason();
     if (why) { lastError = why; fire(); return false; }
@@ -325,7 +352,10 @@ RC.Voice = (function () {
     const ac = ensureCtx();
     if (ac && ac.state === 'suspended') { try { await ac.resume(); } catch (e) {} }
     localMeter = meterFor(stream);
-    joined = true; micOn = true;
+    joined = true;
+    micOn = true;                       // mic live on join
+    setDeaf(false);                     // and speaker live
+    if (!isAuto) { setAutoWanted(true); autoTried = true; }
     setMicEnabled(true);
     startMeters();
     if (send) send({ t: 'voiceJoin' });
@@ -333,7 +363,8 @@ RC.Voice = (function () {
     return true;
   }
 
-  function leave() {
+  function leave(explicit) {
+    if (explicit) setAutoWanted(false);        // they chose to hang up — respect it
     if (send && joined) send({ t: 'voiceLeave' });
     joined = false;
     for (const id of [...peers.keys()]) dropPeer(id);
@@ -366,12 +397,12 @@ RC.Voice = (function () {
   function status() {
     return {
       supported: supported(), secure: secure(), reason: unavailableReason(),
-      joined, micOn, deaf, error: lastError, myId, needsGesture,
+      joined, micOn, deaf, error: lastError, myId, needsGesture, auto: autoWanted(),
       speaking: joined && micOn && localSpeaking,
       peers: [...peers.values()].map(p => ({ id: p.id, name: p.name, state: p.state, speaking: p.speaking })),
     };
   }
 
-  return { init, join, leave, toggleMic, setMicEnabled, toggleDeaf, setDeaf,
+  return { init, join, autoJoin, resetAuto, leave, toggleMic, setMicEnabled, toggleDeaf, setDeaf,
            onSignal, setRoster, status, on, get joined() { return joined; } };
 })();

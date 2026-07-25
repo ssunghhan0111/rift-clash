@@ -447,7 +447,7 @@ window.RC = window.RC || {};
 
   function openMenu() {
     started = false;
-    if (RC.Voice && RC.Voice.joined) RC.Voice.leave();     // quitting to the menu hangs up
+    if (RC.Voice && RC.Voice.joined) RC.Voice.leave(false);   // quitting to the menu hangs up, but keeps auto-join armed
     if (RC.online) { RC.NetClient.close(); RC.online = false; }
     document.getElementById('lobby').classList.add('hidden');
     document.getElementById('browser').classList.add('hidden');
@@ -721,15 +721,17 @@ window.RC = window.RC || {};
 
     const note = document.getElementById('voice-note');
     if (note) note.textContent = st.joined
-      ? 'You are on the call — audio goes straight between players, not through the server.'
-      : (st.reason || 'Talk to the other players while you play.');
+      ? 'Mic and speaker are on — audio goes straight between players, not through the server.'
+      : (st.reason || (st.auto
+          ? 'Voice turns on by itself when you join a game. Press Join Voice to start it now.'
+          : 'Voice is off because you left the call. Press Join Voice to turn it back on.'));
 
     const mic = document.getElementById('voice-mic');
     if (mic) { mic.textContent = st.micOn ? 'Mute mic' : 'Unmute mic'; mic.classList.toggle('on', !st.micOn); }
     const deaf = document.getElementById('voice-deaf');
     if (deaf) { deaf.textContent = st.deaf ? 'Undeafen' : 'Deafen'; deaf.classList.toggle('on', st.deaf); }
     const join = document.getElementById('voice-join');
-    if (join) { join.disabled = !!st.reason; join.title = st.reason || 'Ask for microphone access and join the call'; }
+    if (join) { join.disabled = !!st.reason; join.title = st.reason || 'Turn the mic and speaker on'; }
 
     const err = document.getElementById('voice-error');
     if (err) err.textContent = st.needsGesture
@@ -771,10 +773,11 @@ window.RC = window.RC || {};
     const d = document.getElementById('voice-deaf');
     if (d) d.addEventListener('click', () => { RC.Voice.toggleDeaf(); renderVoice(); });
     const l = document.getElementById('voice-leave');
-    if (l) l.addEventListener('click', () => { RC.Voice.leave(); renderVoice(); });
+    if (l) l.addEventListener('click', () => { RC.Voice.leave(true); renderVoice(); });
     renderVoice();
   })();
-  function leaveVoice() { if (RC.Voice && RC.Voice.joined) RC.Voice.leave(); voiceRoster = []; renderVoice(); }
+  // Not an explicit hang-up: the room ended or the socket dropped, so auto-join stays armed.
+  function leaveVoice() { if (RC.Voice && RC.Voice.joined) RC.Voice.leave(false); voiceRoster = []; renderVoice(); }
 
   function openBrowser(kind) {
     // No nickname yet? Ask first — other players are about to see this name.
@@ -837,12 +840,20 @@ window.RC = window.RC || {};
   N.on('inviteSent', m => setBrowserStatus('Invite sent to ' + m.name + ' — waiting for them to accept…'));
   N.on('inviteDeclined', m => setBrowserStatus(m.name + ' declined the invite.'));
   N.on('inviteError', m => setBrowserStatus(m.msg || 'That invite could not be sent.'));
-  N.on('joined', m => { roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null; showLobby(); });
+  N.on('joined', m => {
+    roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null;
+    showLobby();
+    // Mic and speaker come up automatically on entering a room.
+    if (RC.Voice) { RC.Voice.resetAuto(); RC.Voice.autoJoin().then(renderVoice); }
+  });
   N.on('joinError', m => setBrowserStatus(m.msg || 'Could not join that game.'));
   N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); RC.isHost = isHost; if (m.code) roomCode = m.code; roomPublic = m.public; renderLobby(); renderPresence(); renderVoice(); });
   N.on('toLobby', () => { started = false; game.over = null; overlayShown = false; overlay.classList.add('hidden'); showLobby(); });
 
-  N.on('start', m => startOnline(m));
+  N.on('start', m => {
+    startOnline(m);
+    if (RC.Voice) RC.Voice.autoJoin().then(renderVoice);
+  });
   N.on('snap', m => {
     if (!started || !RC.online) return;
     RC.Net.applySnapshot(game, m.s);
