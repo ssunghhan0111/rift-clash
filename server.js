@@ -281,6 +281,8 @@ function onConnect(socket) {
     races: RC.RACE_ORDER.map(r => ({ id: r, name: RC.RACES[r].name })),
   });
   sendRoomList(c);
+  send(c, presencePayload());
+  broadcastPresence();
 
   const parse = makeParser(
     (text) => { let m; try { m = JSON.parse(text); } catch (e) { return; } onMsg(c, m); },
@@ -296,6 +298,7 @@ function onConnect(socket) {
 function onClose(c) {
   sockets.delete(c);
   if (c.room) leaveRoom(c);
+  broadcastPresence();
 }
 
 // ── Room lifecycle ──
@@ -333,6 +336,7 @@ function joinRoom(c, room) {
   send(c, { t: 'joined', roomId: room.id, code: room.code, name: room.name, public: room.public });
   pushLobby(room);
   broadcastRoomList();
+  broadcastPresence();
 }
 
 function leaveRoom(c) {
@@ -348,6 +352,7 @@ function leaveRoom(c) {
   if (room.clients.length === 0) destroyRoom(room);
   else pushLobby(room);
   broadcastRoomList();
+  broadcastPresence();
 }
 
 function destroyRoom(room) {
@@ -386,12 +391,85 @@ function broadcastRoomList() {                     // push to everyone currently
   sockets.forEach(c => { if (!c.room) wsSend(c.socket, s); });
 }
 
+// ── Presence ──
+// Who else is actually here. The room list alone never answered that: a player
+// could be online and idle in the menu and be completely invisible to everyone.
+const PRESENCE_CAP = 60;                           // payload guard, not a player cap
+function clientById(id) { for (const c of sockets) if (c.id === id) return c; return null; }
+function statusOf(c) { return c.room ? (c.room.lobby.started ? 'ingame' : 'lobby') : 'idle'; }
+function presencePayload() {
+  const players = [];
+  for (const c of sockets) {
+    if (players.length >= PRESENCE_CAP) break;
+    players.push({ id: c.id, name: c.name, status: statusOf(c) });
+  }
+  return { t: 'presence', players, total: sockets.size };
+}
+// Anyone in a running match is already getting 30 Hz snapshots — don't add to it.
+function broadcastPresence() {
+  const s = JSON.stringify(presencePayload());
+  sockets.forEach(c => { if (!c.room || !c.room.lobby.started) wsSend(c.socket, s); });
+}
+
 // ── Message handling ──
 function onMsg(c, m) {
   switch (m.t) {
-    case 'setName': c.name = String(m.name || '').slice(0, 16) || c.name; if (c.room) pushLobby(c.room); break;
-    case 'list': sendRoomList(c); break;
+    case 'setName':
+      c.name = String(m.name || '').slice(0, 16) || c.name;
+      if (c.room) pushLobby(c.room);
+      broadcastPresence();
+      break;
+    case 'list': sendRoomList(c); send(c, presencePayload()); break;
     case 'create': createRoom(c, m.name, m.public, m.gameMode); break;
+
+    // ── Direct invites ──
+    // Pull a named player straight into a game: no code to read out, no room to
+    // find. The inviter's room is created on demand and shaped to the invite.
+    case 'invite': {
+      const now = Date.now();
+      if (now - (c.lastInvite || 0) < 1500) { send(c, { t: 'inviteError', msg: 'Give it a second before inviting again.' }); break; }
+      const target = clientById(m.to);
+      if (!target || target === c) { send(c, { t: 'inviteError', msg: 'That player is no longer online.' }); break; }
+      if (target.room && target.room.lobby.started) { send(c, { t: 'inviteError', msg: target.name + ' is already in a match.' }); break; }
+      if (c.room && c.room.lobby.started) { send(c, { t: 'inviteError', msg: 'Leave your current match first.' }); break; }
+      c.lastInvite = now;
+
+      // A kind is only sent from the browser screen ("invite them to a 2v2"). An
+      // invite sent from inside a lobby carries none, because the room already has
+      // a game type and rewriting it out from under the host would be a surprise.
+      const hasKind = (m.kind === 'vs' || m.kind === 'survival');
+      const gm = (m.kind === 'survival') ? 'survival' : 'vs';
+      const modeId = RC.MODES[m.modeId] ? m.modeId : '1v1';
+      let room = c.room;
+      if (!room) room = createRoom(c, c.name + "'s Game", false, gm);
+      // Only reshape a room we actually host — otherwise we'd rewrite someone else's lobby.
+      if (hasKind && isHost(c) && !room.lobby.started) {
+        room.lobby.gameMode = gm;
+        if (gm === 'vs') room.lobby.modeId = modeId;
+        pushLobby(room); broadcastRoomList();
+      }
+      if (room.clients.length >= roomCap(room)) { send(c, { t: 'inviteError', msg: 'Your game is already full.' }); break; }
+      send(target, {
+        t: 'invited', from: c.id, fromName: c.name,
+        roomId: room.id, code: room.code,
+        gameMode: room.lobby.gameMode, modeId: room.lobby.modeId,
+      });
+      send(c, { t: 'inviteSent', name: target.name });
+      break;
+    }
+    case 'inviteAccept': {
+      const room = rooms.get(m.roomId);
+      if (!room) { send(c, { t: 'joinError', msg: 'That game no longer exists.' }); break; }
+      if (room.lobby.started) { send(c, { t: 'joinError', msg: 'That game has already started.' }); break; }
+      if (room.clients.length >= roomCap(room)) { send(c, { t: 'joinError', msg: 'That game filled up.' }); break; }
+      joinRoom(c, room);
+      break;
+    }
+    case 'inviteDecline': {
+      const target = clientById(m.to);
+      if (target) send(target, { t: 'inviteDeclined', name: c.name });
+      break;
+    }
     case 'join': {
       const code = String(m.code || '').toUpperCase();
       const room = m.roomId ? rooms.get(m.roomId) : roomByCode(code);
@@ -465,6 +543,7 @@ function startMatch(room) {
                team: room.teamOf[room.ownerOf.get(cl.socket)], rosters });
   });
   broadcastRoomList();                             // it's no longer joinable — drop from the public list
+  broadcastPresence();                             // everyone in it now reads as "In a match"
 
   const DT = 1 / 30;
   room.loop = setInterval(() => {
@@ -513,6 +592,7 @@ function startSurvivalMatch(room) {
     });
   });
   broadcastRoomList();
+  broadcastPresence();                             // co-op defenders now read as "In a match"
 
   const DT = 1 / 30;
   room.loop = setInterval(() => {
@@ -539,6 +619,7 @@ function stopMatch(room) {
   room.game = null; room.lobby.started = false; room.ownerOf = new Map(); room.cmdQueue = [];
   roomBroadcast(room, { t: 'toLobby' });
   broadcastRoomList();
+  broadcastPresence();
 }
 
 // ── Heartbeat — keeps idle lobby sockets alive through proxies (fixes lobby disconnects) ──

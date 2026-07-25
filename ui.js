@@ -23,19 +23,102 @@ RC.UI = (function () {
     el.toast = document.getElementById('toast');
     el.overlay = document.getElementById('overlay');
     el.overlayText = document.getElementById('overlay-text');
+    el.pauseBtn = document.getElementById('tb-pause');
+    el.pausedTag = document.getElementById('paused-tag');
+    el.gameMenu = document.getElementById('gamemenu');
 
-    document.getElementById('btn-restart').addEventListener('click', () => {
-      if (RC.online) { RC.NetClient.send({ t: 'restart' }); return; }   // host returns everyone to lobby
-      g.reset(); RC.AI.reset(); RC.Input.clampCam();
-      el.overlay.classList.add('hidden');
-    });
+    document.getElementById('btn-restart').addEventListener('click', () => restartMatch());
 
+    initGameMenu();
     initTouchbar();
+    syncPause();
+  }
+
+  // ── Restart / quit ────────────────────────────────
+  // Shared by the end-of-match overlay and the ⏹ end-match dialog so the two can
+  // never drift apart.
+  function restartMatch() {
+    if (RC.online) { RC.NetClient.send({ t: 'restart' }); return; }   // host returns everyone to lobby
+    g.reset();
+    if (RC.AI) RC.AI.reset();
+    RC.Input.clampCam();
+    g.paused = false;
+    el.overlay.classList.add('hidden');
+    syncPause();
+  }
+  function quitToMenu() {
+    g.paused = false;
+    syncPause();
+    if (RC.openMenu) RC.openMenu();
+  }
+
+  // ── ⏹ End-match dialog ───────────────────────────
+  // Opening it pauses the match (offline) so nobody is being overrun while they
+  // read the buttons. Cancelling restores whatever the pause state was before.
+  let gmWasPaused = false;
+  function openGameMenu() {
+    if (!el.gameMenu) return;
+    gmWasPaused = !!g.paused;
+    if (!RC.online) g.paused = true;
+    const sub = document.getElementById('gm-sub');
+    const restartBtn = document.getElementById('gm-restart');
+    if (RC.online) {
+      // Online, only the host can send everyone back to the lobby; anyone can leave.
+      const host = !!RC.isHost;
+      if (restartBtn) {
+        restartBtn.disabled = !host;
+        restartBtn.textContent = host ? '↻ Back to Lobby (everyone)' : '↻ Back to Lobby — host only';
+      }
+      if (sub) sub.textContent = 'Online matches keep running — the game is not paused.';
+    } else {
+      if (restartBtn) { restartBtn.disabled = false; restartBtn.textContent = '↻ Restart'; }
+      if (sub) sub.textContent = 'The match is paused while you decide.';
+    }
+    el.gameMenu.classList.remove('hidden');
+    syncPause();
+  }
+  function closeGameMenu(restorePause) {
+    if (!el.gameMenu) return;
+    el.gameMenu.classList.add('hidden');
+    if (restorePause && !RC.online) g.paused = gmWasPaused;
+    syncPause();
+  }
+  function initGameMenu() {
+    const menuBtn = document.getElementById('tb-gamemenu');
+    if (menuBtn) menuBtn.addEventListener('click', openGameMenu);
+    const r = document.getElementById('gm-restart');
+    if (r) r.addEventListener('click', () => { closeGameMenu(false); restartMatch(); });
+    const q = document.getElementById('gm-quit');
+    if (q) q.addEventListener('click', () => { closeGameMenu(false); quitToMenu(); });
+    const c = document.getElementById('gm-cancel');
+    if (c) c.addEventListener('click', () => closeGameMenu(true));
+  }
+
+  // ── Pause ─────────────────────────────────────────
+  // One place decides what the button looks like, so the P key, the touch button
+  // and the end-match dialog can never disagree about the state.
+  function syncPause() {
+    const online = !!RC.online;
+    if (online) g.paused = false;              // the server never stops ticking
+    const on = !!g.paused;
+    if (el.pauseBtn) {
+      el.pauseBtn.textContent = on ? '▶' : '⏸';
+      el.pauseBtn.title = online ? 'Pause is offline-only' : (on ? 'Resume (P)' : 'Pause (P)');
+      el.pauseBtn.classList.toggle('on', on);
+      el.pauseBtn.disabled = online;
+      el.pauseBtn.style.opacity = online ? '.4' : '';
+    }
+    if (el.pausedTag) el.pausedTag.classList.toggle('hidden', !on);
+  }
+  function togglePause() {
+    if (RC.online) return;                     // no pausing a live server match
+    g.paused = !g.paused;
+    syncPause();
   }
 
   // 터치용 툴바 — 키보드 단축키(P/S/F/Space/Esc/컨트롤그룹)를 버튼으로 대체
   function initTouchbar() {
-    document.getElementById('tb-pause').addEventListener('click', () => { g.paused = !g.paused; });
+    document.getElementById('tb-pause').addEventListener('click', togglePause);
 
     document.getElementById('tb-stop').addEventListener('click', () => {
       const ids = g.selection.filter(u => u.kind === 'unit' && u.owner === g.playerOwner).map(u => u.id);
@@ -133,6 +216,8 @@ RC.UI = (function () {
   let lastSig = '';
 
   function update() {
+    // 일시정지 표시는 매 프레임 맞춘다 — P 키로 바꿔도 버튼이 따라온다
+    syncPause();
     const me = g.playerOwner;
     if (!g.res[me]) return;                 // online: state not received yet
     const s = g.supply(me);
@@ -234,7 +319,9 @@ RC.UI = (function () {
     if (e.kind === 'unit') {
       const atk = e.effAtk ? Math.round(e.effAtk(g)) : e.def.dmg;
       rows.push(['Attack', atk]);
-      rows.push(['Range', e.effRange ? e.effRange(g) : e.def.range]);
+      rows.push(['Range', Math.round(e.effRange ? e.effRange(g) : e.def.range)]);
+      // 시야 — 이제 유닛마다 다르고, 이 거리 안에 적이 들어오면 알아서 교전한다
+      rows.push(['Sight', Math.round(e.effSight ? e.effSight(g) : (e.def.sight || 0))]);
       const arm = e.effArmor ? e.effArmor(g) : (e.def.armor || 0);
       if (arm) rows.push(['Armor', arm]);
       if (e.maxEnergy) rows.push(['Energy', `${Math.floor(e.energy)} / ${Math.floor(e.effMaxEnergy(g))}`]);
@@ -363,6 +450,7 @@ RC.UI = (function () {
     if (d.shield) bits.push(`SHLD ${d.shield}`);
     if (d.dmg) bits.push(`ATK ${d.dmg}`);
     if (d.range > 20) bits.push(`RNG ${d.range}`);
+    if (d.sight) bits.push(`SIGHT ${d.sight}`);
     if (d.armor) bits.push(`ARM ${d.armor}`);
     if (d.regen) bits.push(`regen ${d.regen}/s`);
     if (d.acid) bits.push('applies acid');
@@ -508,5 +596,5 @@ RC.UI = (function () {
     el.overlay.classList.remove('hidden');
   }
 
-  return { init, update, showOverlay };
+  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch };
 })();

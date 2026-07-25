@@ -19,6 +19,66 @@ window.RC = window.RC || {};
   window.addEventListener('resize', resize);
   resize();
 
+  // ── 닉네임 ────────────────────────────────────────
+  // One name for everything: the online player list, lobby chips and the world
+  // leaderboard all read it. Stored under the key leaderboard.js already used, so
+  // anyone who has posted a score keeps the name they picked and is never asked.
+  const nickEl = document.getElementById('nickname');
+  function myName() {
+    const raw = (RC.Leaderboard && RC.Leaderboard.getName && RC.Leaderboard.getName()) || '';
+    return raw.trim();
+  }
+  function saveName(n) {
+    const clean = RC.Leaderboard && RC.Leaderboard.cleanName ? RC.Leaderboard.cleanName(n) : String(n || '').slice(0, 14);
+    if (RC.Leaderboard && RC.Leaderboard.setName) RC.Leaderboard.setName(clean);
+    if (RC.NetClient && RC.NetClient.connected) RC.NetClient.send({ t: 'setName', name: clean });
+    return clean;
+  }
+  function renderWho() {
+    const n = myName() || '—';
+    const el = document.getElementById('who-name');
+    if (el) el.textContent = n;
+    const b = document.getElementById('browser-name');
+    if (b) b.textContent = n;
+  }
+  // afterFn runs once a name is committed — used to resume whatever the player was doing.
+  let nickAfter = null;
+  function openNickname(after) {
+    nickAfter = after || null;
+    const input = document.getElementById('nick-input');
+    const msg = document.getElementById('nick-msg');
+    if (msg) { msg.textContent = ''; msg.className = ''; }
+    if (input) { input.value = myName(); }
+    if (nickEl) nickEl.classList.remove('hidden');
+    // focus after the element is actually visible, or mobile keyboards ignore it
+    setTimeout(() => { if (input) { input.focus(); input.select(); } }, 30);
+  }
+  function commitNickname() {
+    const input = document.getElementById('nick-input');
+    const msg = document.getElementById('nick-msg');
+    const clean = RC.Leaderboard && RC.Leaderboard.cleanName
+      ? RC.Leaderboard.cleanName(input ? input.value : '')
+      : String((input && input.value) || '').slice(0, 14);
+    if (clean.length < 2) {
+      if (msg) { msg.textContent = 'Give yourself at least two characters.'; msg.className = 'warn'; }
+      if (input) input.focus();
+      return;
+    }
+    saveName(clean);
+    renderWho();
+    if (nickEl) nickEl.classList.add('hidden');
+    const after = nickAfter; nickAfter = null;
+    if (after) after();
+  }
+  (function initNickname() {
+    const go = document.getElementById('nick-go');
+    const input = document.getElementById('nick-input');
+    if (go) go.addEventListener('click', commitNickname);
+    if (input) input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commitNickname(); } });
+    const edit = document.getElementById('who-edit');
+    if (edit) edit.addEventListener('click', () => openNickname(null));
+  })();
+
   // ── 시작 화면 ─────────────────────────────────────
   const ss = document.getElementById('startscreen');
   const overlay = document.getElementById('overlay');
@@ -396,8 +456,11 @@ window.RC = window.RC || {};
     exitFullscreenIfActive();
     buildStartScreen();
     applyGameMode(selGameMode);
+    renderWho();
     ss.classList.remove('hidden');
   }
+  // The ⏹ end-match dialog in ui.js needs a way home without reaching into this closure.
+  RC.openMenu = openMenu;
 
   // ── World leaderboard screen ────────────────────────────
   const boardEl = document.getElementById('board');
@@ -544,7 +607,107 @@ window.RC = window.RC || {};
     });
   }
 
+  // ── Who's online + direct invites ───────────────────────
+  // The room browser only ever showed rooms, so you could not tell whether anyone
+  // else was even connected. This lists every player on the server and lets you
+  // pull one of them straight into a game without either of you typing a code.
+  let presence = [];
+  const INVITE_KINDS = [
+    { id: '1v1', label: '⚔️ 1v1', kind: 'vs', modeId: '1v1' },
+    { id: '2v2', label: '⚔️ 2v2', kind: 'vs', modeId: '2v2' },
+    { id: 'survival', label: '🛡️ Survival', kind: 'survival', modeId: '1v1' },
+  ];
+  const STATUS_TEXT = { idle: 'In the menu', lobby: 'Waiting in a game lobby', ingame: 'In a match' };
+
+  // Rendered into TWO places: the browser (pick the game type as you invite) and
+  // the lobby (pull more people into the game you are already sitting in — without
+  // which a 2v2 or a 4-player co-op could never be filled by invite).
+  function renderPresence() {
+    renderPresenceInto('online-list', 'online-count', false);
+    renderPresenceInto('lobby-online', 'lobby-online-count', true);
+  }
+  function renderPresenceInto(listId, countId, inLobby) {
+    const wrap = document.getElementById(listId);
+    const count = document.getElementById(countId);
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    const others = presence.filter(p => p.id !== myId && (!inLobby || p.status !== 'lobby' || !inRoomWithMe(p.id)));
+    if (count) {
+      count.textContent = presence.length <= 1
+        ? 'just you for now'
+        : presence.length + ' online · ' + others.length + ' other' + (others.length === 1 ? '' : 's');
+    }
+    if (!others.length) {
+      wrap.innerHTML = '<div id="online-empty">' + (inLobby
+        ? 'Nobody else is online to invite yet. Empty seats are filled by bots.'
+        : 'Nobody else is online right now. Create a public game and it will show up for the next player who arrives.')
+        + '</div>';
+      return;
+    }
+    others.forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'prow';
+      const busy = p.status === 'ingame';
+      const info = document.createElement('div');
+      info.innerHTML = `<div class="pnm">${esc(p.name)}</div><div class="pst">${STATUS_TEXT[p.status] || 'Online'}</div>`;
+      const btns = document.createElement('div');
+      btns.className = 'pinv';
+      // In the lobby there is nothing to choose — the room already has a game type,
+      // and sending a kind here would silently rewrite the host's own settings.
+      const kinds = inLobby ? [{ id: 'this game', label: '✉️ Invite', kind: null }] : INVITE_KINDS;
+      kinds.forEach(k => {
+        const b = document.createElement('button');
+        b.textContent = k.label;
+        b.disabled = busy;
+        b.title = busy ? p.name + ' is in a match' : 'Invite ' + p.name + ' to ' + k.id;
+        if (!busy) b.addEventListener('click', () => {
+          const msg = { t: 'invite', to: p.id };
+          if (k.kind) { msg.kind = k.kind; msg.modeId = k.modeId; }
+          N.send(msg);
+          const note = 'Invite sent to ' + p.name + ' — waiting for them to accept…';
+          if (inLobby) setStatus(note); else setBrowserStatus(note);
+        });
+        btns.appendChild(b);
+      });
+      row.appendChild(info); row.appendChild(btns);
+      wrap.appendChild(row);
+    });
+  }
+  function inRoomWithMe(id) {
+    return !!(lobbyData && (lobbyData.players || []).some(p => p.id === id));
+  }
+
+  // Incoming invite — one at a time; a newer invite replaces the one on screen.
+  let pendingInvite = null;
+  function showInvite(m) {
+    pendingInvite = m;
+    const pop = document.getElementById('invite-pop');
+    const txt = document.getElementById('invite-text');
+    if (!pop || !txt) return;
+    const what = m.gameMode === 'survival' ? 'Survival co-op' : (m.modeId === '2v2' ? 'a 2v2' : 'a 1v1');
+    txt.innerHTML = `<b>${esc(m.fromName)}</b> invites you to ${what}.`;
+    pop.classList.remove('hidden');
+  }
+  function hideInvite() { pendingInvite = null; const p = document.getElementById('invite-pop'); if (p) p.classList.add('hidden'); }
+  (function initInvite() {
+    const a = document.getElementById('inv-accept');
+    const d = document.getElementById('inv-decline');
+    if (a) a.addEventListener('click', () => {
+      if (!pendingInvite) return;
+      const inv = pendingInvite; hideInvite();
+      N.send({ t: 'inviteAccept', roomId: inv.roomId });
+    });
+    if (d) d.addEventListener('click', () => {
+      if (!pendingInvite) return;
+      const inv = pendingInvite; hideInvite();
+      N.send({ t: 'inviteDecline', to: inv.from });
+    });
+  })();
+
   function openBrowser(kind) {
+    // No nickname yet? Ask first — other players are about to see this name.
+    if (!myName()) { openNickname(() => openBrowser(kind)); return; }
+    renderWho();
     onlineKind = kind;
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
     const title = document.getElementById('browser-title');
@@ -552,6 +715,7 @@ window.RC = window.RC || {};
       ? 'RIFT<b>CLASH</b> · Online Co-op'
       : 'RIFT<b>CLASH</b> · Online';
     showBrowser(); setBrowserStatus('Connecting…');
+    presence = []; renderPresence();
     RC.online = false;
     if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); }
     N.connect(url);
@@ -569,6 +733,7 @@ window.RC = window.RC || {};
   });
   document.getElementById('browser-back').addEventListener('click', () => {
     N.close(); RC.online = false; started = false;
+    presence = []; hideInvite();
     browserEl.classList.add('hidden'); openMenu();
   });
   document.getElementById('btn-menu2').addEventListener('click', () => {
@@ -577,15 +742,24 @@ window.RC = window.RC || {};
   });
   document.getElementById('lobby-start').addEventListener('click', () => { goFullscreen(); N.send({ t: 'start' }); });
 
-  N.on('__open', () => { setBrowserStatus('Connected. Create or join a game below.'); N.send({ t: 'list' }); });
+  N.on('__open', () => {
+    setBrowserStatus('Connected. Invite someone below, or create a game.');
+    N.send({ t: 'setName', name: myName() });     // claim our name before anyone sees the list
+    N.send({ t: 'list' });
+  });
   N.on('__error', () => setBrowserStatus('Could not connect — the server may be waking up. Wait ~30s, then press Back and Online again.'));
-  N.on('__close', () => { if (!started) setBrowserStatus('Disconnected. Press Back, then Online to reconnect.'); });
+  N.on('__close', () => { presence = []; renderPresence(); hideInvite(); if (!started) setBrowserStatus('Disconnected. Press Back, then Online to reconnect.'); });
 
-  N.on('welcome', m => { myId = m.id; });
+  N.on('welcome', m => { myId = m.id; renderPresence(); });
   N.on('rooms', m => renderRooms(m.rooms));
+  N.on('presence', m => { presence = m.players || []; renderPresence(); });
+  N.on('invited', m => showInvite(m));
+  N.on('inviteSent', m => setBrowserStatus('Invite sent to ' + m.name + ' — waiting for them to accept…'));
+  N.on('inviteDeclined', m => setBrowserStatus(m.name + ' declined the invite.'));
+  N.on('inviteError', m => setBrowserStatus(m.msg || 'That invite could not be sent.'));
   N.on('joined', m => { roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null; showLobby(); });
   N.on('joinError', m => setBrowserStatus(m.msg || 'Could not join that game.'));
-  N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); if (m.code) roomCode = m.code; roomPublic = m.public; renderLobby(); });
+  N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); RC.isHost = isHost; if (m.code) roomCode = m.code; roomPublic = m.public; renderLobby(); renderPresence(); });
   N.on('toLobby', () => { started = false; game.over = null; overlayShown = false; overlay.classList.add('hidden'); showLobby(); });
 
   N.on('start', m => startOnline(m));
@@ -728,6 +902,10 @@ window.RC = window.RC || {};
 
   buildStartScreen();
   applyGameMode(selGameMode);
+  renderWho();
+  // First launch — ask who they are before the menu. Anyone who already has a name
+  // (including from posting a leaderboard score) walks straight past this.
+  if (!myName()) openNickname(null);
 
   // ── 루프 ──────────────────────────────────────────
   let last = performance.now();

@@ -283,6 +283,10 @@ window.RC = window.RC || {};
       this.path = null;         // 길찾기 경유점 목록 (null = 직선 이동)
       this.attackMove = false;  // 공격-이동 (경로상 적 자동 교전 후 계속 진군)
       this.amoveGoal = null;    // 공격-이동 최종 목적지
+      // 자동 교전 — 플레이어가 시킨 게 아니라 스스로 문 싸움인지, 그리고 그때 서 있던 자리.
+      // A self-initiated fight is leashed to `post`; a player-ordered attack never is.
+      this.auto = false;
+      this.post = null;
       this.carry = 0;
       this.gatherTimer = 0;
       this.hitFlash = 0;
@@ -374,6 +378,7 @@ window.RC = window.RC || {};
       this.target = { x, y };
       this.foe = null; this.node = null; this.site = null; this.path = null;
       this.attackMove = false; this.amoveGoal = null;
+      this.auto = false; this.post = null;
     }
     // 공격-이동: 목적지로 진군하되 경로상의 적을 자동 교전하고, 처치 후 계속 이동
     attackMoveTo(x, y) {
@@ -381,32 +386,101 @@ window.RC = window.RC || {};
       this.target = { x, y };
       this.foe = null; this.node = null; this.site = null; this.path = null;
       this.attackMove = true; this.amoveGoal = { x, y };
+      this.auto = false; this.post = null;
     }
+    // 플레이어(또는 AI)가 명시적으로 지시한 공격 — 목줄(leash) 없이 끝까지 쫓는다
     attackTarget(e) {
       this.state = 'attack';
       this.foe = e; this.target = null; this.node = null; this.site = null; this.path = null;
+      this.auto = false; this.post = null;
+    }
+    // 스스로 발견해서 시작한 교전 — 지금 서 있는 자리를 초소로 삼고 그 주변에서만 싸운다.
+    // Without this leash, widening acquisition to a unit's full sight would let an
+    // army dribble across the map one sighting at a time.
+    engage(e) {
+      const px = this.x, py = this.y;
+      const am = this.attackMove, goal = this.amoveGoal;
+      this.attackTarget(e);
+      this.auto = true;
+      this.post = { x: px, y: py };
+      this.attackMove = am; this.amoveGoal = goal;   // 공격-이동은 처치 후 계속되어야 한다
     }
     gatherFrom(node) {
       if (!this.def.worker) return;
       this.state = 'toNode';
       this.node = node; this.foe = null; this.site = null; this.path = null;
+      this.auto = false; this.post = null;
     }
     buildAt(b) {
       if (!this.def.worker) return;
       this.state = 'build';
       this.site = b; this.foe = null; this.node = null; this.path = null;
       this.target = { x: b.x, y: b.y };
+      this.auto = false; this.post = null;
     }
     stop() {
       this.state = 'idle';
       this.target = null; this.foe = null; this.node = null; this.site = null; this.path = null;
       this.attackMove = false; this.amoveGoal = null;
+      this.auto = false; this.post = null;
     }
     boardTarget(ship) {
       if (this.def.flying) return;           // 공중 유닛은 탑승 불가
       this.state = 'toBoard';
       this.transportTarget = ship;
       this.foe = null; this.node = null; this.site = null; this.target = null;
+      this.auto = false; this.post = null;
+    }
+
+    // ── 자동 교전 판정 ────────────────────────────────
+    // 수송선과 무장이 없는 유닛은 절대 스스로 싸우지 않는다.
+    canFight() { return !this.def.transport && (this.def.dmg || 0) > 0; }
+
+    // 이 유닛의 실효 시야 — 유닛마다 다르고, 서 있는 지형이 다시 보정한다.
+    // 고지대에 오르면 더 멀리 보고, 그만큼 더 멀리서 적을 문다.
+    effSight(game) {
+      let s = this.def.sight;
+      if (!s) s = this.def.worker ? RC.CFG.SIGHT_WORKER
+              : this.def.flying ? RC.CFG.SIGHT_AIR : RC.CFG.SIGHT_GROUND;
+      const t = this.terr(game);                                 // 공중 유닛은 null → 보정 없음
+      if (t && t.high) s *= (RC.CFG.TERRAIN.high.sight || 1);
+      else if (t && t.low) s *= (RC.CFG.TERRAIN.low.sight || 1);
+      return s;
+    }
+    // 자동으로 적을 인식하는 거리. 시야가 기준이지만, 사거리보다 짧아질 수는 없다 —
+    // 그러면 쏠 수 있는데도 가만히 서 있는 유닛이 생긴다 (조준 사격 중인 공성 유닛 등).
+    acquireRange(game) {
+      return Math.max(this.effSight(game), this.effRange(game) + (RC.CFG.ACQUIRE_PAD || 0),
+                      this.def.sight ? 0 : (RC.CFG.AGGRO_RANGE || 0));
+    }
+    // 초소에서 이만큼 벗어나면 추격을 포기하고 돌아온다
+    leashRange(game) { return this.acquireRange(game) + (RC.CFG.CHASE_PAD || 0); }
+
+    // ── 사거리 판정 ───────────────────────────────────
+    // 건물은 사각형이다. 반지름(r = max(w,h)/2)으로 재면 _pushOutBox가 유닛을
+    // 밀어내는 거리(w/2 + u.r)와 어긋나서, 근접 유닛이 건물에 딱 붙고도 영원히
+    // "사거리 밖"으로 판정되는 교착이 생긴다 — 실제로 글로블링·블로트·아덴트·
+    // 실드러·워든은 코어와 리프트 크리스탈을 절대 때리지 못했다.
+    // 그래서 건물에는 사각형 가장자리까지의 거리를 쓴다.
+    _inReach(foe, game) {
+      const r = this.effRange(game);
+      if (foe.kind === 'building') {
+        const dx = Math.max(Math.abs(this.x - foe.x) - foe.w / 2, 0);
+        const dy = Math.max(Math.abs(this.y - foe.y) - foe.h / 2, 0);
+        // 지상 유닛은 가장자리에서 this.r 보다 가까이 갈 수 없다 — 그보다 짧은
+        // 사거리를 요구하면 물리적으로 영원히 도달할 수 없는 조건이 된다.
+        const need = this.def.flying ? r : Math.max(r, this.r + 2);
+        return Math.hypot(dx, dy) <= need;
+      }
+      return dist(this.x, this.y, foe.x, foe.y) <= r + (foe.r || 0);
+    }
+    // 접근할 때 겨냥할 지점 — 건물이면 가장 가까운 가장자리 위의 점
+    _aimPoint(foe) {
+      if (foe.kind !== 'building') return { x: foe.x, y: foe.y };
+      return {
+        x: Math.max(foe.x - foe.w / 2, Math.min(this.x, foe.x + foe.w / 2)),
+        y: Math.max(foe.y - foe.h / 2, Math.min(this.y, foe.y + foe.h / 2)),
+      };
     }
 
     // 목표 지점으로 한 스텝 이동. 도착하면 true
@@ -621,9 +695,12 @@ window.RC = window.RC || {};
     }
 
     _idle(game) {
-      if (this.def.worker || this.def.transport) return;   // 일꾼·수송선은 알아서 싸우지 않음
-      const e = game.findNearestEnemy(this, CFG.AGGRO_RANGE);
-      if (e) { this.attackTarget(e); return; }
+      // 유휴 상태에서는 일꾼도 스스로를 지킨다 (채집/건설 중일 때는 여전히 일을 계속한다 —
+      // 그 상태들은 이 함수를 거치지 않는다). 수송선과 비무장 유닛만 예외.
+      if (!this.def.transport) {
+        const e = this.canFight() ? game.findNearestEnemy(this, this.acquireRange(game)) : null;
+        if (e) { this.engage(e); return; }
+      }
       // 공격-이동: 근처 적이 없으면 목적지로 계속 진군
       if (this.attackMove && this.amoveGoal) {
         if (RC.dist(this.x, this.y, this.amoveGoal.x, this.amoveGoal.y) > 8) this.attackMoveTo(this.amoveGoal.x, this.amoveGoal.y);
@@ -633,14 +710,30 @@ window.RC = window.RC || {};
 
     _move(dt, game) {
       if (!this.target) { this.state = 'idle'; return; }
-      // 일반 이동(Move)은 적을 무시하고 그냥 이동 → 교전 중에도 후퇴 가능.
-      // 공격-이동(attack-move)일 때만 경로상의 적을 자동 교전한다.
-      if (this.attackMove && !this.def.worker && !this.def.transport) {
-        const e = game.findNearestEnemy(this, CFG.AGGRO_RANGE);
-        if (e) { this.attackTarget(e); return; }   // attackMove/amoveGoal persist → resumes after the kill
+      if (this.canFight()) {
+        if (this.attackMove) {
+          // 공격-이동 — 시야에 들어온 적을 향해 교전을 시작한다
+          const e = game.findNearestEnemy(this, this.acquireRange(game));
+          if (e) { this.engage(e); return; }   // attackMove/amoveGoal persist → resumes after the kill
+        } else {
+          // 일반 이동(Move)은 적을 향해 방향을 틀지 않는다 — 그래야 후퇴가 가능하다.
+          // 다만 그냥 얻어맞고만 가지는 않는다: 사거리 안에 적이 들어오면 이동을
+          // 멈추지 않은 채 응사한다. Return fire never changes the move order.
+          this._returnFire(game);
+        }
       }
       // 길찾기 — 장애물/건물을 우회한다 (지상). 공중은 직진.
       if (this.navigate(dt, game, this.target.x, this.target.y, 4)) this.stop();
+    }
+
+    // 이동 중 응사 — 명령을 바꾸지 않고, 사거리 안에 있고 쿨타임이 찼을 때만 한 발.
+    _returnFire(game) {
+      if (this.cd > 0 || this.rail > 0) return;
+      const reach = this.effRange(game);
+      if (reach <= 0) return;
+      const e = game.findNearestEnemy(this, reach + 26);
+      if (!e || !this._inReach(e, game)) return;
+      this._fireAt(e, game);
     }
 
     _toBoard(dt, game) {
@@ -660,45 +753,61 @@ window.RC = window.RC || {};
 
     _attack(dt, game) {
       if (!this.foe) {
-        const e = game.findNearestEnemy(this, CFG.AGGRO_RANGE);
+        const e = this.canFight() ? game.findNearestEnemy(this, this.acquireRange(game)) : null;
         if (e) { this.foe = e; } else { this.state = 'idle'; return; }
       }
-      const reach = this.effRange(game) + (this.foe.kind === 'building' ? this.foe.r * 0.8 : this.foe.r);
-      const d = dist(this.x, this.y, this.foe.x, this.foe.y);
-      if (d > reach) {
-        this.navigate(dt, game, this.foe.x, this.foe.y, reach - 2);
+      // 목줄 — 스스로 시작한 싸움이라면 초소에서 너무 멀어졌을 때 추격을 포기한다.
+      // 플레이어가 직접 지시한 공격(auto=false)은 어디까지든 쫓아간다.
+      if (this.auto && this.post && dist(this.x, this.y, this.post.x, this.post.y) > this.leashRange(game)) {
+        const p = this.post;
+        if (this.attackMove && this.amoveGoal) this.attackMoveTo(this.amoveGoal.x, this.amoveGoal.y);
+        else this.moveTo(p.x, p.y);
+        return;
+      }
+      if (!this._inReach(this.foe, game)) {
+        if (this.foe.kind === 'building') {
+          // 사각형 가장자리를 향해 붙는다 (중심을 향하면 벽에 갈려 제자리걸음)
+          const p = this._aimPoint(this.foe);
+          this.navigate(dt, game, p.x, p.y, Math.max(2, this.effRange(game) - this.r));
+        } else {
+          const reach = this.effRange(game) + this.foe.r;
+          this.navigate(dt, game, this.foe.x, this.foe.y, reach - 2);
+        }
         return;
       }
       this.facing = Math.atan2(this.foe.y - this.y, this.foe.x - this.x);
-      if (this.cd <= 0) {
-        this.cd = this.effCd(game);
-        const foe = this.foe;
-        let dmg = this.effAtk(game);
-        // 치명 타격 업그레이드 — 확률적 2배
-        const critLvl = this._up(game, 'crit');
-        let crit = false;
-        if (critLvl > 0 && Math.random() < critLvl * RC.CFG.UP_CRIT_CHANCE) {
-          dmg *= RC.CFG.UP_CRIT_MULT; crit = true; this.critFx = 0.25;
-        }
-        const splash = this.effSplash(game);
-        const hx = foe.x, hy = foe.y;           // 착탄 지점 (스플래시 중심)
-        this._hit(foe, dmg, game);
+      if (this.cd <= 0) this._fireAt(this.foe, game);
+    }
 
-        // 공성 유닛 스플래시 — 주변 적에게도 피해
-        if (splash) {
-          const half = dmg * 0.5;
-          for (const u of game.units) {
-            if (u === foe || u.dead || u.owner === this.owner) continue;
-            if (RC.dist(hx, hy, u.x, u.y) <= splash) this._hit(u, half, game);
-          }
-        }
-
-        game.fx.push({ x: this.x, y: this.y, tx: hx, ty: hy,
-                       t: crit ? 0.14 : 0.09, owner: this.owner, splash: splash, crit: crit });
-        if (RC.Audio) RC.Audio.play('shoot');
-        if (game.marks && (crit || this.hero)) game.marks.push({ dmg: Math.round(dmg), x: foe.x, y: foe.y - (foe.r || 10) - 4, crit: crit, t: 0.8 });
-        if (this.foe && this.foe.dead) this.foe = null;
+    // 한 발 발사 — 사거리/방향 판정은 호출한 쪽 책임. _attack과 이동 중 응사가 공유한다.
+    _fireAt(foe, game) {
+      if (!foe || foe.dead) return;
+      this.cd = this.effCd(game);
+      let dmg = this.effAtk(game);
+      // 치명 타격 업그레이드 — 확률적 2배
+      const critLvl = this._up(game, 'crit');
+      let crit = false;
+      if (critLvl > 0 && Math.random() < critLvl * RC.CFG.UP_CRIT_CHANCE) {
+        dmg *= RC.CFG.UP_CRIT_MULT; crit = true; this.critFx = 0.25;
       }
+      const splash = this.effSplash(game);
+      const hx = foe.x, hy = foe.y;           // 착탄 지점 (스플래시 중심)
+      this._hit(foe, dmg, game);
+
+      // 공성 유닛 스플래시 — 주변 적에게도 피해
+      if (splash) {
+        const half = dmg * 0.5;
+        for (const u of game.units) {
+          if (u === foe || u.dead || u.owner === this.owner) continue;
+          if (RC.dist(hx, hy, u.x, u.y) <= splash) this._hit(u, half, game);
+        }
+      }
+
+      game.fx.push({ x: this.x, y: this.y, tx: hx, ty: hy,
+                     t: crit ? 0.14 : 0.09, owner: this.owner, splash: splash, crit: crit });
+      if (RC.Audio) RC.Audio.play('shoot');
+      if (game.marks && (crit || this.hero)) game.marks.push({ dmg: Math.round(dmg), x: foe.x, y: foe.y - (foe.r || 10) - 4, crit: crit, t: 0.8 });
+      if (this.foe && this.foe.dead) this.foe = null;
     }
 
     // 한 대상에게 피해 적용 (방어력 반영, 반격 유발)
@@ -713,7 +822,9 @@ window.RC = window.RC || {};
         foe.hitFlash = 0.12;
         // 동결 탄자 업그레이드 — 피격 시 둔화
         if (this._up(game, 'frost') > 0) foe.slow = Math.max(foe.slow, RC.CFG.FROST_DUR);
-        if (!foe.dead && foe.state === 'idle' && !foe.def.worker && !foe.def.transport) foe.attackTarget(this);
+        // 반격 — 가만히 서 있다가 맞았으면 되받아친다. 일꾼도 마찬가지지만,
+        // 채집·건설 중(state가 idle이 아님)이면 하던 일을 계속한다.
+        if (!foe.dead && foe.state === 'idle' && foe.canFight && foe.canFight()) foe.engage(this);
       } else {
         foe.damage(dealt);
       }
@@ -860,7 +971,8 @@ window.RC = window.RC || {};
           this.bulwark = ab.dur;
           for (const u of game.units) {
             if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(this.x, this.y, u.x, u.y) <= ab.radius) u.attackTarget(this);
+            // 도발은 그 유닛의 주인이 내린 명령이 아니다 — 목줄이 걸린 자동 교전으로 취급한다
+            if (RC.dist(this.x, this.y, u.x, u.y) <= ab.radius && u.canFight()) u.engage(this);
           }
           return true;
         }

@@ -424,7 +424,8 @@ RC.Input = (function () {
       if (c) centerOn(c.x, c.y);
       return;
     }
-    if (k === 'p' && !RC.online) { g.paused = !g.paused; return; }   // no pause in online play
+    // 일시정지 — 온라인은 서버가 계속 돌기 때문에 막는다. 버튼 모양도 같이 바뀌도록 UI를 통한다.
+    if (k === 'p') { if (RC.UI && RC.UI.togglePause) RC.UI.togglePause(); else if (!RC.online) g.paused = !g.paused; return; }
     if (k === 's') {
       const ids = g.selection.filter(u => u.kind === 'unit' && u.owner === me).map(u => u.id);
       if (ids.length) RC.cmd(g, { t: 'stop', ids });
