@@ -176,9 +176,11 @@ RC.MAPS = [
     desc: 'Frozen and far from the sun. Deep snow drags you down; the ice ridges and hot springs are worth fighting for.',
     world: { w: 3400, h: 2400 },
     bg: '#050a12', ground: '#101d2e',
+    // 시작 지점은 네 모서리로. 예전에는 좌/우 시작점이 '깊은 눈'(이동속도 55%) 띠와
+    // 얼음 첨탑 숲 한가운데 있었다 — 1v1 두 진영 모두 본진 전체가 늪 위였다.
     spawns: [
-      { x: 520, y: 1200 }, { x: 2880, y: 1200 },
-      { x: 1700, y: 480 }, { x: 1700, y: 1920 },
+      { x: 520, y: 620 }, { x: 2880, y: 1780 },
+      { x: 2880, y: 620 }, { x: 520, y: 1780 },
     ],
     terrain: [
       { poly: blob(1700, 1200, 500, 301, 0.45), color: '#16293e' },
@@ -214,6 +216,166 @@ RC.MAPS = [
     midNodes: [
       { x: 1700, y: 1200, n: 4, rad: 140 },
       { x: 1000, y: 1200, n: 3, rad: 95 },
+      { x: 2400, y: 1200, n: 3, rad: 95 },
+    ],
+  },
+  // ══ 4. 화성 — 붉은 먼지, 거대 협곡, 극관 서리 ═══════════
+  // The gimmick is the canyon: a huge Hollow scar across the middle that costs you
+  // range and sight to cross, with the Olympus caldera as the one piece of high
+  // ground everybody wants. Dust storms roll through and blind the whole map.
+  {
+    id: 'mars',
+    biome: 'rust',
+    name: 'Mars',
+    desc: 'The red planet. A canyon splits the world in two and dust storms blind everyone — take the caldera before the next one hits.',
+    world: { w: 3400, h: 2400 },
+    bg: '#1e0d08', ground: '#6b3320',
+    spawns: [
+      { x: 500, y: 500 }, { x: 2900, y: 1900 },
+      { x: 2900, y: 500 }, { x: 500, y: 1900 },
+    ],
+    terrain: [
+      { poly: blob(1700, 1200, 540, 501, 0.44), color: '#7a3b24' },
+      { poly: blob(700, 1200, 300, 502, 0.5), color: '#5f2c1b' },
+      { poly: blob(2700, 1200, 300, 503, 0.5), color: '#5f2c1b' },
+      { poly: blob(1700, 260, 340, 504, 0.5), color: '#8a5240' },   // 북극관
+      { poly: blob(1700, 2140, 340, 505, 0.5), color: '#8a5240' },  // 남극관
+    ],
+    zones: [
+      // 발레스 마리네리스 — 지도를 가로지르는 협곡. 안에서는 사거리와 시야를 잃는다.
+      { t: 'low', poly: ribbon([[-60, 1180], [620, 1300], [1240, 1120], [1700, 1260], [2180, 1100], [2780, 1280], [3460, 1160]], 165, 511) },
+      // 올림푸스 칼데라 — 지도에서 가장 높은 곳
+      { t: 'high', poly: blob(1700, 1200, 250, 512, 0.3) },
+      // 협곡 양옆 대지
+      { t: 'high', poly: blob(1080, 640, 215, 513, 0.34) },
+      { t: 'high', poly: blob(2320, 1760, 215, 514, 0.34) },
+      // 극관 서리 — 발이 미끄러진다
+      { t: 'mud', poly: blob(1700, 250, 300, 515, 0.42) },
+      { t: 'mud', poly: blob(1700, 2150, 300, 516, 0.42) },
+      // 무너진 바위 지대 — 엄폐물
+      { t: 'forest', poly: blob(760, 1720, 230, 517, 0.46) },
+      { t: 'forest', poly: blob(2640, 680, 230, 518, 0.46) },
+      // 협곡 바닥의 지열 분출구
+      { t: 'vent', poly: blob(1150, 1220, 150, 519, 0.3) },
+      { t: 'vent', poly: blob(2250, 1180, 150, 520, 0.3) },
+    ],
+    obstacles: [].concat(
+      rocks(1700, 1200, 200, 4, 100, 531),
+      rocks(1080, 640, 140, 3, 100, 532),
+      rocks(2320, 1760, 140, 3, 100, 533),
+      rocks(760, 1720, 160, 4, 90, 534),
+      rocks(2640, 680, 160, 4, 90, 535)
+    ),
+    midNodes: [
+      { x: 1700, y: 1200, n: 4, rad: 140 },
+      { x: 1150, y: 1220, n: 3, rad: 95 },
+      { x: 2250, y: 1180, n: 3, rad: 95 },
+    ],
+  },
+
+  // ══ 5. 목성 — 구름 갑판, 번개, 대적점 ═══════════════════
+  // No solid ground anywhere: you fight on cloud decks between jet-stream bands.
+  // The bands are the map — crossing one costs you real time, so the fastest route
+  // is rarely a straight line.
+  {
+    id: 'jupiter',
+    biome: 'storm',
+    name: 'Jupiter',
+    desc: 'No ground, only cloud decks. Jet-stream bands drag you sideways and lightning lights the whole sky — the Great Red Spot is the prize.',
+    world: { w: 3400, h: 2400 },
+    bg: '#160e1e', ground: '#3d2a3f',
+    spawns: [
+      { x: 520, y: 620 }, { x: 2880, y: 1780 },
+      { x: 2880, y: 620 }, { x: 520, y: 1780 },
+    ],
+    terrain: [
+      { poly: blob(1700, 1200, 560, 601, 0.4), color: '#5a3444' },   // 대적점 언저리
+      { poly: ribbon([[-60, 880], [900, 820], [1900, 900], [3460, 840]], 190, 602, 0.3), color: '#4a3350' },
+      { poly: ribbon([[-60, 1560], [900, 1620], [1900, 1520], [3460, 1580]], 190, 603, 0.3), color: '#4a3350' },
+      { poly: blob(700, 1200, 280, 604, 0.5), color: '#463049' },
+      { poly: blob(2700, 1200, 280, 605, 0.5), color: '#463049' },
+    ],
+    zones: [
+      // 제트기류 띠 — 맞바람에 걸리면 기어가게 된다
+      { t: 'mud', poly: ribbon([[-60, 880], [900, 820], [1900, 900], [3460, 840]], 150, 611) },
+      { t: 'mud', poly: ribbon([[-60, 1560], [900, 1620], [1900, 1520], [3460, 1580]], 150, 612) },
+      // 솟아오른 구름탑 — 위에 올라서면 폭풍 위로 나온다
+      { t: 'high', poly: blob(1150, 1200, 235, 613, 0.33) },
+      { t: 'high', poly: blob(2250, 1200, 235, 614, 0.33) },
+      { t: 'high', poly: blob(1700, 620, 205, 615, 0.33) },
+      { t: 'high', poly: blob(1700, 1780, 205, 616, 0.33) },
+      // 폭풍 그늘 — 구름 아래로 가라앉는 곳
+      { t: 'low', poly: blob(760, 620, 210, 617, 0.42) },
+      { t: 'low', poly: blob(2640, 1780, 210, 618, 0.42) },
+      // 암모니아 결정운 — 몸을 감출 수 있다
+      { t: 'forest', poly: blob(760, 1780, 235, 619, 0.44) },
+      { t: 'forest', poly: blob(2640, 620, 235, 620, 0.44) },
+      // 대적점 — 폭풍의 눈. 에너지가 솟는다.
+      { t: 'vent', poly: blob(1700, 1200, 185, 621, 0.26) },
+    ],
+    obstacles: [].concat(
+      rocks(1150, 1200, 150, 3, 95, 631),
+      rocks(2250, 1200, 150, 3, 95, 632),
+      rocks(1700, 620, 130, 3, 90, 633),
+      rocks(1700, 1780, 130, 3, 90, 634)
+    ),
+    midNodes: [
+      { x: 1700, y: 1200, n: 4, rad: 150 },
+      { x: 1150, y: 1200, n: 3, rad: 95 },
+      { x: 2250, y: 1200, n: 3, rad: 95 },
+    ],
+  },
+
+  // ══ 6. 토성 — 고리 파편, 목자 위성, 카시니 간극 ═════════
+  // The widest map, and the most open. Cover is scarce, the ring arcs slow you
+  // down, and the shepherd moons are the only high ground for a long way.
+  {
+    id: 'saturn',
+    biome: 'ring',
+    name: 'Saturn',
+    desc: 'Fighting inside the rings. Debris arcs drag you to a crawl, cover is scarce, and the shepherd moons are the only high ground out here.',
+    world: { w: 3600, h: 2400 },
+    bg: '#080d18', ground: '#1c2438',
+    spawns: [
+      { x: 540, y: 1200 }, { x: 3060, y: 1200 },
+      { x: 1800, y: 400 }, { x: 1800, y: 2020 },
+    ],
+    terrain: [
+      { poly: ribbon([[-60, 1200], [900, 1130], [1800, 1240], [2700, 1130], [3660, 1210]], 300, 701, 0.25), color: '#25314b' },
+      { poly: ribbon([[-60, 700], [900, 760], [1800, 660], [2700, 760], [3660, 690]], 150, 702, 0.3), color: '#212c44' },
+      { poly: ribbon([[-60, 1700], [900, 1640], [1800, 1740], [2700, 1640], [3660, 1710]], 150, 703, 0.3), color: '#212c44' },
+      { poly: blob(1800, 1200, 320, 704, 0.46), color: '#2b3856' },
+    ],
+    zones: [
+      // 고리 파편대 — 촘촘한 얼음 자갈이 발목을 잡는다
+      { t: 'mud', poly: ribbon([[-60, 700], [900, 760], [1800, 660], [2700, 760], [3660, 690]], 130, 711) },
+      { t: 'mud', poly: ribbon([[-60, 1700], [900, 1640], [1800, 1740], [2700, 1640], [3660, 1710]], 130, 712) },
+      // 목자 위성 — 이 근처의 유일한 고지
+      { t: 'high', poly: blob(1200, 1200, 235, 713, 0.32) },
+      { t: 'high', poly: blob(2400, 1200, 235, 714, 0.32) },
+      { t: 'high', poly: blob(1800, 700, 200, 715, 0.32) },
+      { t: 'high', poly: blob(1800, 1700, 200, 716, 0.32) },
+      // 카시니 간극 — 고리가 끊긴 빈 골. 아래로 꺼져 시야가 나빠진다.
+      { t: 'low', poly: ribbon([[700, 1200], [1200, 1080], [1800, 1220], [2400, 1080], [2900, 1200]], 105, 717) },
+      // 얼음 결정 덤불 — 이 개활지에서 유일한 엄폐
+      { t: 'forest', poly: blob(820, 1700, 225, 718, 0.44) },
+      { t: 'forest', poly: blob(2780, 700, 225, 719, 0.44) },
+      { t: 'forest', poly: blob(820, 700, 200, 720, 0.44) },
+      { t: 'forest', poly: blob(2780, 1700, 200, 721, 0.44) },
+      // 고리 한가운데의 얼음 간헐천
+      { t: 'vent', poly: blob(1800, 1200, 170, 722, 0.3) },
+    ],
+    obstacles: [].concat(
+      rocks(1200, 1200, 160, 4, 95, 731),
+      rocks(2400, 1200, 160, 4, 95, 732),
+      rocks(1800, 700, 110, 3, 90, 733),
+      rocks(1800, 1700, 110, 3, 90, 734),
+      rocks(820, 1700, 150, 3, 85, 735),
+      rocks(2780, 700, 150, 3, 85, 736)
+    ),
+    midNodes: [
+      { x: 1800, y: 1200, n: 4, rad: 145 },
+      { x: 1200, y: 1200, n: 3, rad: 95 },
       { x: 2400, y: 1200, n: 3, rad: 95 },
     ],
   },

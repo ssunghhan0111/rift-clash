@@ -81,7 +81,18 @@ RC.CFG = {
              mud: 'Deep Sand',      vent: 'Magma Vent' },
     ice:   { high: 'Ice Ridge', low: 'Crevasse',     forest: 'Frozen Spires',
              mud: 'Deep Snow',      vent: 'Hot Spring' },
+    rust:  { high: 'Caldera Rim', low: 'Canyon Floor', forest: 'Rockfall',
+             mud: 'Polar Frost',    vent: 'Fumarole' },
+    storm: { high: 'Cloud Tower', low: 'Storm Shadow', forest: 'Crystal Cloud',
+             mud: 'Jet Stream',     vent: 'The Red Spot' },
+    ring:  { high: 'Shepherd Moon', low: 'Cassini Gap', forest: 'Ice Thicket',
+             mud: 'Debris Arc',     vent: 'Ice Geyser' },
   },
+
+  // ── 날씨 (Weather) ──
+  // 날씨는 game.time과 맵 id만으로 결정되므로 서버와 클라이언트가 통신 없이 같은
+  // 결과를 낸다. 대부분은 연출이지만, 일부 날씨는 시야를 실제로 줄인다 (weather.js).
+  WEATHER_ENABLED: true,
 
   // ── 전장의 안개 (Fog of War) ──
   FOG_ENABLED: true,    // 안개 on/off (끄면 전맵이 보인다)

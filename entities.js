@@ -445,6 +445,9 @@ window.RC = window.RC || {};
       const t = this.terr(game);                                 // 공중 유닛은 null → 보정 없음
       if (t && t.high) s *= (RC.CFG.TERRAIN.high.sight || 1);
       else if (t && t.low) s *= (RC.CFG.TERRAIN.low.sight || 1);
+      // 날씨 — 모래폭풍/눈보라는 실제로 눈을 가린다. game.time에서만 나오는 값이라
+      // 서버와 클라이언트가 따로 계산해도 같은 숫자가 된다.
+      if (RC.Weather) s *= RC.Weather.sightMul(game);
       return s;
     }
     // 자동으로 적을 인식하는 거리. 시야가 기준이지만, 사거리보다 짧아질 수는 없다 —

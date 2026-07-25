@@ -42,12 +42,12 @@
     font-size: 13px; color: var(--orange); margin-right: 8px;
   }
   #logo b { color: var(--blue); }
-  .res { display: flex; align-items: baseline; gap: 7px; font-size: 12px; color: var(--dim); }
+  .res { display: flex; align-items: baseline; gap: 7px; font-size: 12px; color: var(--dim); white-space: nowrap; flex: none; }
   .res .val { font-family: var(--mono); font-size: 17px; color: var(--text); font-weight: 600; }
   .res .val.warn { color: var(--bad); }
   .dot { width: 9px; height: 9px; transform: rotate(45deg); background: var(--cyan); }
   #hint { margin-left: auto; font-size: 11px; color: var(--dim); font-family: var(--mono); }
-  @media (max-width: 1024px) { #hint { display: none; } }
+  @media (max-width: 1280px) { #hint { display: none; } }
 
   /* ── 화면 ─────────────────────────────────── */
   #stage { position: relative; flex: 1; min-height: 0; }
@@ -503,7 +503,7 @@
   #gm-quit { color: var(--bad); }
 
   #paused-tag {
-    position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 12;
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 12;
     background: #0d1520e8; border: 1px solid var(--line); color: var(--cyan);
     padding: 6px 16px; border-radius: 20px; font-family: var(--mono);
     font-size: 13px; font-weight: 700; letter-spacing: .18em; pointer-events: none;
@@ -585,6 +585,7 @@
     <div class="res">Pop <span class="val" id="res-pop">0 / 0</span></div>
     <div class="res">Time <span class="val" id="res-clock">0:00</span></div>
     <div class="res" id="wave-box" style="display:none">Wave <span class="val" id="res-wave" style="color:var(--cyan)">0</span></div>
+    <div class="res" id="weather-box" style="display:none" title="Current weather, and how much it is cutting unit sight. Identical for every player in the match."><span class="val" id="res-weather" style="color:#bfe3ff">—</span></div>
     <div class="res" id="daily-box" style="display:none; color:#ffc857" title="Daily Challenge — the same run for every player today"><span class="val" id="res-daily" style="color:#ffe9a8">—</span></div>
     <div id="hint">Drag to pan (middle-mouse or two fingers) · arrows/edges also pan · Left-click select, ⬚ to box-select · Right-click command · A = attack-move · Workers build towers</div>
     <button id="mute-btn" title="Sound on/off" style="margin-left:10px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">🔊</button>
@@ -852,6 +853,7 @@
 <script src="game.js"></script>
 <script src="ai.js"></script>
 <script src="daily.js"></script>
+<script src="weather.js"></script>
 <script src="survival.js"></script>
 <script src="leaderboard.js"></script>
 <script src="dev.js"></script>

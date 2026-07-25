@@ -131,6 +131,8 @@ RC.Renderer = (function () {
     ctx.restore();
 
     drawAmbient(g, W, H);          // 대기 입자 (꽃가루 / 불티 / 눈발)
+    drawIllusion(g, W, H);         // 행성 고유 착시 (토성 고리 / 목성 밴드 / 화성 아지랑이)
+    drawWeather(g, W, H);          // 날씨 (비 / 눈보라 / 모래폭풍 / 번개 …)
     drawGrade(g, W, H);            // 비네트 + 바이옴 색 보정 (영화적 톤)
     if (shk) ctx.restore();        // HUD 요소는 흔들리지 않는다
     drawDragBox(input);
@@ -160,6 +162,30 @@ RC.Renderer = (function () {
       forest: { fill: 'rgba(120,180,220,0.18)', edge: '#8fc6e8', deco: 'spires' },
       mud:    { fill: 'rgba(214,232,248,0.22)', edge: '#cfe6f7', deco: 'snow' },
       vent:   { fill: 'rgba(120,230,220,0.20)', edge: '#79e6dc', deco: 'steam' },
+    },
+    // 화성 — 산화철 붉은 대지, 극관의 흰 서리, 협곡 바닥의 그늘
+    rust: {
+      high:   { fill: 'rgba(198,110,66,0.24)',  edge: '#e0854f', deco: 'mesa',   cap: '#f0b083' },
+      low:    { fill: 'rgba(48,18,10,0.42)',    edge: '#7d3a22', deco: 'basin' },
+      forest: { fill: 'rgba(120,66,44,0.30)',   edge: '#a3663f', deco: 'rocks' },
+      mud:    { fill: 'rgba(226,214,206,0.22)', edge: '#e6dcd4', deco: 'snow' },
+      vent:   { fill: 'rgba(255,150,70,0.22)',  edge: '#ffa14a', deco: 'lava' },
+    },
+    // 목성 — 보랏빛 구름 갑판, 흐르는 제트기류, 대적점의 붉은 눈
+    storm: {
+      high:   { fill: 'rgba(196,168,224,0.20)', edge: '#cbb0e8', deco: 'peaks',  cap: '#f2e8ff' },
+      low:    { fill: 'rgba(20,10,30,0.44)',    edge: '#5a3f74', deco: 'basin' },
+      forest: { fill: 'rgba(150,190,230,0.18)', edge: '#a8cbe8', deco: 'spires' },
+      mud:    { fill: 'rgba(150,120,200,0.26)', edge: '#b79ae0', deco: 'water' },
+      vent:   { fill: 'rgba(255,90,80,0.24)',   edge: '#ff6f5c', deco: 'lava' },
+    },
+    // 토성 — 얼음 고리 파편, 목자 위성의 흰 능선, 카시니 간극의 어둠
+    ring: {
+      high:   { fill: 'rgba(190,206,236,0.20)', edge: '#c3d4f0', deco: 'ridge',  cap: '#f0f6ff' },
+      low:    { fill: 'rgba(4,8,20,0.48)',      edge: '#33456e', deco: 'basin' },
+      forest: { fill: 'rgba(150,190,225,0.17)', edge: '#a6c9e6', deco: 'spires' },
+      mud:    { fill: 'rgba(206,220,244,0.20)', edge: '#cddbf2', deco: 'debris' },
+      vent:   { fill: 'rgba(140,235,235,0.20)', edge: '#8bebeb', deco: 'steam' },
     },
   };
   function styleOf(g, t) {
@@ -256,6 +282,7 @@ RC.Renderer = (function () {
         peaks: [15000, 6, 26], ridge: [15000, 6, 26], mesa: [15000, 6, 26],
         trees: [7000, 10, 60], spires: [8000, 10, 52], rocks: [11000, 8, 40],
         water: [13000, 8, 110], dunes: [17000, 8, 80], snow: [14000, 8, 90],
+        debris: [9000, 10, 70],
       };
       const dn = DENS[st.deco] || [18000, 6, 30];
       const pts = scatter(z, decoCount(z, dn[0], dn[1], dn[2]), seed);
@@ -349,6 +376,28 @@ RC.Renderer = (function () {
           blitGlow(snowSpr, px, py, rw, rw * 0.42, 0.42);
         });
         ctx.globalAlpha = 1;
+      } else if (st.deco === 'debris') {
+        // 고리 파편 — 각진 얼음 조각. 자갈밭처럼 촘촘하되 하나하나는 날카롭다.
+        pts.sort((a, b) => a[1] - b[1]).forEach(([px, py, r], i) => {
+          const s2 = 5 + r * 11;
+          const spin = r * 6.28 + i * 0.7;
+          ctx.save();
+          ctx.translate(px, py); ctx.rotate(spin);
+          ctx.fillStyle = 'rgba(0,0,0,0.30)';
+          ctx.beginPath(); ctx.ellipse(s2 * 0.3, s2 * 0.5, s2 * 1.05, s2 * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = st.edge; ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.moveTo(0, -s2); ctx.lineTo(s2 * 0.9, -s2 * 0.15);
+          ctx.lineTo(s2 * 0.5, s2 * 0.8); ctx.lineTo(-s2 * 0.7, s2 * 0.5);
+          ctx.lineTo(-s2 * 0.85, -s2 * 0.3);
+          ctx.closePath(); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.55)';
+          ctx.beginPath();
+          ctx.moveTo(0, -s2); ctx.lineTo(s2 * 0.9, -s2 * 0.15); ctx.lineTo(0, -s2 * 0.1);
+          ctx.closePath(); ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        });
       } else if (st.deco === 'basin') {
         // 저지대 — 안쪽으로 파인 그림자
         ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -437,6 +486,9 @@ RC.Renderer = (function () {
     earth: { n: 34, col: '#cde89a', size: 2.2, vx: 14, vy: -7, wob: 16, alpha: 0.5 },
     ember: { n: 40, col: '#ffb066', size: 2.4, vx: 26, vy: -20, wob: 14, alpha: 0.55 },
     ice:   { n: 52, col: '#eaf6ff', size: 2.6, vx: 16, vy: 26, wob: 22, alpha: 0.6 },
+    rust:  { n: 44, col: '#e2a074', size: 2.3, vx: 34, vy: 5,  wob: 18, alpha: 0.45 },  // 붉은 먼지
+    storm: { n: 38, col: '#d7c2f0', size: 2.8, vx: 46, vy: -4, wob: 12, alpha: 0.42 },  // 찢긴 구름 조각
+    ring:  { n: 58, col: '#dbe7ff', size: 2.4, vx: 22, vy: 10, wob: 20, alpha: 0.5 },   // 떠다니는 얼음 알갱이
   };
   function drawAmbient(g, W, H) {
     const a = AMB[(g.mapDef && g.mapDef.biome) || 'earth'];
@@ -484,6 +536,307 @@ RC.Renderer = (function () {
     ctx.restore();
   }
 
+  // ── 행성 고유 연출 (illusions) ──────────────────────────
+  // 날씨와 별개로 늘 깔려 있는 착시 레이어. 토성은 고리 안에 들어와 있다는 느낌,
+  // 목성은 밴드가 옆으로 흐르는 시차, 화성은 지평선의 먼지 아지랑이.
+  // 전부 화면 좌표계라 카메라를 따라오지 않는다 — 그게 "훨씬 먼 것"처럼 보이게 한다.
+  function drawIllusion(g, W, H) {
+    const biome = (g.mapDef && g.mapDef.biome) || 'earth';
+    const t = performance.now() / 1000;
+    const camX = g.camera.x || 0, camY = g.camera.y || 0;
+    ctx.save();
+    if (biome === 'ring') {
+      // 하늘을 가로지르는 거대한 고리 — 카메라보다 훨씬 느리게 흐른다 (시차)
+      for (let i = 0; i < 4; i++) {
+        const base = H * (0.12 + i * 0.24) - camY * 0.06;
+        const y = ((base % (H * 1.6)) + H * 1.6) % (H * 1.6) - H * 0.3;
+        const th = 26 + i * 14;
+        const gr = ctx.createLinearGradient(0, y - th, 0, y + th);
+        gr.addColorStop(0, 'rgba(190,210,245,0)');
+        gr.addColorStop(0.5, 'rgba(200,220,255,' + (0.055 + i * 0.012).toFixed(3) + ')');
+        gr.addColorStop(1, 'rgba(190,210,245,0)');
+        ctx.fillStyle = gr;
+        ctx.save();
+        ctx.translate(0, 0); ctx.transform(1, -0.05, 0, 1, -camX * 0.03, 0);
+        ctx.fillRect(-100, y - th, W + 200, th * 2);
+        ctx.restore();
+      }
+      // 카시니 간극처럼 고리에 뚫린 검은 틈
+      const gapY = H * 0.55 - camY * 0.06;
+      ctx.fillStyle = 'rgba(0,2,10,0.10)';
+      ctx.fillRect(-100, gapY - 7, W + 200, 14);
+    } else if (biome === 'storm') {
+      // 목성의 밴드 — 화면 위를 옆으로 흐르는 넓고 흐릿한 띠
+      for (let i = 0; i < 5; i++) {
+        const y = (H / 5) * i + Math.sin(t * 0.13 + i) * 16 - camY * 0.05;
+        const th = 40 + (i % 3) * 22;
+        const warm = i % 2 === 0;
+        const gr = ctx.createLinearGradient(0, y - th, 0, y + th);
+        const c = warm ? '236,190,150' : '150,130,200';
+        gr.addColorStop(0, 'rgba(' + c + ',0)');
+        gr.addColorStop(0.5, 'rgba(' + c + ',0.045)');
+        gr.addColorStop(1, 'rgba(' + c + ',0)');
+        ctx.fillStyle = gr;
+        ctx.fillRect(-50, y - th, W + 100, th * 2);
+      }
+    } else if (biome === 'rust') {
+      // 화성의 먼 먼지 아지랑이 — 화면 위쪽이 옅게 붉다
+      const gr = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+      gr.addColorStop(0, 'rgba(224,150,96,0.10)');
+      gr.addColorStop(1, 'rgba(224,150,96,0)');
+      ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H * 0.5);
+    }
+    ctx.restore();
+  }
+
+  // ── 날씨 ────────────────────────────────────────────────
+  // weather.js가 "지금 무슨 날씨이고 얼마나 세냐"만 알려주고, 그리는 건 전부 여기다.
+  // 전부 화면 좌표계 + 단순 도형이라 프레임 비용이 일정하다.
+  let _flashT = -99, _flashSeed = 0;
+  function drawWeather(g, W, H) {
+    if (!RC.Weather || RC.CFG.WEATHER_ENABLED === false) return;
+    const w = RC.Weather.at(g);
+    const k = w.intensity;
+    if (k <= 0.01) return;
+    const id = w.ev.id;
+    const t = performance.now() / 1000;
+    ctx.save();
+
+    // 화면을 가로지르는 입자 — 비/눈/재/불티 공용
+    const streak = (n, col, vx, vy, len, wid, alpha) => {
+      ctx.strokeStyle = col; ctx.lineWidth = wid; ctx.globalAlpha = alpha * k;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const s = i * 79.31;
+        const spanX = W + 400, spanY = H + 400;
+        const x = ((s * 53 + t * vx) % spanX + spanX) % spanX - 200;
+        const y = ((s * 31 + t * vy) % spanY + spanY) % spanY - 200;
+        ctx.moveTo(x, y); ctx.lineTo(x - vx * len * 0.012, y - vy * len * 0.012);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    };
+    const dots = (n, col, vx, vy, size, alpha) => {
+      ctx.fillStyle = col; ctx.globalAlpha = alpha * k;
+      for (let i = 0; i < n; i++) {
+        const s = i * 61.7;
+        const spanX = W + 300, spanY = H + 300;
+        let x = ((s * 47 + t * vx) % spanX + spanX) % spanX - 150;
+        let y = ((s * 73 + t * vy) % spanY + spanY) % spanY - 150;
+        x += Math.sin(t * 1.1 + s) * 14;
+        const r = size * (0.5 + (i % 4) * 0.28);
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    };
+    // 화면 전체를 덮는 색 — 시야가 줄었다는 걸 눈으로도 알 수 있게
+    const wash = (col, a) => { ctx.fillStyle = col; ctx.globalAlpha = a * k; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; };
+    // 옆으로 흘러가는 두꺼운 시트 — 모래폭풍·눈보라의 몸통
+    const sheets = (n, col, speed, alpha, thick) => {
+      for (let i = 0; i < n; i++) {
+        const s = i * 137.5;
+        const span = W + 900;
+        const x = ((s * 91 + t * speed) % span + span) % span - 450;
+        const y = (s * 57) % H;
+        const rw = 260 + (i % 3) * 170, rh = thick * (0.7 + (i % 4) * 0.25);
+        blitGlow(softGlow(col, [0.6, 0.55]), x, y, rw, rh, alpha * k);
+      }
+      ctx.globalAlpha = 1;                 // blitGlow leaves it set
+    };
+
+    switch (id) {
+      case 'rain':
+        wash('#1b2c3c', 0.16);
+        streak(150, 'rgba(178,214,244,0.55)', -70, 900, 34, 1.3, 0.75);
+        break;
+      case 'mist':
+        wash('#c9d8e2', 0.13);
+        sheets(6, '210,226,238', 24, 0.09, 120);
+        break;
+      case 'sunbeam': {
+        // 구름 사이로 쏟아지는 빛기둥 — 화면 왼쪽 위에서 비스듬히
+        ctx.globalAlpha = 0.10 * k;
+        for (let i = 0; i < 5; i++) {
+          const x = -200 + i * (W / 3.2) + Math.sin(t * 0.2 + i) * 26;
+          ctx.fillStyle = '#ffeec2';
+          ctx.beginPath();
+          ctx.moveTo(x, -40); ctx.lineTo(x + 120, -40);
+          ctx.lineTo(x + 420, H + 40); ctx.lineTo(x + 250, H + 40);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'heat': {
+        // 열 아지랑이 — 화면을 가로지르는 얇은 띠가 위아래로 일렁인다
+        ctx.globalAlpha = 0.05 * k;
+        ctx.fillStyle = '#ffd9a8';
+        for (let y = 0; y < H; y += 14) {
+          const off = Math.sin(y * 0.05 + t * 3.4) * 5 + Math.sin(y * 0.017 + t * 1.7) * 8;
+          ctx.fillRect(off, y, W, 6);
+        }
+        ctx.globalAlpha = 1;
+        wash('#ff9a4a', 0.05);
+        break;
+      }
+      case 'ashfall':
+        wash('#241a16', 0.24);
+        dots(120, 'rgba(206,196,188,0.7)', 18, 90, 2.2, 0.75);
+        sheets(4, '90,74,66', 16, 0.07, 130);
+        break;
+      case 'emberwind':
+        wash('#ff7a2a', 0.06);
+        streak(90, 'rgba(255,168,86,0.85)', 420, -60, 30, 1.8, 0.8);
+        dots(40, 'rgba(255,214,150,0.9)', 300, -40, 1.8, 0.7);
+        break;
+      case 'snow':
+        wash('#dfeefc', 0.09);
+        dots(150, 'rgba(255,255,255,0.85)', 26, 110, 2.4, 0.8);
+        break;
+      case 'blizzard':
+        wash('#e6f2ff', 0.30);
+        streak(200, 'rgba(255,255,255,0.75)', 340, 260, 26, 1.7, 0.85);
+        sheets(7, '235,246,255', 190, 0.13, 150);
+        break;
+      case 'aurora': {
+        // 오로라 — 위쪽에서 천천히 물결치는 색 커튼
+        for (let i = 0; i < 3; i++) {
+          const hue = ['120,255,190', '110,190,255', '190,140,255'][i];
+          ctx.globalAlpha = 0.11 * k;
+          ctx.fillStyle = 'rgb(' + hue + ')';
+          ctx.beginPath();
+          ctx.moveTo(-50, 0);
+          for (let x = -50; x <= W + 50; x += 40) {
+            const y = H * (0.10 + i * 0.07) + Math.sin(x * 0.004 + t * (0.5 + i * 0.2) + i) * 46;
+            ctx.lineTo(x, y);
+          }
+          ctx.lineTo(W + 50, 0); ctx.closePath(); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'dust': {
+        // 먼지 회오리 — 몇 개의 기둥이 화면을 천천히 가로지른다
+        for (let i = 0; i < 3; i++) {
+          const span = W + 500;
+          const x = ((i * 613 + t * (58 + i * 22)) % span + span) % span - 250;
+          const y = (i * 421) % H;
+          const sway = Math.sin(t * 1.6 + i) * 18;
+          for (let j = 0; j < 7; j++) {
+            const yy = y - j * 34;
+            const rr = 26 + j * 9;
+            blitGlow(softGlow('198,138,92', [0.6, 0.5]), x + sway * (j / 7) + Math.sin(t * 3 + j) * 8, yy, rr, rr * 0.75, 0.10 * k);
+          }
+        }
+        ctx.globalAlpha = 1;
+        wash('#c98a5c', 0.05);
+        break;
+      }
+      case 'duststorm':
+        wash('#b06a38', 0.34);
+        sheets(9, '176,106,56', 230, 0.15, 190);
+        streak(120, 'rgba(226,170,120,0.55)', 480, 60, 26, 2.2, 0.7);
+        dots(70, 'rgba(240,200,160,0.6)', 380, 30, 2.6, 0.55);
+        break;
+      case 'frostfall':
+        wash('#dcd6d0', 0.14);
+        dots(120, 'rgba(246,242,238,0.8)', 22, 84, 2.1, 0.7);
+        break;
+      case 'lightning': {
+        // 번개 — 주기적으로 하늘 전체가 하얗게 타고, 갈라진 줄기가 남는다
+        const period = 3.4;
+        const cyc = Math.floor(t / period);
+        if (cyc !== _flashSeed) { _flashSeed = cyc; _flashT = t; }
+        const since = t - _flashT;
+        if (since < 0.42) {
+          const f = Math.max(0, 1 - since / 0.42);
+          wash('#f2eaff', 0.55 * f * f);
+          // 갈래진 줄기
+          let sx = ((_flashSeed * 9301 + 49297) % 233280) / 233280 * W;
+          ctx.strokeStyle = 'rgba(255,250,255,' + (0.9 * f).toFixed(3) + ')';
+          ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(sx, 0);
+          let yy = 0;
+          let seed = _flashSeed * 7919;
+          const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+          while (yy < H) { yy += 40 + rnd() * 60; sx += (rnd() - 0.5) * 110; ctx.lineTo(sx, yy); }
+          ctx.stroke();
+        }
+        wash('#241634', 0.16);
+        streak(70, 'rgba(214,198,244,0.4)', 300, 220, 24, 1.4, 0.6);
+        break;
+      }
+      case 'bands':
+        wash('#3a2a52', 0.12);
+        streak(140, 'rgba(226,206,255,0.45)', 700, 0, 40, 1.6, 0.7);
+        sheets(5, '170,140,220', 380, 0.08, 110);
+        break;
+      case 'redspot': {
+        // 대적점 발작 — 화면 중앙에서 붉은 소용돌이가 부풀었다 가라앉는다
+        const pulse = 0.5 + 0.5 * Math.sin(t * 1.1);
+        blitGlow(softGlow('255,90,70', [0.55, 0.5]), W / 2, H / 2, W * 0.62, H * 0.62, 0.14 * k * (0.6 + pulse * 0.4));
+        ctx.globalAlpha = 1;
+        ctx.globalAlpha = 0.16 * k;
+        ctx.strokeStyle = '#ff8a72'; ctx.lineWidth = 2;
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          for (let a = 0; a < 6.3; a += 0.25) {
+            const rr = (60 + i * 70) * (1 + 0.1 * Math.sin(a * 3 + t));
+            const x = W / 2 + Math.cos(a + t * (0.4 + i * 0.1)) * rr * 1.5;
+            const y = H / 2 + Math.sin(a + t * (0.4 + i * 0.1)) * rr;
+            a === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        wash('#5a1a20', 0.10);
+        break;
+      }
+      case 'meteor': {
+        // 유성 — 몇 초에 하나씩 화면을 사선으로 가른다
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 7; i++) {
+          const per = 2.6 + (i % 4) * 0.9;
+          const local = (t + i * 1.7) % per;
+          if (local > 0.75) continue;
+          const f = local / 0.75;
+          const sx = ((i * 8171) % 1000) / 1000 * (W + 400) - 200;
+          const sy = -80 + ((i * 3313) % 1000) / 1000 * H * 0.4;
+          const x = sx + f * (W * 0.7), y = sy + f * (H * 0.8);
+          const a = Math.sin(f * Math.PI);
+          ctx.strokeStyle = 'rgba(255,240,214,' + (0.85 * a * k).toFixed(3) + ')';
+          ctx.lineWidth = 2.4;
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 120, y - 137); ctx.stroke();
+          blitGlow(softGlow('255,236,200', [0.6, 0.5]), x, y, 26, 26, 0.5 * a * k);
+          ctx.globalAlpha = 1;
+        }
+        ctx.lineCap = 'butt';
+        break;
+      }
+      case 'ringshadow': {
+        // 고리 그림자 — 거대한 어두운 띠가 세상을 천천히 쓸고 지나간다
+        wash('#020610', 0.30);
+        for (let i = 0; i < 4; i++) {
+          const span = H + 700;
+          const y = ((i * 311 + t * 26) % span + span) % span - 350;
+          const th = 70 + (i % 3) * 46;
+          const gr = ctx.createLinearGradient(0, y - th, 0, y + th);
+          gr.addColorStop(0, 'rgba(0,2,10,0)');
+          gr.addColorStop(0.5, 'rgba(0,2,10,' + (0.30 * k).toFixed(3) + ')');
+          gr.addColorStop(1, 'rgba(0,2,10,0)');
+          ctx.fillStyle = gr; ctx.fillRect(-50, y - th, W + 100, th * 2);
+        }
+        break;
+      }
+      case 'icefog':
+        wash('#b9d4ee', 0.20);
+        sheets(7, '198,222,244', 30, 0.11, 140);
+        dots(70, 'rgba(232,244,255,0.7)', 34, 20, 2.0, 0.6);
+        break;
+      default: break;    // clear / calmband — 아무것도 덧그리지 않는다
+    }
+    ctx.restore();
+  }
+
   // 비네트 + 바이옴 색 보정 — 화면 가장자리를 살짝 눌러 시선을 중앙으로 모은다.
   // 두 그라디언트를 한 장의 오버레이 캔버스에 구워, 매 프레임 drawImage 한 번으로 끝낸다.
   let _gradeKey = null, _gradeCv = null;
@@ -491,6 +844,9 @@ RC.Renderer = (function () {
     earth: ['rgba(150,220,150,0.045)', 'rgba(10,20,40,0.10)'],
     ember: ['rgba(255,150,70,0.06)',   'rgba(60,10,5,0.12)'],
     ice:   ['rgba(150,205,255,0.055)', 'rgba(5,15,40,0.12)'],
+    rust:  ['rgba(255,150,90,0.055)',  'rgba(40,10,4,0.13)'],
+    storm: ['rgba(200,150,255,0.06)',  'rgba(16,6,28,0.15)'],
+    ring:  ['rgba(180,205,255,0.05)',  'rgba(3,6,18,0.16)'],
   };
   function drawGrade(g, W, H) {
     const biome = (g.mapDef && g.mapDef.biome) || 'earth';
