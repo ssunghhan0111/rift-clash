@@ -205,9 +205,10 @@ window.RC = window.RC || {};
     const seenFx = game._ultFx || (game._ultFx = new Set());
     const nowKeys = new Set();
     for (const f of (s.FX || [])) {
-      const amt = ULT_SHAKE[f.abil];
+      // 건물 파괴(boom:2)도 궁극기처럼 클라이언트가 스스로 흔든다 (서버는 연출 상태를 보내지 않음)
+      const amt = ULT_SHAKE[f.abil] || (f.boom === 2 ? 0.35 : 0);
       if (!amt) continue;
-      const k = f.abil + ':' + Math.round(f.ax) + ':' + Math.round(f.ay);
+      const k = (f.abil || 'boom' + f.boom) + ':' + Math.round(f.ax) + ':' + Math.round(f.ay);
       nowKeys.add(k);
       if (!seenFx.has(k) && game.shake) game.shake(amt);
     }

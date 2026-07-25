@@ -819,7 +819,23 @@ window.RC = window.RC || {};
         if (RC.Audio) RC.Audio.play('explode');
         this._awardKillXp(u);
         if (this.survival && !u.def.hero && this.areEnemies(u.owner, this.playerOwner)) this.survivalKills++;
+        // 죽음 연출 — 순수 시각 이펙트. fx 스냅샷에 실려 온라인 클라이언트도 같은 폭발을 본다.
+        // (영웅은 '전사' 상태로 남으므로 폭발 대신 별도 연출 없이 사라진다)
+        if (!u.def.hero) {
+          this.fx.push({ boom: 1, ax: Math.round(u.x), ay: Math.round(u.y), r: u.r,
+                         fly: u.def.flying ? 1 : 0, race: u.def.race || 'forge', t: 0.8 });
+        }
         if (u.def.hero) this._downHero(u);
+      }
+
+      // 건물 파괴 연출 — 다단 폭발 + 화면 흔들림 (오프라인 즉시, 온라인은 fx 스냅샷 경유)
+      for (const b of this.buildings) {
+        if (b.dead && !b._boomFx) {
+          b._boomFx = true;
+          this.fx.push({ boom: 2, ax: Math.round(b.x), ay: Math.round(b.y),
+                         r: Math.max(b.w, b.h) * 0.62, race: b.def.race || 'forge', t: 1.6 });
+          this.shake(Math.min(0.5, 0.2 + Math.max(b.w, b.h) / 400));
+        }
       }
 
       this.units = this.units.filter(u => !u.dead && !u.boarded);   // 탑승 유닛은 화면에서 제외

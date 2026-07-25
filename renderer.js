@@ -43,6 +43,34 @@ RC.Renderer = (function () {
     return `rgb(${Math.round(A[0] + (B[0] - A[0]) * t)},${Math.round(A[1] + (B[1] - A[1]) * t)},${Math.round(A[2] + (B[2] - A[2]) * t)})`;
   }
 
+  // ── 발광 스프라이트 캐시 ────────────────────────────
+  // createRadialGradient를 매 프레임 만들면 소프트웨어 래스터에서 매우 비싸다 (특히
+  // 모바일). 색별 소프트 글로우를 64px 캔버스에 한 번만 구워 drawImage로 찍는다.
+  const _spr = {};
+  function glowSprite(key, mk) {
+    let s = _spr[key];
+    if (!s) { s = document.createElement('canvas'); mk(s); _spr[key] = s; }
+    return s;
+  }
+  // 'r,g,b' 문자열 → 중심 불투명, 가장자리 투명한 원형 글로우 스프라이트
+  function softGlow(rgb, mid) {
+    return glowSprite('g:' + rgb + (mid ? ':' + mid[0] + ',' + mid[1] : ''), (s) => {
+      s.width = s.height = 64;
+      const g2 = s.getContext('2d');
+      const gr = g2.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(' + rgb + ',1)');
+      if (mid) gr.addColorStop(mid[0], 'rgba(' + rgb + ',' + mid[1] + ')');
+      gr.addColorStop(1, 'rgba(' + rgb + ',0)');
+      g2.fillStyle = gr; g2.fillRect(0, 0, 64, 64);
+    });
+  }
+  // 스프라이트를 (x,y) 중심의 rx×ry 타원으로 찍는다
+  function blitGlow(sprite, x, y, rx, ry, alpha) {
+    if (ry == null) ry = rx;
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.drawImage(sprite, x - rx, y - ry, rx * 2, ry * 2);
+  }
+
   // 둥근 사각형 경로
   function rrect(x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
@@ -76,13 +104,12 @@ RC.Renderer = (function () {
     // 표면 질감 (카메라를 따라 흘러가도록 패턴 원점을 이동)
     const tex = groundTexture(g);
     if (tex) {
+      // 반점 + 대규모 명암이 한 타일에 구워져 있어 채우기 한 번이면 된다
       ctx.save();
-      ctx.translate(-Math.round(g.camera.x) % 128, -Math.round(g.camera.y) % 128);
+      ctx.translate(-Math.round(g.camera.x) % 512, -Math.round(g.camera.y) % 512);
       ctx.fillStyle = tex;
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(0, 0, W + 128, H + 128);
+      ctx.fillRect(0, 0, W + 512, H + 512);
       ctx.restore();
-      ctx.globalAlpha = 1;
     }
 
     ctx.save();
@@ -90,6 +117,7 @@ RC.Renderer = (function () {
 
     drawTerrain(g, W, H);
     drawZones(g);                     // 전술 지형 (고지/숲/늪/분출구)
+    drawClouds(g, W, H);              // 흘러가는 구름 그림자 (지면 위, 유닛 아래)
     (g.obstacles || []).forEach(o => drawObstacle(o));
     g.nodes.forEach(n => drawNode(n));
     g.buildings.forEach(b => drawBuilding(g, b));
@@ -103,6 +131,7 @@ RC.Renderer = (function () {
     ctx.restore();
 
     drawAmbient(g, W, H);          // 대기 입자 (꽃가루 / 불티 / 눈발)
+    drawGrade(g, W, H);            // 비네트 + 바이옴 색 보정 (영화적 톤)
     if (shk) ctx.restore();        // HUD 요소는 흔들리지 않는다
     drawDragBox(input);
     drawMinimap(g, W, H);
@@ -313,17 +342,13 @@ RC.Renderer = (function () {
         });
       } else if (st.deco === 'snow') {
         // 눈더미 — 가장자리가 흐릿해야 눈처럼 보인다 (딱딱한 타원은 얼룩처럼 보임)
+        // 그라디언트는 스프라이트로 한 번만 굽는다 — 눈밭 하나에 수십 개씩 찍히기 때문
+        const snowSpr = softGlow('247,251,255', [0.55, 0.5]);
         pts.forEach(([px, py, r]) => {
-          const rw = 24 + r * 26, rh = rw * 0.42;
-          const gr = ctx.createRadialGradient(px, py, 0, px, py, rw);
-          gr.addColorStop(0, 'rgba(255,255,255,0.42)');
-          gr.addColorStop(0.55, 'rgba(238,248,255,0.22)');
-          gr.addColorStop(1, 'rgba(238,248,255,0)');
-          ctx.save(); ctx.translate(px, py); ctx.scale(1, rh / rw); ctx.translate(-px, -py);
-          ctx.fillStyle = gr;
-          ctx.beginPath(); ctx.arc(px, py, rw, 0, Math.PI * 2); ctx.fill();
-          ctx.restore();
+          const rw = 24 + r * 26;
+          blitGlow(snowSpr, px, py, rw, rw * 0.42, 0.42);
         });
+        ctx.globalAlpha = 1;
       } else if (st.deco === 'basin') {
         // 저지대 — 안쪽으로 파인 그림자
         ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -373,7 +398,37 @@ RC.Renderer = (function () {
       t.beginPath(); t.ellipse(x, y, r, r * (0.6 + rnd() * 0.6), rnd() * 3, 0, Math.PI * 2); t.fill();
     }
     t.globalAlpha = 1;
-    _texKey = key; _texPat = ctx.createPattern(c, 'repeat');
+
+    // 대규모 명암 얼룩 — 512px 타일에 반점 텍스처를 깔고, 그 위에 넓고 부드러운
+    // 밝음/그늘 패치를 한 번만 굽는다. 두 레이어를 한 타일로 합쳐 매 프레임
+    // 패턴 채우기가 한 번으로 끝난다. 작은 반점 + 큰 명암이 겹치면 땅이
+    // 균일한 타일이 아니라 실제 지표처럼 읽힌다.
+    const M = 512;
+    const mc = document.createElement('canvas'); mc.width = M; mc.height = M;
+    const mt = mc.getContext('2d');
+    mt.globalAlpha = 0.85;                       // 기존 반점 레이어의 알파를 그대로 승계
+    mt.fillStyle = mt.createPattern(c, 'repeat');
+    mt.fillRect(0, 0, M, M);
+    mt.globalAlpha = 1;
+    let ms = 98765;
+    const mrnd = () => { ms = (ms * 1103515245 + 12345) & 0x7fffffff; return ms / 0x7fffffff; };
+    for (let i = 0; i < 26; i++) {
+      const px = mrnd() * M, py = mrnd() * M, pr = 60 + mrnd() * 120;
+      const lightPatch = mrnd() > 0.5;
+      const col = lightPatch ? '255,255,255' : '0,0,10';
+      const a = (lightPatch ? 0.05 : 0.07) + mrnd() * 0.04;
+      // 타일 이음새가 보이지 않도록 네 방향으로 감싸 그린다
+      [[0, 0], [M, 0], [-M, 0], [0, M], [0, -M]].forEach(([wx, wy]) => {
+        const gx = px + wx, gy = py + wy;
+        if (gx + pr < 0 || gx - pr > M || gy + pr < 0 || gy - pr > M) return;
+        const gr2 = mt.createRadialGradient(gx, gy, 0, gx, gy, pr);
+        gr2.addColorStop(0, 'rgba(' + col + ',' + a.toFixed(3) + ')');
+        gr2.addColorStop(1, 'rgba(' + col + ',0)');
+        mt.fillStyle = gr2;
+        mt.beginPath(); mt.arc(gx, gy, pr, 0, Math.PI * 2); mt.fill();
+      });
+    }
+    _texKey = key; _texPat = ctx.createPattern(mc, 'repeat');
     return _texPat;
   }
 
@@ -400,7 +455,63 @@ RC.Renderer = (function () {
       const r = a.size * (0.5 + (i % 3) * 0.35);
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
     }
+    // 근경 레이어 — 더 크고 빠르고 흐린 입자가 카메라 가까이를 스쳐가 깊이감을 만든다
+    for (let i = 0; i < (a.n >> 1); i++) {
+      const seed = i * 151.7 + 40;
+      const spanX = W + 300, spanY = H + 300;
+      let x = ((seed * 43 + t * a.vx * 1.9) % spanX + spanX) % spanX - 150;
+      let y = ((seed * 71 + t * a.vy * 1.9) % spanY + spanY) % spanY - 150;
+      x += Math.sin(t * 0.7 + seed) * a.wob * 1.4;
+      ctx.globalAlpha = a.alpha * 0.22 * (0.4 + 0.6 * Math.abs(Math.sin(t * 0.5 + seed)));
+      ctx.beginPath(); ctx.arc(x, y, a.size * 2.6, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.restore();
+  }
+
+  // 구름 그림자 — 거대한 부드러운 그늘이 맵 위를 천천히 흘러간다 (월드 좌표계)
+  function drawClouds(g, W, H) {
+    const t = performance.now() / 1000;
+    const camX = g.camera.x, camY = g.camera.y;
+    ctx.save();
+    for (let i = 0; i < 3; i++) {
+      const rw = 380 + i * 150, rh = rw * 0.55;
+      const span = CFG.WORLD_W + rw * 2;
+      const cx = ((i * 1531 + t * (9 + i * 4)) % span + span) % span - rw;
+      const cy = (i * 977) % CFG.WORLD_H;
+      if (cx + rw < camX || cx - rw > camX + W || cy + rh < camY || cy - rh > camY + H) continue;
+      blitGlow(softGlow('2,4,10', [0.65, 0.6]), cx, cy, rw, rh, 0.085);
+    }
+    ctx.restore();
+  }
+
+  // 비네트 + 바이옴 색 보정 — 화면 가장자리를 살짝 눌러 시선을 중앙으로 모은다.
+  // 두 그라디언트를 한 장의 오버레이 캔버스에 구워, 매 프레임 drawImage 한 번으로 끝낸다.
+  let _gradeKey = null, _gradeCv = null;
+  const GRADE_TINT = {
+    earth: ['rgba(150,220,150,0.045)', 'rgba(10,20,40,0.10)'],
+    ember: ['rgba(255,150,70,0.06)',   'rgba(60,10,5,0.12)'],
+    ice:   ['rgba(150,205,255,0.055)', 'rgba(5,15,40,0.12)'],
+  };
+  function drawGrade(g, W, H) {
+    const biome = (g.mapDef && g.mapDef.biome) || 'earth';
+    const key = W + 'x' + H + '|' + biome;
+    if (key !== _gradeKey) {
+      _gradeCv = document.createElement('canvas');
+      _gradeCv.width = W; _gradeCv.height = H;
+      const gg = _gradeCv.getContext('2d');
+      const tc = GRADE_TINT[biome] || GRADE_TINT.earth;
+      const tint = gg.createLinearGradient(0, 0, 0, H);
+      tint.addColorStop(0, tc[0]);           // 위쪽 — 대기광
+      tint.addColorStop(0.55, 'rgba(0,0,0,0)');
+      tint.addColorStop(1, tc[1]);           // 아래쪽 — 그늘
+      gg.fillStyle = tint; gg.fillRect(0, 0, W, H);
+      const vig = gg.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.75);
+      vig.addColorStop(0, 'rgba(0,0,8,0)');
+      vig.addColorStop(1, 'rgba(0,0,8,0.30)');
+      gg.fillStyle = vig; gg.fillRect(0, 0, W, H);
+      _gradeKey = key;
+    }
+    ctx.drawImage(_gradeCv, 0, 0);
   }
 
   function drawTerrain(g, W, H) {
@@ -433,13 +544,44 @@ RC.Renderer = (function () {
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, CFG.WORLD_W - 4, CFG.WORLD_H - 4);
 
-    // 중앙 리프트 표시 (Phase 3에서 점령 목표로 사용)
+    // 중앙 리프트 — 소용돌이치는 차원 균열 (맵의 중심을 잡아주는 볼거리)
     const cx = CFG.WORLD_W / 2, cy = CFG.WORLD_H / 2;
+    const rt = performance.now() / 1000;
     ctx.save();
-    ctx.globalAlpha = 0.25;
-    ctx.strokeStyle = C.rift;
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(cx, cy, 150, 0, Math.PI * 2); ctx.stroke();
+    // 바닥 광휘
+    const rp = 0.5 + 0.5 * Math.sin(rt * 1.1);
+    blitGlow(softGlow('166,104,255', [0.6, 0.45]), cx, cy, 185, 185, 0.10 + 0.05 * rp);
+    ctx.globalAlpha = 1;
+    // 서로 반대로 도는 이중 호 — 회전문 같은 차원 고리
+    ctx.lineCap = 'round';
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rt * 0.45);
+    ctx.strokeStyle = C.rift; ctx.lineWidth = 3; ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 3; i++) {
+      ctx.rotate((Math.PI * 2) / 3);
+      ctx.beginPath(); ctx.arc(0, 0, 150, 0, 1.45); ctx.stroke();
+    }
+    ctx.rotate(-rt * 0.45 * 2.6);
+    ctx.strokeStyle = '#cfa9ff'; ctx.lineWidth = 2; ctx.globalAlpha = 0.4;
+    for (let i = 0; i < 3; i++) {
+      ctx.rotate((Math.PI * 2) / 3);
+      ctx.beginPath(); ctx.arc(0, 0, 118, 0, 1.1); ctx.stroke();
+    }
+    ctx.restore();
+    // 안으로 빨려드는 입자들
+    ctx.fillStyle = '#cfa9ff';
+    for (let i = 0; i < 9; i++) {
+      const ph = (rt * 0.14 + i * 0.117) % 1;
+      const rr = 165 * (1 - ph);
+      const a = i * 0.7 - rt * 1.1 - ph * 2.2;      // 나선을 그리며 수렴
+      ctx.globalAlpha = ph * 0.65;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 2.4 * (0.5 + ph), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 중심핵
+    fireball(cx, cy, 26, 'rgba(240,225,255,0.95)', 'rgba(166,104,255,0.45)', 0.55 + 0.3 * rp);
     ctx.restore();
   }
 
@@ -495,14 +637,56 @@ RC.Renderer = (function () {
     const x = b.x - b.w / 2, y = b.y - b.h / 2;
 
     if (!b.done) {
+      // 홀로그램 건설 — 청사진 위로 스캔선이 지나가고, 완성된 만큼 아래에서부터 실체화된다
+      const t = performance.now() / 1000;
+      const holo = b.def.race === 'gloop' ? '#7dff9e' : b.def.race === 'aether' ? '#c9a6ff' : '#8fe3ff';
+      const fh = b.h * b.buildProgress;
+      const ey = y + b.h - fh;                     // 실체화 경계선
       ctx.save();
-      ctx.setLineDash([6, 5]);
-      ctx.strokeStyle = p.trim; ctx.lineWidth = 2;
+      // 청사진 바탕
+      ctx.globalAlpha = 0.10;
+      ctx.fillStyle = holo; ctx.fillRect(x, y, b.w, b.h);
+      // 실체화된 부분 (아래에서 위로 차오른다)
+      ctx.globalAlpha = 0.24;
+      ctx.fillRect(x, ey, b.w, fh);
+      // 홀로그램 주사선
+      ctx.globalAlpha = 0.15;
+      for (let yy = y + ((t * 24) % 6); yy < y + b.h; yy += 6) ctx.fillRect(x, yy, b.w, 1);
+      // 실체화 경계 — 밝은 조립선 + 흐르는 스파크
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = mix(holo, '#ffffff', 0.55);
+      ctx.fillRect(x, ey - 1, b.w, 2);
+      for (let i = 0; i < 3; i++) {
+        const sx = x + ((t * (46 + i * 21) + i * 57 + (b.id || 0) * 13) % b.w);
+        ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t * 21 + i * 2.4);
+        ctx.beginPath(); ctx.arc(sx, ey, 2.1, 0, Math.PI * 2); ctx.fill();
+      }
+      // 행진하는 점선 외곽 + 모서리 브래킷 (타깃팅 UI 느낌)
+      ctx.globalAlpha = 0.85;
+      ctx.setLineDash([7, 5]);
+      ctx.lineDashOffset = -t * 26;
+      ctx.strokeStyle = holo; ctx.lineWidth = 1.6;
       ctx.strokeRect(x, y, b.w, b.h);
+      ctx.setLineDash([]);
+      ctx.strokeStyle = p.trim; ctx.lineWidth = 2.2;
+      const L = Math.min(12, b.w * 0.2);
+      [[x, y, 1, 1], [x + b.w, y, -1, 1], [x, y + b.h, 1, -1], [x + b.w, y + b.h, -1, -1]].forEach(([cx2, cy2, dx, dy]) => {
+        ctx.beginPath();
+        ctx.moveTo(cx2 + dx * L, cy2); ctx.lineTo(cx2, cy2); ctx.lineTo(cx2, cy2 + dy * L);
+        ctx.stroke();
+      });
       ctx.restore();
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(x, y + b.h * (1 - b.buildProgress), b.w, b.h * b.buildProgress);
     } else {
+      // 완공 건물 — 발밑의 은은한 동력광 (몸체보다 먼저 깔린다)
+      {
+        const t = performance.now() / 1000;
+        const glowCol = b.def.race === 'gloop' ? '125,255,158' : b.def.race === 'aether' ? '201,166,255' : '143,227,255';
+        const pp = 0.5 + 0.5 * Math.sin(t * 1.3 + (b.id || 0) * 0.9);
+        const gy = y + b.h * 0.9;
+        ctx.save();
+        blitGlow(softGlow(glowCol), b.x, gy, b.w * 0.85, b.h * 0.42, 0.10 + 0.06 * pp);
+        ctx.restore();
+      }
       if (b.def.race === 'gloop') {
         // 글룹 — 유기적 점액 덩어리 본체 (둥글둥글, 초록빛)
         gloopBody(b, p, x, y);
@@ -570,6 +754,23 @@ RC.Renderer = (function () {
         ctx.fillStyle = p.trim;
         ctx.fillRect(b.x - 16, b.y - 20, 9, 12);
         ctx.fillRect(b.x + 7, b.y - 20, 9, 12);
+        // 굴뚝 연기 — 가동 중이라는 생활감 (상태 없는 시간 함수)
+        {
+          const t = performance.now() / 1000;
+          ctx.save();
+          [b.x - 11.5, b.x + 11.5].forEach((chX, ci) => {
+            for (let k2 = 0; k2 < 3; k2++) {
+              const rise = (t * 17 + k2 * 21 + ci * 9 + (b.id || 0) * 7) % 58;
+              const fade = 1 - rise / 58;
+              ctx.globalAlpha = fade * 0.24;
+              ctx.fillStyle = 'rgba(150,155,165,1)';
+              ctx.beginPath();
+              ctx.arc(chX + Math.sin(rise * 0.14 + k2 * 2) * 3.2, b.y - 22 - rise, 2.6 + rise * 0.12, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          });
+          ctx.restore();
+        }
       } else if (b.type === 'arclab') {
         // 아크 랩 — 회전 링 + 발광 코어
         const tt = performance.now() / 1000;
@@ -679,6 +880,59 @@ RC.Renderer = (function () {
         shard(0, 48, 6, '#e6fdff');
         ctx.globalAlpha = 1;
         ctx.restore();
+      }
+
+      // 항법등 — 모서리에서 천천히 깜빡이는 붉은 점 (건물마다 위상이 다르다)
+      {
+        const t = performance.now() / 1000;
+        const blink = (Math.sin(t * 2.1 + (b.id || 0) * 2.63) + 1) / 2;
+        if (blink > 0.68) {
+          const ba = (blink - 0.68) / 0.32;
+          const bx2 = x + b.w - 6, by2 = y + 6;
+          ctx.save();
+          blitGlow(softGlow('255,93,93'), bx2, by2, 7, 7, ba * 0.5);
+          ctx.globalAlpha = ba;
+          ctx.fillStyle = '#ff8484';
+          ctx.beginPath(); ctx.arc(bx2, by2, 1.8, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      // 손상 연출 — 반파되면 연기, 위험 수위면 불꽃까지 (시드는 건물 id로 고정)
+      {
+        const dfrac = b.hp / b.maxHp;
+        if (dfrac < 0.55) {
+          const t = performance.now() / 1000;
+          let s = ((b.id || 1) * 2654435761) >>> 0 || 7;
+          const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+          ctx.save();
+          const spots = dfrac < 0.28 ? 3 : 2;
+          for (let i = 0; i < spots; i++) {
+            const px = x + 8 + rnd() * (b.w - 16), py = y + 6 + rnd() * (b.h * 0.6);
+            // 피어오르는 연기
+            for (let k2 = 0; k2 < 3; k2++) {
+              const rise = (t * 15 + k2 * 19 + i * 31) % 46;
+              ctx.globalAlpha = (1 - rise / 46) * 0.34;
+              ctx.fillStyle = 'rgba(30,30,34,1)';
+              ctx.beginPath();
+              ctx.arc(px + Math.sin(rise * 0.16 + k2) * 3, py - rise, 3 + rise * 0.16, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            // 위험 수위 — 불꽃 혀가 일렁인다
+            if (dfrac < 0.28) {
+              const fl = 0.6 + 0.4 * Math.sin(t * 13 + i * 2.7);
+              blitGlow(softGlow('255,170,60'), px, py, 9, 9, 0.55 * fl);
+              ctx.globalAlpha = 0.85 * fl;
+              ctx.fillStyle = '#ffb648';
+              ctx.beginPath();
+              ctx.moveTo(px - 3.2, py + 2);
+              ctx.quadraticCurveTo(px - 1.5, py - 4 - fl * 4, px + Math.sin(t * 17 + i) * 1.6, py - 7 - fl * 3);
+              ctx.quadraticCurveTo(px + 2.4, py - 3, px + 3.2, py + 2);
+              ctx.closePath(); ctx.fill();
+            }
+          }
+          ctx.restore();
+        }
       }
     }
 
@@ -1190,8 +1444,12 @@ RC.Renderer = (function () {
     if (fogged(g, u)) return;
     const flash = u.hitFlash > 0;
     const c = unitColors(u, flash);
+    const tNow = performance.now() / 1000;
 
-    const alt = u.def.flying ? 15 : 0;   // 공중 유닛 고도
+    // 공중 유닛 고도 — 살짝 떠 있는 듯한 부유 흔들림 (순수 연출: 그리기 위치만 움직이고
+    // u.x/u.y는 그대로라 명령·피격 판정·동기화에 영향 없음)
+    const bob = u.def.flying ? Math.sin(tNow * 2.6 + (u.id || 0) * 1.7) * 2.4 : 0;
+    const alt = u.def.flying ? 15 + bob : 0;
 
     ctx.save();
     ctx.translate(u.x, u.y);
@@ -1226,10 +1484,27 @@ RC.Renderer = (function () {
       ctx.strokeStyle = tc; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.9;
       ctx.beginPath(); ctx.ellipse(0, oy, rx * 1.2, ry * 1.2, 0, 0, Math.PI * 2); ctx.stroke();
     }
+    // Aether — 유닛 발밑에 은은한 사이오닉 광원 (에너지 존재라는 인상)
+    if (u.def.race === 'aether' && !flash) {
+      const pp = 0.5 + 0.5 * Math.sin(tNow * 1.8 + (u.id || 0) * 0.9);
+      blitGlow(softGlow('201,166,255'), 0, oy, rx * 1.35, ry * 1.5, 0.13 + 0.07 * pp);
+    }
     ctx.restore();
 
     ctx.translate(0, -alt);
     ctx.rotate(u.facing);
+    // 공중 유닛 — 기체 후미의 엔진 광 (이동 중엔 더 길고 밝은 분사 꼬리)
+    if (u.def.flying && !flash) {
+      const eng = u.def.race === 'gloop' ? '125,255,158' : u.def.race === 'aether' ? '226,198,255' : '140,211,255';
+      const R = u.r * 1.18;
+      const pulse = 0.6 + 0.4 * Math.sin(tNow * 16 + (u.id || 0) * 2.1);
+      const moving = u.state === 'move' || u.state === 'attack';
+      const spr = softGlow(eng);
+      blitGlow(spr, -R * 0.9, 0, R * 0.7, R * 0.7, 0.5 * pulse);
+      // 분사 꼬리 — 이동 중엔 뒤로 길게 늘어난다
+      if (moving) blitGlow(spr, -R * 1.6, 0, R * 1.53, R * 0.5, 0.28 * pulse);
+      ctx.globalAlpha = 1;
+    }
     drawUnitSprite(u, c);
 
     ctx.restore();
@@ -1237,9 +1512,11 @@ RC.Renderer = (function () {
     // 버프/디버프 표시 링 + 시전 섬광
     drawBuffs(u);
 
-    // 영웅 표식 — 금색 링 + 레벨 배지
+    // 영웅 표식 — 금색 링 + 레벨 배지 (+ 은은한 맥동 광채)
     if (u.hero) {
       ctx.save();
+      const hp2 = 0.5 + 0.5 * Math.sin(tNow * 2.2);
+      blitGlow(softGlow('255,210,63'), u.x, u.y + u.r * 0.5, u.r * 1.9, u.r * 0.95, 0.10 + 0.07 * hp2);
       ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
       ctx.beginPath(); ctx.ellipse(u.x, u.y + u.r * 0.5, u.r * 1.4, u.r * 0.64, 0, 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
@@ -1862,22 +2139,212 @@ RC.Renderer = (function () {
     ctx.fillRect(cx - w / 2, y, w * frac, h);
   }
 
-  // 피격 순간 실드 껍질 반짝임
+  // 실드 껍질 — 평상시엔 돌아가는 미광 호(弧), 피격 순간엔 육각 면이 드러나는 에너지 셸
   function shieldFlare(e) {
     if (!e.maxShield || e.shield <= 0) return;
     const a = e.shieldFx > 0 ? Math.min(1, e.shieldFx / 0.18) : 0;
-    const idle = 0.10 * (e.shield / e.maxShield);   // 은은한 상시 껍질
-    const alpha = Math.max(idle, a * 0.55);
-    if (alpha <= 0.02) return;
+    const frac = e.shield / e.maxShield;
+    const idle = 0.10 * frac;
+    if (Math.max(idle, a * 0.55) <= 0.02) return;
     const rad = (e.kind === 'building' ? Math.max(e.w, e.h) * 0.62 : e.r + 5);
+    const t = performance.now() / 1000;
     ctx.save();
-    ctx.globalAlpha = alpha;
+    // 기본 껍질
+    ctx.globalAlpha = Math.max(idle, a * 0.55);
     ctx.strokeStyle = PSI; ctx.lineWidth = a > 0 ? 2.5 : 1.5;
     ctx.beginPath(); ctx.arc(e.x, e.y, rad, 0, Math.PI * 2); ctx.stroke();
+    // 돌아가는 미광 — 껍질 위를 흐르는 하이라이트 (SF 영화의 포스필드)
+    const sa = (t * 0.9 + (e.id || 0) * 0.7) % (Math.PI * 2);
+    ctx.globalAlpha = Math.min(0.4, idle * 3 + a * 0.3);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(e.x, e.y, rad, sa, sa + 1.1); ctx.stroke();
+    // 피격 — 육각 면 분할이 잠깐 드러난다
+    if (a > 0.03) {
+      ctx.strokeStyle = PSI; ctx.lineWidth = 1.6;
+      for (let i = 0; i < 6; i++) {
+        const g0 = i * Math.PI / 3 + t * 0.35;
+        ctx.globalAlpha = a * (0.3 + 0.4 * Math.abs(Math.sin(t * 9 + i * 1.9)));
+        ctx.beginPath(); ctx.arc(e.x, e.y, rad + 2.5, g0 + 0.09, g0 + Math.PI / 3 - 0.09); ctx.stroke();
+      }
+      // 안쪽 섬광 — 가장자리로 갈수록 밝아지는 링 스프라이트 (한 번만 굽는다)
+      const ring = glowSprite('shieldring', (s) => {
+        s.width = s.height = 64;
+        const g2 = s.getContext('2d');
+        const gr = g2.createRadialGradient(32, 32, 32 * 0.4, 32, 32, 32);
+        gr.addColorStop(0, 'rgba(226,198,255,0)');
+        gr.addColorStop(1, 'rgba(226,198,255,1)');
+        g2.fillStyle = gr; g2.fillRect(0, 0, 64, 64);
+      });
+      blitGlow(ring, e.x, e.y, rad, rad, a * 0.3);
+    }
+    ctx.restore();
+  }
+
+  // ── 죽음 폭발 (boom fx) ──────────────────────────────
+  // 시뮬레이션은 {boom, ax, ay, r, race, t}만 만든다. 나머지는 전부 시간의 함수 —
+  // 결정적 시드에서 파편 궤적을 뽑으므로 상태 저장 없이 매 프레임 같은 그림이 나온다.
+  function boomRng(f) {
+    let s = ((f.ax * 73856093) ^ (f.ay * 19349663)) >>> 0 || 7;
+    return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  }
+  function fireball(x, y, r, hot, mid, alpha) {
+    const s = glowSprite('f:' + hot + '|' + mid, (cn) => {
+      cn.width = cn.height = 64;
+      const g2 = cn.getContext('2d');
+      const gr = g2.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, hot); gr.addColorStop(0.4, mid); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g2.fillStyle = gr; g2.fillRect(0, 0, 64, 64);
+    });
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.drawImage(s, x - r, y - r, r * 2, r * 2);
+  }
+  function drawBoom(f) {
+    const life = f.boom === 2 ? 1.6 : 0.8;
+    const prog = Math.min(1, Math.max(0, 1 - f.t / life));
+    const rnd = boomRng(f);
+    ctx.save();
+
+    if (f.boom === 2) {
+      // ── 건물 파괴 — 다단 폭발 + 충격파 + 연기 기둥 + 그을음 ──
+      const R = f.r;
+      // 그을린 바닥 — 폭발 내내 남았다가 마지막에 옅어진다
+      ctx.globalAlpha = 0.4 * (1 - Math.max(0, prog - 0.72) / 0.28);
+      ctx.fillStyle = '#0a0a0c';
+      ctx.beginPath(); ctx.ellipse(f.ax, f.ay + R * 0.2, R * 1.25, R * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      // 첫 섬광
+      if (prog < 0.14) fireball(f.ax, f.ay, R * 1.7, 'rgba(255,255,255,0.95)', 'rgba(255,236,180,0.7)', 1 - prog / 0.14);
+      // 주 화구
+      if (prog < 0.5) {
+        const k = prog / 0.5;
+        fireball(f.ax, f.ay - R * 0.2 * k, R * (0.7 + k * 1.1), 'rgba(255,244,200,0.95)', 'rgba(255,138,51,0.8)', 1 - k * 0.85);
+      }
+      // 다단 2차 폭발 — 시차를 두고 터져야 "무너져 내리는" 느낌이 난다
+      for (let i = 0; i < 5; i++) {
+        const ox = (rnd() - 0.5) * R * 1.5, oy = (rnd() - 0.5) * R * 0.9;
+        const start = 0.08 + i * 0.11, dur = 0.3;
+        const k = (prog - start) / dur;
+        if (k <= 0 || k >= 1) continue;
+        fireball(f.ax + ox, f.ay + oy, R * (0.3 + k * 0.55), 'rgba(255,240,190,0.95)', 'rgba(255,122,47,0.75)', 1 - k);
+      }
+      // 충격파 링
+      if (prog < 0.55) {
+        const k = prog / 0.55;
+        ctx.globalAlpha = (1 - k) * 0.8;
+        ctx.strokeStyle = '#ffe9c4'; ctx.lineWidth = 6 * (1 - k) + 1;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.4 + k * 2.3), 0, Math.PI * 2); ctx.stroke();
+      }
+      // 불꽃 파편 — 포물선을 그리며 튄다
+      for (let i = 0; i < 10; i++) {
+        const a = rnd() * Math.PI * 2, sp = 0.6 + rnd() * 0.9, g0 = rnd();
+        const k = Math.min(1, prog * 1.7);
+        if (k >= 1) continue;
+        const dx = Math.cos(a) * R * 2.1 * sp * k;
+        const dy = Math.sin(a) * R * 1.2 * sp * k + R * 1.4 * k * k * g0;   // 유사 중력
+        ctx.globalAlpha = (1 - k) * 0.95;
+        ctx.strokeStyle = i % 3 ? '#ffc86e' : '#fff1cf'; ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(f.ax + dx, f.ay + dy);
+        ctx.lineTo(f.ax + dx * 0.86, f.ay + dy * 0.86 - R * 0.06);
+        ctx.stroke();
+      }
+      // 연기 기둥 — 위로 피어오르며 흩어진다
+      if (prog > 0.12) {
+        const k = (prog - 0.12) / 0.88;
+        for (let i = 0; i < 6; i++) {
+          const sx = (rnd() - 0.5) * R * 0.9;
+          const rise = (k * 0.75 + rnd() * 0.25) * R * 2.1;
+          const puff = R * (0.32 + k * 0.5 + rnd() * 0.2);
+          ctx.globalAlpha = Math.max(0, (1 - k) * 0.4);
+          ctx.fillStyle = i % 2 ? 'rgba(40,40,46,1)' : 'rgba(66,62,58,1)';
+          ctx.beginPath();
+          ctx.arc(f.ax + sx + Math.sin(rise * 0.02 + i) * R * 0.2, f.ay - rise, puff, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    } else if (f.race === 'gloop') {
+      // ── 글룹 — 산성 점액 파열 (불 대신 초록 점액이 터진다) ──
+      const R = f.r * 1.2;
+      ctx.globalAlpha = (1 - prog) * 0.5;
+      ctx.fillStyle = '#3f9b58';
+      ctx.beginPath(); ctx.ellipse(f.ax, f.ay + R * 0.3, R * (0.8 + prog * 1.2), R * (0.35 + prog * 0.5), 0, 0, Math.PI * 2); ctx.fill();
+      if (prog < 0.2) fireball(f.ax, f.ay, R * 1.4, 'rgba(220,255,225,0.9)', 'rgba(125,255,158,0.6)', 1 - prog / 0.2);
+      ctx.fillStyle = '#7dff9e';
+      for (let i = 0; i < 8; i++) {
+        const a = rnd() * Math.PI * 2, sp = 0.5 + rnd();
+        const k = Math.min(1, prog * 1.4);
+        const dx = Math.cos(a) * R * 1.8 * sp * k;
+        const dy = Math.sin(a) * R * sp * k - R * 1.1 * k * (1 - k) * 2;   // 위로 튀었다 떨어진다
+        ctx.globalAlpha = (1 - k) * 0.85;
+        ctx.beginPath(); ctx.arc(f.ax + dx, f.ay + dy, (2.6 + rnd() * 2.4) * (1 - k * 0.5), 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (f.race === 'aether') {
+      // ── Aether — 사이오닉 내파: 안으로 무너졌다가 빛으로 흩어진다 ──
+      const R = f.r * 1.35;
+      if (prog < 0.3) {              // 수축
+        const k = prog / 0.3;
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = PSI; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (1.6 - k * 1.3), 0, Math.PI * 2); ctx.stroke();
+      } else {                       // 방출
+        const k = (prog - 0.3) / 0.7;
+        if (k < 0.3) fireball(f.ax, f.ay, R * 1.5, 'rgba(255,255,255,0.95)', 'rgba(226,198,255,0.7)', 1 - k / 0.3);
+        ctx.globalAlpha = (1 - k) * 0.9;
+        ctx.strokeStyle = '#e2c6ff'; ctx.lineWidth = 3.5 * (1 - k) + 0.5;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.3 + k * 2), 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = PSI;
+        for (let i = 0; i < 6; i++) {
+          const a = rnd() * Math.PI * 2;
+          const px = f.ax + Math.cos(a) * R * 1.9 * k, py = f.ay + Math.sin(a) * R * 1.9 * k;
+          ctx.globalAlpha = (1 - k) * 0.85;
+          ctx.save(); ctx.translate(px, py); ctx.rotate(a);
+          ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(0, -2.4); ctx.lineTo(5, 0); ctx.lineTo(0, 2.4);
+          ctx.closePath(); ctx.fill(); ctx.restore();
+        }
+      }
+    } else {
+      // ── 포지/기본 — 화구 + 충격파 + 금속 파편 + 연기 ──
+      const R = f.r * (f.fly ? 1.5 : 1.25);
+      if (prog < 0.16) fireball(f.ax, f.ay, R * 1.6, 'rgba(255,255,255,0.95)', 'rgba(255,232,170,0.7)', 1 - prog / 0.16);
+      if (prog < 0.55) {
+        const k = prog / 0.55;
+        fireball(f.ax, f.ay - R * 0.15 * k, R * (0.6 + k * 0.9), 'rgba(255,246,210,0.95)', 'rgba(255,138,51,0.8)', 1 - k * 0.8);
+      }
+      if (prog < 0.45) {
+        const k = prog / 0.45;
+        ctx.globalAlpha = (1 - k) * 0.75;
+        ctx.strokeStyle = '#ffe9c4'; ctx.lineWidth = 4 * (1 - k) + 0.8;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.35 + k * 1.9), 0, Math.PI * 2); ctx.stroke();
+      }
+      for (let i = 0; i < 7; i++) {
+        const a = rnd() * Math.PI * 2, sp = 0.55 + rnd() * 0.8, g0 = rnd();
+        const k = Math.min(1, prog * 1.5);
+        if (k >= 1) continue;
+        const dx = Math.cos(a) * R * 2 * sp * k;
+        const dy = Math.sin(a) * R * 1.1 * sp * k + R * 1.2 * k * k * g0;
+        ctx.globalAlpha = (1 - k) * 0.9;
+        ctx.strokeStyle = i % 3 ? '#ffc86e' : '#e8eef4'; ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(f.ax + dx, f.ay + dy);
+        ctx.lineTo(f.ax + dx * 0.84, f.ay + dy * 0.84 - R * 0.05);
+        ctx.stroke();
+      }
+      if (prog > 0.3) {
+        const k = (prog - 0.3) / 0.7;
+        for (let i = 0; i < 3; i++) {
+          const sx = (rnd() - 0.5) * R * 0.8;
+          ctx.globalAlpha = (1 - k) * 0.32;
+          ctx.fillStyle = 'rgba(46,44,48,1)';
+          ctx.beginPath();
+          ctx.arc(f.ax + sx, f.ay - (k * 0.7 + rnd() * 0.3) * R * 1.5, R * (0.28 + k * 0.35), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
     ctx.restore();
   }
 
   function drawShot(f) {
+    if (f.boom) { drawBoom(f); return; }
     // 스킬 이펙트 (범위 파동 / 치유 / 점멸)
     if (f.abil) {
       const ULT_LIFE = { barrage: 1.1, swarm: 0.9, aegis: 1.0 };
@@ -1995,16 +2462,56 @@ RC.Renderer = (function () {
       return;
     }
     const col = f.crit ? C.crit : pal(f.owner).trim;
+    const k = Math.min(1, f.t / 0.12);
     ctx.save();
-    ctx.globalAlpha = Math.min(1, f.t / 0.12);
+    ctx.lineCap = 'round';
+    // 바깥 광선 (넓고 흐린 에너지 빔) — 그 위에 뜨거운 심을 겹쳐 광선처럼 보이게 한다
+    ctx.globalAlpha = k * 0.3;
     ctx.strokeStyle = col;
-    ctx.lineWidth = f.crit ? 4 : (f.splash ? 3 : 2);
+    ctx.lineWidth = f.crit ? 10 : (f.splash ? 9 : 6.5);
     ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.tx, f.ty); ctx.stroke();
-    // 공성 스플래시 폭발 링
+    // 심 — 흰빛에 가까운 중심선
+    ctx.globalAlpha = k * 0.95;
+    ctx.strokeStyle = mix(col, '#ffffff', 0.65);
+    ctx.lineWidth = f.crit ? 2.6 : 1.7;
+    ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.tx, f.ty); ctx.stroke();
+    // 총구 섬광 — 발사 직후에만 (수명 앞 40%)
+    if (k > 0.6) {
+      const mf = (k - 0.6) / 0.4;
+      ctx.globalAlpha = mf * 0.9;
+      ctx.fillStyle = mix(col, '#ffffff', 0.5);
+      const ang = Math.atan2(f.ty - f.y, f.tx - f.x);
+      ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.moveTo(0, -3.2); ctx.lineTo(9 + mf * 4, 0); ctx.lineTo(0, 3.2); ctx.lineTo(-2.5, 0);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    // 착탄 불꽃 — 명중 지점에서 튀는 스파크
+    {
+      const ia = Math.atan2(f.ty - f.y, f.tx - f.x);
+      ctx.globalAlpha = k * 0.85;
+      ctx.strokeStyle = mix(col, '#ffffff', 0.4);
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 4; i++) {
+        const sa = ia + Math.PI + (i - 1.5) * 0.55;
+        const len = 5 + (i % 2) * 4 + (1 - k) * 7;
+        ctx.beginPath();
+        ctx.moveTo(f.tx + Math.cos(sa) * 2, f.ty + Math.sin(sa) * 2);
+        ctx.lineTo(f.tx + Math.cos(sa) * len, f.ty + Math.sin(sa) * len);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = k * 0.7;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(f.tx, f.ty, 2.2, 0, Math.PI * 2); ctx.fill();
+    }
+    // 공성 스플래시 — 화구 그라디언트 + 팽창 링 (평평한 원반 대신)
     if (f.splash) {
-      ctx.fillStyle = col;
-      ctx.globalAlpha *= 0.4;
-      ctx.beginPath(); ctx.arc(f.tx, f.ty, f.splash, 0, Math.PI * 2); ctx.fill();
+      const sp = 1 - k;                      // 수명이 줄어드는 만큼 커진다
+      fireball(f.tx, f.ty, f.splash * (0.5 + sp * 0.7), 'rgba(255,244,205,0.85)', 'rgba(255,150,60,0.5)', k);
+      ctx.globalAlpha = k * 0.8;
+      ctx.strokeStyle = '#ffd9a0'; ctx.lineWidth = 2.5 * k + 0.5;
+      ctx.beginPath(); ctx.arc(f.tx, f.ty, f.splash * (0.4 + sp * 0.8), 0, Math.PI * 2); ctx.stroke();
     }
     // 치명타 — 노란 별 표시
     if (f.crit) {
@@ -2076,6 +2583,13 @@ RC.Renderer = (function () {
     ctx.lineWidth = 2;
     g.selection.forEach(e => {
       if (e.kind === 'unit') {
+        ctx.save();                     // 바깥쪽 부드러운 광륜 → 안쪽 선명한 링
+        ctx.globalAlpha = 0.30;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.ellipse(e.x, e.y + e.r * 0.5, e.r * 1.25, e.r * 0.6, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
         ctx.beginPath();
         ctx.ellipse(e.x, e.y + e.r * 0.5, e.r * 1.25, e.r * 0.6, 0, 0, Math.PI * 2);
         ctx.stroke();
