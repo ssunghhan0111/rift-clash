@@ -354,6 +354,49 @@ RC.UI = (function () {
     })[u.state] || u.state;
   }
 
+  function escapeAttr(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function escapeHtml(s) { return escapeAttr(s); }
+
+  // Hook up the "submit my run" box on the Survival end screen.
+  function wireScoreSubmit(run) {
+    const input = document.getElementById('lb-name');
+    const btn = document.getElementById('lb-send');
+    const msg = document.getElementById('lb-msg');
+    if (!input || !btn || !msg) return;
+    let sent = false;
+    const send = () => {
+      if (sent) return;
+      const name = RC.Leaderboard.cleanName(input.value);
+      if (!name) { msg.textContent = 'Type a name first.'; msg.className = 'warn'; input.focus(); return; }
+      sent = true;
+      btn.disabled = true; input.disabled = true;
+      msg.textContent = 'Sending…'; msg.className = '';
+      RC.Leaderboard.submit({
+        name: name, diff: run.diff, wave: run.waves, kills: run.kills,
+        race: g.playerRace ? g.playerRace[g.playerOwner] : 'forge',
+        mode: RC.online ? 'coop' : 'solo',
+      }).then(r => {
+        if (r.rank) {
+          msg.innerHTML = r.improved
+            ? `🏆 You are <b>#${r.rank}</b> in the world on ${(RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(run.diff) : run.diff}!`
+            : `Your best on this difficulty is still <b>#${r.rank}</b> — beat it next run!`;
+        } else {
+          msg.textContent = 'Score sent! Keep climbing to reach the top 100.';
+        }
+        msg.className = 'good';
+      }).catch(e => {
+        sent = false; btn.disabled = false; input.disabled = false;
+        msg.textContent = 'Could not reach the leaderboard (' + e.message + '). Try again?';
+        msg.className = 'warn';
+      });
+    };
+    btn.addEventListener('click', send);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  }
+
   function showOverlay(kind) {
     if (g.survival) {
       const diff = g.survivalDiff || 'medium';
@@ -366,11 +409,24 @@ RC.UI = (function () {
         best = parseInt(window.localStorage.getItem(key) || '0', 10) || 0;
         if (score > best) { best = score; isNew = true; window.localStorage.setItem(key, String(best)); }
       } catch (e) { /* localStorage unavailable (e.g. file://) — skip persistence */ }
+      const canPost = RC.Leaderboard && RC.Leaderboard.available();
       el.overlayText.innerHTML =
         `<b class="lose">CRYSTAL SHATTERED</b>` +
         `<span>${dn} — reached <b style="color:var(--cyan)">Wave ${waves}</b> · ${kills} enemies slain</span>` +
         `<span style="font-size:26px;font-weight:700;color:var(--good)">Score ${score}${isNew ? '  🏆 NEW BEST!' : ''}</span>` +
-        `<span style="color:var(--dim)">Best on ${dn}: ${best}</span>`;
+        `<span style="color:var(--dim)">Best on ${dn}: ${best}</span>` +
+        (canPost
+          ? `<div id="lb-post">
+               <div class="lb-h">🌍 Send your score to the world leaderboard</div>
+               <div class="lb-row">
+                 <input id="lb-name" maxlength="14" placeholder="Your name"
+                        value="${escapeAttr(RC.Leaderboard.getName())}">
+                 <button id="lb-send">Submit</button>
+               </div>
+               <div id="lb-msg"></div>
+             </div>`
+          : `<div id="lb-post"><div class="lb-h" style="color:var(--dim)">Play the online version to post your score to the world leaderboard.</div></div>`);
+      if (canPost) wireScoreSubmit({ diff, waves, kills, score });
     } else {
       el.overlayText.innerHTML = kind === 'win'
         ? '<b class="win">VICTORY</b><span>Enemy core destroyed.</span>'

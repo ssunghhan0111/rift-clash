@@ -369,12 +369,85 @@ window.RC = window.RC || {};
     if (RC.online) { RC.NetClient.close(); RC.online = false; }
     document.getElementById('lobby').classList.add('hidden');
     document.getElementById('browser').classList.add('hidden');
+    const bd = document.getElementById('board');
+    if (bd) bd.classList.add('hidden');
     overlay.classList.add('hidden');
     exitFullscreenIfActive();
     buildStartScreen();
     applyGameMode(selGameMode);
     ss.classList.remove('hidden');
   }
+
+  // ── World leaderboard screen ────────────────────────────
+  const boardEl = document.getElementById('board');
+  let boardDiff = 'medium';
+
+  function renderBoardTabs() {
+    const tabs = document.getElementById('board-tabs');
+    if (!tabs) return;
+    tabs.innerHTML = '';
+    DIFFS.forEach(d => {
+      const b = document.createElement('div');
+      b.className = 'modebtn' + (d.id === boardDiff ? ' sel' : '');
+      b.innerHTML = `<div class="mb-name">${d.name}</div>`;
+      b.addEventListener('click', () => { boardDiff = d.id; renderBoardTabs(); loadBoard(); });
+      tabs.appendChild(b);
+    });
+  }
+
+  function loadBoard() {
+    const list = document.getElementById('board-list');
+    const status = document.getElementById('board-status');
+    list.innerHTML = '';
+    if (!RC.Leaderboard || !RC.Leaderboard.available()) {
+      status.textContent = 'The world leaderboard needs the online version of the game — open it from the web address instead of a local file.';
+      return;
+    }
+    status.textContent = 'Loading…';
+    const myName = (RC.Leaderboard.getName() || '').toLowerCase();
+    RC.Leaderboard.top(boardDiff, 25).then(res => {
+      list.innerHTML = '';
+      if (!res.rows || !res.rows.length) {
+        status.textContent = '';
+        list.innerHTML = '<div id="board-empty">No scores yet on this difficulty — be the first!</div>';
+        return;
+      }
+      status.textContent = 'Top ' + res.rows.length + ' — beat them and your name goes up here.';
+      res.rows.forEach((r, i) => {
+        const rank = i + 1;
+        const race = RC.RACES[r.race] || RC.RACES.forge;
+        const mine = String(r.name || '').toLowerCase() === myName;
+        const row = document.createElement('div');
+        row.className = 'lbrow' + (rank <= 3 ? ' top' + rank : '') + (mine ? ' me' : '');
+        const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank;
+        row.innerHTML =
+          `<div class="rk">${medal}</div>` +
+          `<div><div class="nm">${esc(r.name)}${mine ? ' <span style="color:var(--orange);font-size:11px">(you)</span>' : ''}</div>` +
+          `<div class="meta">Wave ${r.wave} · ${r.kills} slain · <span style="color:${race.tint}">${race.name}</span>${r.mode === 'coop' ? ' · co-op' : ''}</div></div>` +
+          `<div class="sc">${r.score}</div>`;
+        list.appendChild(row);
+      });
+    }).catch(e => { status.textContent = 'Could not load the leaderboard (' + e.message + ').'; });
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function openBoard() {
+    ss.classList.add('hidden');
+    boardEl.classList.remove('hidden');
+    renderBoardTabs();
+    loadBoard();
+  }
+  const lbBtn = document.getElementById('ss-leaderboard');
+  if (lbBtn) lbBtn.addEventListener('click', openBoard);
+  const lbBack = document.getElementById('board-back');
+  if (lbBack) lbBack.addEventListener('click', () => {
+    boardEl.classList.add('hidden');
+    ss.classList.remove('hidden');
+  });
 
   document.getElementById('ss-start').addEventListener('click', startGame);
   document.getElementById('ss-survival').addEventListener('click', startSurvival);

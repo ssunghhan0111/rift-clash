@@ -25,14 +25,148 @@ RC.CFG.FOG_ENABLED = false;               // server is omniscient; clients compu
 const PORT = process.env.PORT || 8080;
 const DIR = __dirname;
 
-// ── Static file server ──
+// ══ Global Survival leaderboard ═══════════════════════════════════════════
+// Top scores per difficulty, kept in a JSON file next to the server.
+// NOTE: on a free Render instance the filesystem is EPHEMERAL — the board
+// survives restarts of the process but is wiped by a redeploy. That's fine for
+// a friendly high-score board; swap in a hosted DB later if it needs to persist.
+const SCORES_FILE = path.join(DIR, 'scores.json');
+const DIFFS = ['easy', 'medium', 'insane'];
+const MAX_ROWS = 100;                    // rows kept per difficulty
+const MAX_BODY = 4096;                   // reject oversized POST bodies
+
+let scores = { easy: [], medium: [], insane: [] };
+try {
+  const raw = JSON.parse(fs.readFileSync(SCORES_FILE, 'utf8'));
+  DIFFS.forEach(d => { if (Array.isArray(raw[d])) scores[d] = raw[d].slice(0, MAX_ROWS); });
+  console.log('leaderboard loaded:', DIFFS.map(d => d + '=' + scores[d].length).join(' '));
+} catch (e) { /* first run, or unreadable/corrupt file — start with an empty board */ }
+
+let saveTimer = null;
+function saveScores() {                  // debounced + atomic (write temp, then rename)
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    const tmp = SCORES_FILE + '.tmp';
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(scores));
+      fs.renameSync(tmp, SCORES_FILE);
+    } catch (e) { console.log('leaderboard save failed:', e.message); }
+  }, 1500);
+}
+
+// Keep names friendly: letters/digits/spaces and a few marks, nothing else.
+function cleanName(s) {
+  const t = String(s == null ? '' : s)
+    .replace(/[^\p{L}\p{N} _\-.!]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 14);
+  return t || 'Anonymous';
+}
+
+// The client is not trusted: the score is RECOMPUTED here from waves+kills, and
+// implausible runs are rejected outright. This is a friendly game, so the goal is
+// to stop casual tampering, not to be unforgeable.
+function validate(b) {
+  if (!b || typeof b !== 'object') return 'bad payload';
+  if (DIFFS.indexOf(b.diff) < 0) return 'bad difficulty';
+  const wave = Math.floor(Number(b.wave));
+  const kills = Math.floor(Number(b.kills));
+  if (!isFinite(wave) || wave < 1 || wave > 500) return 'bad wave';
+  if (!isFinite(kills) || kills < 0 || kills > 200000) return 'bad kills';
+  if (kills > wave * 400 + 200) return 'kills do not match waves';
+  const mode = (b.mode === 'coop') ? 'coop' : 'solo';
+  const race = (RC.RACES && RC.RACES[b.race]) ? b.race : 'forge';
+  return { diff: b.diff, wave, kills, mode, race,
+           score: wave * 100 + kills * 5, name: cleanName(b.name), at: Date.now() };
+}
+
+// One row per name per difficulty — keeps the board varied instead of letting a
+// single player occupy every slot.
+function submitScore(entry) {
+  const list = scores[entry.diff];
+  const key = entry.name.toLowerCase();
+  const prev = list.findIndex(r => String(r.name).toLowerCase() === key);
+  let improved = true;
+  if (prev >= 0) {
+    if (list[prev].score >= entry.score) { improved = false; }
+    else list.splice(prev, 1);
+  }
+  if (improved) list.push(entry);
+  list.sort((a, b) => b.score - a.score || a.at - b.at);
+  scores[entry.diff] = list.slice(0, MAX_ROWS);
+  saveScores();
+  const rank = scores[entry.diff].findIndex(r =>
+    String(r.name).toLowerCase() === key && r.score >= entry.score);
+  return { improved, rank: rank >= 0 ? rank + 1 : null, total: scores[entry.diff].length };
+}
+
+// Light per-IP rate limit so nobody can spam the board.
+const rate = new Map();
+function rateOk(ip) {
+  const now = Date.now(), win = 3600000, cap = 40;
+  const r = rate.get(ip);
+  if (!r || now > r.reset) { rate.set(ip, { n: 1, reset: now + win }); return true; }
+  if (r.n >= cap) return false;
+  r.n++; return true;
+}
+setInterval(() => {                                    // drop expired buckets
+  const now = Date.now();
+  for (const [ip, r] of rate) if (now > r.reset) rate.delete(ip);
+}, 600000).unref?.();
+
+function sendJson(res, code, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(body);
+}
+
+// ── Static file server (+ leaderboard API) ──
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
                '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
-  let p = decodeURIComponent((req.url || '/').split('?')[0]);
+  const url = req.url || '/';
+  let p = decodeURIComponent(url.split('?')[0]);
+
+  // ── API ──
+  if (p === '/api/scores' && req.method === 'GET') {
+    const q = new URLSearchParams(url.split('?')[1] || '');
+    const diff = DIFFS.indexOf(q.get('diff')) >= 0 ? q.get('diff') : 'medium';
+    const limit = Math.max(1, Math.min(MAX_ROWS, parseInt(q.get('limit') || '25', 10) || 25));
+    sendJson(res, 200, { diff, rows: scores[diff].slice(0, limit) });
+    return;
+  }
+  if (p === '/api/score' && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+               req.socket.remoteAddress || 'unknown';
+    if (!rateOk(ip)) { sendJson(res, 429, { ok: false, error: 'too many submissions — try again later' }); return; }
+    let body = '';
+    let aborted = false;
+    req.on('data', c => {
+      body += c;
+      if (body.length > MAX_BODY) { aborted = true; sendJson(res, 413, { ok: false, error: 'too large' }); req.destroy(); }
+    });
+    req.on('end', () => {
+      if (aborted) return;
+      let parsed;
+      try { parsed = JSON.parse(body); } catch (e) { sendJson(res, 400, { ok: false, error: 'bad json' }); return; }
+      const entry = validate(parsed);
+      if (typeof entry === 'string') { sendJson(res, 400, { ok: false, error: entry }); return; }
+      const r = submitScore(entry);
+      sendJson(res, 200, {
+        ok: true, rank: r.rank, improved: r.improved, score: entry.score,
+        name: entry.name, rows: scores[entry.diff].slice(0, 25),
+      });
+    });
+    return;
+  }
+
+  // ── static ──
   if (p === '/') p = '/index.html';
   const file = path.join(DIR, path.normalize(p).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(DIR)) { res.writeHead(403); res.end(); return; }
+  if (path.basename(file) === 'scores.json') { res.writeHead(404); res.end('not found'); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('not found'); return; }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
