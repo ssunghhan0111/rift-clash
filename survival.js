@@ -1,7 +1,32 @@
 // RIFT CLASH — Survival wave director (offline)
-// Enemy waves march from g.enemySpawn to the Rift Crystal. A wave spawns in full, and the
-// NEXT wave only begins 5 seconds AFTER the current wave has been completely wiped out — so
-// enemies never pile up. Each wave is bigger and stronger; three difficulty levels set the pace.
+// ---------------------------------------------------------------------------
+// Enemy waves march from g.enemySpawn to the Rift Crystal. A wave spawns in full,
+// and the NEXT wave only begins a few seconds AFTER the current wave has been
+// completely wiped out — so enemies never pile up.
+//
+// DIFFICULTY CURVE — rewritten so the run opens as a real warm-up and the
+// pressure compounds from there, instead of dropping a half-formed army on the
+// player at wave 1. Three dials move together, all anchored so wave 1 is the
+// true floor of the run:
+//
+//   1. COUNT  — size + sizeGrow * (w-1)^sizeExp. The exponent (1.15) means the
+//               opening waves add about one enemy each while the late ones add
+//               three or four. Medium now reads 2, 3, 4, 5, 7, 8, 10 ... 16 by
+//               wave 10 and 34 by wave 20. The old straight line opened at SIX
+//               and was already at 12 by wave 5.
+//   2. HP     — enemies use their printed stats for the first few waves
+//               (hpFree), then climb steadily. The old formula handed wave 1 a
+//               +12% health bonus before the player had built anything.
+//   3. ROSTER — a newly unlocked enemy type enters at a QUARTER of its weight
+//               and reaches full weight RAMP waves later, so each new threat
+//               arrives as one or two scouts before it becomes a real part of
+//               the horde. Previously a type jumped from absent to ~1/5 of the
+//               wave the instant it unlocked, which is what made waves 7 and 9
+//               feel like walls rather than steps.
+//
+// Late-game numbers are deliberately close to the old curve (Medium wave 20 is
+// still ~34 enemies) — what changed is the SHAPE of the ramp, not the ceiling,
+// so deep runs and leaderboard scores stay broadly comparable.
 window.RC = window.RC || {};
 
 RC.Survival = (function () {
@@ -9,13 +34,56 @@ RC.Survival = (function () {
   const GAP = 5;            // seconds after a wave is fully cleared before the next one
   const SPAWN_STEP = 0.22;  // seconds between individual unit spawns within a wave
   const ENEMY = 2;          // owner id of the attacking horde
+  const RAMP = 4;           // waves for a newly unlocked type to reach full weight
 
-  // Difficulty presets — enemy count, HP and upgrade pace scale with the level.
+  // Difficulty presets — count, HP and upgrade pace scale with the level.
+  //   size/sizeGrow/sizeExp  wave-size curve (see waveSize)
+  //   sizeCap                hard ceiling on wave size, a performance guard that
+  //                          only bites deep into a run; difficulty keeps rising
+  //                          through HP and roster after it does
+  //   hpBase/hpGrow/hpFree   HP multiplier — flat at hpBase for the first
+  //                          hpFree waves, then +hpGrow per wave
+  //   unlock                 shifts every non-starter enemy type later (+) or
+  //                          earlier (-)
   const DIFF = {
-    easy:   { name: 'Easy',       size: 3, sizeGrow: 0.9, hpBase: 0.80, hpGrow: 0.07, atkEvery: 6, armEvery: 10, unlock: 2 },
-    medium: { name: 'Medium',     size: 4, sizeGrow: 1.5, hpBase: 1.00, hpGrow: 0.12, atkEvery: 4, armEvery: 6,  unlock: 0 },
-    insane: { name: 'Crazy Hard', size: 5, sizeGrow: 2.3, hpBase: 1.35, hpGrow: 0.18, atkEvery: 3, armEvery: 4,  unlock: -2 },
+    easy: {
+      name: 'Easy',
+      size: 2, sizeGrow: 0.55, sizeExp: 1.15, sizeCap: 55,
+      hpBase: 0.80, hpGrow: 0.08, hpFree: 4,
+      atkEvery: 6, armEvery: 10, unlock: 2,
+    },
+    medium: {
+      name: 'Medium',
+      size: 2, sizeGrow: 1.00, sizeExp: 1.15, sizeCap: 70,
+      hpBase: 1.00, hpGrow: 0.135, hpFree: 3,
+      atkEvery: 4, armEvery: 6, unlock: 0,
+    },
+    insane: {
+      name: 'Crazy Hard',
+      size: 3, sizeGrow: 1.60, sizeExp: 1.15, sizeCap: 85,
+      hpBase: 1.35, hpGrow: 0.18, hpFree: 1,
+      atkEvery: 3, armEvery: 4, unlock: -2,
+    },
   };
+
+  // The horde roster. `at` is the wave a type first appears on Medium, `w` its
+  // share of the wave once fully ramped in. `core` types ignore the difficulty
+  // unlock shift so wave 1 is never empty on Easy.
+  const ROSTER = [
+    { t: 'globling', at: 1,  w: 3.0, core: true },
+    { t: 'volt',     at: 2,  w: 2.4, core: true },
+    { t: 'spitter',  at: 4,  w: 1.9 },
+    { t: 'shielder', at: 6,  w: 1.5 },
+    { t: 'bloat',    at: 8,  w: 1.2, heavy: true },
+    { t: 'ardent',   at: 9,  w: 1.2 },   // Aether — shielded melee, needs sustained damage
+    { t: 'floater',  at: 10, w: 1.1, air: true },   // the player now needs anti-air
+    { t: 'lancer',   at: 12, w: 1.0 },   // shielded ranged
+    { t: 'heli',     at: 13, w: 0.9, air: true },
+    { t: 'seraph',   at: 16, w: 0.8, air: true },   // shielded air
+    { t: 'bastion',  at: 19, w: 0.7, heavy: true }, // late-game shielded siege
+  ];
+  const HEAVY_ORDER = ['bastion', 'bloat'];   // milestone pushes prefer the first unlocked
+
   // Daily Challenge always runs on the Medium curve with the day's twist applied
   // on top, so the only thing separating two players on the daily board is how
   // they played — not which difficulty they picked.
@@ -24,13 +92,20 @@ RC.Survival = (function () {
     const m = g && g.daily && g.daily.mod;
     if (!m) return base;
     const d = Object.assign({}, DIFF.medium);
-    if (m.size) { d.size = Math.max(2, Math.round(d.size * m.size)); d.sizeGrow = d.sizeGrow * m.size; }
+    if (m.size) {
+      d.size = Math.max(2, Math.round(d.size * m.size));
+      d.sizeGrow = d.sizeGrow * m.size;
+      d.sizeCap = Math.min(90, Math.round(d.sizeCap * m.size));
+    }
     if (m.hp) { d.hpBase = d.hpBase * m.hp; d.hpGrow = d.hpGrow * m.hp; }
     if (m.upgradePace) {
       d.atkEvery = Math.max(1, Math.round(d.atkEvery * m.upgradePace));
       d.armEvery = Math.max(1, Math.round(d.armEvery * m.upgradePace));
     }
-    if (m.airEarly) d.unlock = d.unlock + 6;   // air types unlock six waves sooner
+    // Skyfall — air types only, and EARLIER. The old code did `unlock + 6`,
+    // which pushed every type six waves LATER: the twist was doing the exact
+    // opposite of its own description, and to the whole roster rather than air.
+    if (m.airEarly) d.airShift = -5;
     d.name = m.name;
     return d;
   }
@@ -49,31 +124,88 @@ RC.Survival = (function () {
   }
   function reset() { }
 
+  // ── The curve ─────────────────────────────────────────────────────────────
+
+  // How many enemies wave w contains. Accelerating rather than linear: the early
+  // waves are a warm-up, the pressure compounds later.
+  function waveSize(w, D) {
+    const n = D.size + D.sizeGrow * Math.pow(Math.max(0, w - 1), D.sizeExp);
+    return Math.max(2, Math.min(D.sizeCap, Math.round(n)));
+  }
+
+  // A type's share of wave w — 0 before it unlocks, a quarter on its debut wave,
+  // full weight RAMP waves after that. This is what turns "a new enemy type" from
+  // a cliff into a slope.
+  function weightAt(e, w, D) {
+    let at = e.at;
+    if (!e.core) at += (D.unlock || 0);
+    if (e.air) at += (D.airShift || 0);
+    at = Math.max(1, at);
+    if (w < at) return 0;
+    return e.w * Math.min(1, 0.25 + 0.75 * (w - at) / RAMP);
+  }
+
+  function poolFor(w, D) {
+    const pool = [];
+    let total = 0;
+    for (const e of ROSTER) {
+      const wt = weightAt(e, w, D);
+      if (wt > 0) { pool.push({ t: e.t, wt }); total += wt; }
+    }
+    if (!pool.length) { pool.push({ t: 'globling', wt: 1 }); total = 1; }
+    return { pool, total };
+  }
+
+  function pickFrom(pool, total, g) {
+    let r = rnd(g) * total;
+    for (const e of pool) { r -= e.wt; if (r <= 0) return e.t; }
+    return pool[pool.length - 1].t;
+  }
+
+  // The heaviest type that has FULLY ramped in — a milestone push should reinforce
+  // a threat the player has already met, not introduce a brand-new one three at a
+  // time. Falls back to any unlocked heavy, then to nothing.
+  function heaviestUnlocked(w, D) {
+    for (const pass of [RAMP, 0]) {
+      for (const t of HEAVY_ORDER) {
+        for (const e of ROSTER) {
+          if (e.t !== t) continue;
+          const at = Math.max(1, e.at + (e.core ? 0 : (D.unlock || 0)));
+          if (weightAt(e, w, D) > 0 && w >= at + pass) return t;
+        }
+      }
+    }
+    return null;
+  }
+
   // Which unit types make up wave w (tougher types unlock sooner on higher difficulty)
   function compose(w, g) {
     const D = diffOf(g);
-    const u = D.unlock;
-    const pool = ['globling', 'volt'];
-    if (w >= 3 + u) pool.push('spitter');
-    if (w >= 5 + u) pool.push('shielder');
-    if (w >= 7 + u) pool.push('bloat');
-    if (w >= 8 + u) pool.push('ardent');     // Aether — shielded melee, needs sustained damage
-    if (w >= 9 + u) pool.push('floater');    // air — the player now needs anti-air towers
-    if (w >= 11 + u) pool.push('lancer');    // shielded ranged
-    if (w >= 12 + u) pool.push('heli');
-    if (w >= 15 + u) pool.push('seraph');    // shielded air
-    if (w >= 18 + u) pool.push('bastion');   // late-game shielded siege
-    const count = Math.max(3, D.size + Math.round(w * D.sizeGrow));
+    const { pool, total } = poolFor(w, D);
+    const count = waveSize(w, D);
     const list = [];
-    for (let i = 0; i < count; i++) list.push(pool[(rnd(g) * pool.length) | 0]);
-    if (w % 5 === 0) list.push('bloat', 'bloat');   // heavier push every 5th wave
+    for (let i = 0; i < count; i++) list.push(pickFrom(pool, total, g));
+
+    // Milestone push — every fifth wave from 10 on, a few of the heaviest
+    // unlocked type arrive behind the horde. Held back until wave 10 on purpose:
+    // the old version forced two Bloats into wave 5, two waves BEFORE Bloats were
+    // supposed to exist at all, which is why wave 5 used to end so many runs.
+    if (w >= 10 && w % 5 === 0) {
+      const heavy = heaviestUnlocked(w, D);
+      if (heavy) {
+        const n = 1 + Math.floor(w / 10);
+        for (let i = 0; i < n; i++) list.push(heavy);
+      }
+    }
     return list;
   }
 
-  // Enemy HP growth per wave, scaled by difficulty (applied on spawn)
+  // Enemy HP growth per wave, scaled by difficulty (applied on spawn).
+  // Flat at hpBase for the first hpFree waves — wave 1 enemies are exactly as
+  // tough as the unit card says, no more.
   function scaleHp(u, w, g) {
     const D = diffOf(g);
-    const f = D.hpBase * (1 + w * D.hpGrow);
+    const f = D.hpBase * (1 + D.hpGrow * Math.max(0, w - (D.hpFree || 0)));
     u.baseMaxHp = u.def.hp * f;
     u.maxHp = Math.round(u.def.hp * f);
     u.hp = u.maxHp;
@@ -100,8 +232,10 @@ RC.Survival = (function () {
     s.clearing = false;
     const D = diffOf(g);
     if (g.upgrades[ENEMY]) {
-      g.upgrades[ENEMY].atk = Math.min(3, Math.floor(s.wave / D.atkEvery));
-      g.upgrades[ENEMY].arm = Math.min(3, Math.floor(s.wave / D.armEvery));
+      // wave-1 relative, so the horde does not open the run already upgraded
+      const w0 = Math.max(0, s.wave - 1);
+      g.upgrades[ENEMY].atk = Math.min(3, Math.floor(w0 / D.atkEvery));
+      g.upgrades[ENEMY].arm = Math.min(3, Math.floor(w0 / D.armEvery));
     }
     g.notify('⚠ Wave ' + s.wave + ' incoming!');
     if (RC.Audio) RC.Audio.play('wave');
@@ -144,7 +278,7 @@ RC.Survival = (function () {
       s.timer -= dt;
       if (s.timer <= 0) startWave(g);
     } else if (countEnemies(g) === 0) {
-      // current wave fully cleared → 5s breather, then the next (heavier) wave
+      // current wave fully cleared → short breather, then the next (heavier) wave
       if (!s.clearing) {
         s.clearing = true;
         s.timer = gapOf(g);
@@ -158,6 +292,6 @@ RC.Survival = (function () {
     steer(g);
   }
 
-  return { reset, update, compose, scaleHp, diffOf, prepOf, gapOf,
+  return { reset, update, compose, scaleHp, diffOf, prepOf, gapOf, waveSize, weightAt, ROSTER,
            diffName: k => (DIFF[k] || DIFF.medium).name };
 })();
