@@ -55,11 +55,24 @@ RC.Renderer = (function () {
     ctx.closePath();
   }
 
+  // 화면 흔들림 오프셋 — 궁극기가 터졌을 때만. 남은 시간에 비례해 감쇠한다.
+  // Cosmetic only: it shifts the drawn frame, never g.camera, so orders and
+  // hit-testing are unaffected and a shaking client stays in sync.
+  function shakeOffset(g) {
+    const t = g.shakeT || 0;
+    if (t <= 0) return null;
+    const amp = 16 * (t / (g.shakeMax || 1));
+    const p = performance.now() / 1000;
+    return { x: Math.sin(p * 61) * amp, y: Math.cos(p * 47) * amp * 0.8 };
+  }
+
   function draw(g, input) {
     const W = cv.width, H = cv.height;
+    const shk = shakeOffset(g);
+    if (shk) { ctx.save(); ctx.translate(shk.x, shk.y); }
     // 행성마다 하늘/땅 색이 다르다 (지구=초록, 작열=붉음, 얼음=검푸름)
     ctx.fillStyle = (g.mapDef && g.mapDef.ground) || C.bg;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-20, -20, W + 40, H + 40);
     // 표면 질감 (카메라를 따라 흘러가도록 패턴 원점을 이동)
     const tex = groundTexture(g);
     if (tex) {
@@ -90,6 +103,7 @@ RC.Renderer = (function () {
     ctx.restore();
 
     drawAmbient(g, W, H);          // 대기 입자 (꽃가루 / 불티 / 눈발)
+    if (shk) ctx.restore();        // HUD 요소는 흔들리지 않는다
     drawDragBox(input);
     drawMinimap(g, W, H);
   }
@@ -1198,6 +1212,14 @@ RC.Renderer = (function () {
     ctx.globalAlpha = 0.95;
     ctx.strokeStyle = op.body; ctx.lineWidth = 2.2;
     ctx.beginPath(); ctx.ellipse(0, oy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    // 궁극기로 소환된 임시 유닛 — 점선 링으로 "잠시 뒤 사라짐"을 알린다
+    if (u.summoned || u.temp != null) {
+      ctx.globalAlpha = 0.9;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#a9ffc4'; ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.ellipse(0, oy, rx + 3.5, ry + 2, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // 팀 구분 보조 링 (아군=파랑 / 적군=주황) — 내 유닛엔 없음
     const tc = teamColor(g, u.owner);
     if (tc) {
@@ -1858,10 +1880,79 @@ RC.Renderer = (function () {
   function drawShot(f) {
     // 스킬 이펙트 (범위 파동 / 치유 / 점멸)
     if (f.abil) {
-      const life = f.abil === 'nova' ? 0.5 : (f.abil === 'heal' ? 0.5 : 0.35);
+      const ULT_LIFE = { barrage: 1.1, swarm: 0.9, aegis: 1.0 };
+      const life = ULT_LIFE[f.abil] || (f.abil === 'nova' ? 0.5 : (f.abil === 'heal' ? 0.5 : 0.35));
       const prog = 1 - Math.max(0, f.t) / life;
       ctx.save();
-      if (f.abil === 'nova') {
+      if (f.abil === 'barrage') {
+        // 궤도 폭격 — 하늘에서 떨어지는 광선 다발 + 확장하는 충격파 + 화구
+        const R = f.radius;
+        ctx.globalAlpha = (1 - prog) * 0.55; ctx.fillStyle = '#ffb765';
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.25 + prog * 0.85), 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = (1 - prog) * 0.95; ctx.strokeStyle = '#fff0c2'; ctx.lineWidth = 6 * (1 - prog) + 1;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.2 + prog), 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#ff7a2f'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.05 + prog * 1.05), 0, Math.PI * 2); ctx.stroke();
+        // 낙하하는 포탄 광선 — 한 발씩 시차를 두고 떨어져야 "궤도 폭격"으로 읽힌다
+        for (let i = 0; i < 12; i++) {
+          const a = i * 0.5236 + 0.3;
+          const rr = R * (0.22 + (i % 4) * 0.22);
+          const bx = f.ax + Math.cos(a) * rr, by = f.ay + Math.sin(a) * rr;
+          const fall = Math.min(1, Math.max(0, (prog - i * 0.045) * 2.6));
+          if (fall <= 0) continue;
+          if (fall < 1) {                       // 아직 떨어지는 중 — 하늘에서 내려오는 광선
+            const head = by - 520 * (1 - fall);
+            ctx.globalAlpha = 0.95;
+            ctx.strokeStyle = '#fff6d8'; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(bx, head); ctx.lineTo(bx, head - 150); ctx.stroke();
+            ctx.globalAlpha = 0.4;
+            ctx.strokeStyle = '#ffb765'; ctx.lineWidth = 12;
+            ctx.beginPath(); ctx.moveTo(bx, head); ctx.lineTo(bx, head - 190); ctx.stroke();
+          } else {                              // 착탄 — 화구가 부풀었다 사그라든다
+            const age = Math.min(1, (prog - i * 0.045) * 2.6 - 1);
+            ctx.globalAlpha = (1 - age) * 0.95; ctx.fillStyle = '#fff0c2';
+            ctx.beginPath(); ctx.arc(bx, by, 12 + age * 16, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = (1 - age) * 0.55; ctx.fillStyle = '#ff8a33';
+            ctx.beginPath(); ctx.arc(bx, by, 20 + age * 34, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+      } else if (f.abil === 'swarm') {
+        // 무리 부화 — 갈라지는 땅 + 튀어나오는 포자
+        const R = f.radius;
+        ctx.globalAlpha = (1 - prog) * 0.5; ctx.fillStyle = '#4bd97a';
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.3 + prog * 0.8), 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = (1 - prog) * 0.9; ctx.strokeStyle = '#8dffae'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * (0.15 + prog), 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#a9ffc4';
+        for (let i = 0; i < 14; i++) {
+          const a = i * 0.449;
+          const rr = R * prog * (0.5 + (i % 5) * 0.12);
+          ctx.globalAlpha = (1 - prog) * 0.85;
+          ctx.beginPath();
+          ctx.arc(f.ax + Math.cos(a) * rr, f.ay + Math.sin(a) * rr - prog * 26, 4.5 * (1 - prog) + 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (f.abil === 'aegis') {
+        // 이지스 폭풍 — 퍼져나가는 이중 링 + 빛나는 파편
+        const R = f.radius;
+        ctx.globalAlpha = (1 - prog) * 0.42; ctx.fillStyle = '#7fd8ff';
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * prog, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = (1 - prog); ctx.strokeStyle = '#eaf9ff'; ctx.lineWidth = 7 * (1 - prog) + 1.5;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * prog, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = (1 - prog) * 0.8; ctx.strokeStyle = '#9ad4ff'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(f.ax, f.ay, R * Math.max(0, prog - 0.22), 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#dff3ff';
+        for (let i = 0; i < 12; i++) {
+          const a = i * 0.5236 + prog * 0.9;
+          const rr = R * prog;
+          ctx.globalAlpha = (1 - prog) * 0.9;
+          ctx.save();
+          ctx.translate(f.ax + Math.cos(a) * rr, f.ay + Math.sin(a) * rr);
+          ctx.rotate(a);
+          ctx.fillRect(-7, -1.6, 14, 3.2);
+          ctx.restore();
+        }
+      } else if (f.abil === 'nova') {
         ctx.globalAlpha = (1 - prog) * 0.8;
         ctx.strokeStyle = '#c88bff'; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(f.ax, f.ay, f.radius * prog, 0, Math.PI * 2); ctx.stroke();
@@ -2018,14 +2109,39 @@ RC.Renderer = (function () {
   function drawDragBox(input) {
     if (!input.dragging) return;
     const a = input.dragStart, b = input.screen;
+    const touch = !!input.dragTouch;
     ctx.save();
     ctx.strokeStyle = C.select;
     ctx.fillStyle = 'rgba(142,242,176,0.12)';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = touch ? 2.5 : 1.5;      // thicker on touch — a thin line vanishes on a phone
     const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
     const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
     ctx.fillRect(x, y, w, h);
     ctx.strokeRect(x, y, w, h);
+
+    // Live "N selected" badge. Your fingertip sits on top of the units you're
+    // trying to box, so the count is drawn clear of the finger — above it when
+    // there's room, otherwise below.
+    if (touch) {
+      const n = input.boxCount | 0;
+      const label = n === 1 ? '1 unit' : n + ' units';
+      ctx.font = 'bold 15px system-ui, sans-serif';
+      const tw = ctx.measureText(label).width;
+      const bw = tw + 22, bh = 28;
+      let bx = b.x - bw / 2;
+      let by = b.y - 74;                    // clear of the fingertip
+      if (by < 6) by = b.y + 46;            // near the top edge → put it below instead
+      bx = Math.max(6, Math.min(cv.width - bw - 6, bx));
+      by = Math.max(6, Math.min(cv.height - bh - 6, by));
+      ctx.fillStyle = n ? 'rgba(16,32,24,0.92)' : 'rgba(32,20,20,0.92)';
+      ctx.strokeStyle = n ? C.select : 'rgba(200,120,120,0.9)';
+      ctx.lineWidth = 2;
+      rrect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = n ? '#dfffe9' : '#ffd6d6';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, bx + bw / 2, by + bh / 2 + 0.5);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
     ctx.restore();
   }
 

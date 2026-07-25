@@ -148,6 +148,15 @@
   .cmd.ability { border-left-color: var(--cyan); background: #17303a; }
   .cmd.ability:hover { border-left-color: var(--cyan); background: #1e3f4d; }
   .cmd.ability .l { color: #bfefff; }
+  /* 궁극기 — 준비되면 금색으로 맥동해서 놓칠 수 없게 */
+  .cmd.ult { border-left-color: #ffc857; background: #3a2f14; }
+  .cmd.ult .l { color: #ffe9a8; }
+  .cmd.ult.ready { background: #4a3a12; box-shadow: 0 0 0 1px #ffc857 inset; animation: ultpulse 1.4s ease-in-out infinite; }
+  .cmd.ult.ready .l { color: #fff4cf; }
+  @keyframes ultpulse {
+    0%, 100% { box-shadow: 0 0 0 1px #ffc857 inset, 0 0 0 rgba(255,200,87,0); }
+    50%      { box-shadow: 0 0 0 1px #ffe9a8 inset, 0 0 14px rgba(255,200,87,.55); }
+  }
   .cmd kbd {
     position: absolute; top: 6px; right: 8px;
     font-family: var(--mono); font-size: 10px; color: var(--orange);
@@ -324,6 +333,30 @@
   }
   #ss-survival:hover { filter: brightness(1.08); }
 
+  /* ── Daily Challenge card ── */
+  #ss-daily { margin-top: 14px; }
+  #daily-card {
+    width: min(520px, 92vw); box-sizing: border-box;
+    background: linear-gradient(140deg, #2a2412, #1a1a24);
+    border: 1px solid #6b5a24; border-radius: 10px; padding: 14px 16px;
+    text-align: left;
+  }
+  #daily-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  #daily-badge {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .16em; font-weight: 700;
+    color: #101010; background: #ffc857; padding: 3px 8px; border-radius: 4px;
+  }
+  #daily-date { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  #daily-name { margin-top: 9px; font-size: 19px; font-weight: 800; color: #ffe9a8; }
+  #daily-desc { margin-top: 3px; font-size: 12.5px; color: var(--dim); line-height: 1.45; }
+  #daily-foot { margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #ss-daily-start {
+    background: #ffc857; color: #16140b; border: 0; border-radius: 6px;
+    padding: 10px 18px; font-size: 14px; font-weight: 800; cursor: pointer;
+  }
+  #ss-daily-start:hover { filter: brightness(1.08); }
+  #daily-timer { font-size: 11.5px; color: var(--dim); }
+
   /* ── Tutorial overlay ── */
   #tutorial {
     position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
@@ -455,6 +488,7 @@
     <div class="res">Pop <span class="val" id="res-pop">0 / 0</span></div>
     <div class="res">Time <span class="val" id="res-clock">0:00</span></div>
     <div class="res" id="wave-box" style="display:none">Wave <span class="val" id="res-wave" style="color:var(--cyan)">0</span></div>
+    <div class="res" id="daily-box" style="display:none; color:#ffc857" title="Daily Challenge — the same run for every player today"><span class="val" id="res-daily" style="color:#ffe9a8">—</span></div>
     <div id="hint">Drag to pan (middle-mouse or two fingers) · arrows/edges also pan · Left-click select, ⬚ to box-select · Right-click command · A = attack-move · Workers build towers</div>
     <button id="mute-btn" title="Sound on/off" style="margin-left:10px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">🔊</button>
   </div>
@@ -559,6 +593,21 @@
     <button id="ss-survival-online">Online Co-op</button>
     <button id="ss-leaderboard">🏆 Leaderboard</button>
   </div>
+  <!-- Daily Challenge — same seed and same twist for every player, every day -->
+  <div id="ss-daily" class="mode-sec">
+    <div id="daily-card">
+      <div id="daily-top">
+        <span id="daily-badge">DAILY CHALLENGE</span>
+        <span id="daily-date"></span>
+      </div>
+      <div id="daily-name"></div>
+      <div id="daily-desc"></div>
+      <div id="daily-foot">
+        <button id="ss-daily-start">▶ Play Today's Run</button>
+        <span id="daily-timer"></span>
+      </div>
+    </div>
+  </div>
   <div id="ss-survivalhint" class="mode-sec" style="color:var(--dim); font-size:11.5px; margin-top:8px; max-width:520px; text-align:center;">
     Online Co-op: defend the Rift Crystal together with up to <b>4 players</b>. Create a <b>public</b> game (anyone can find &amp; join) or a <b>private</b> one (share a 4-letter code). You all share one crystal — if it falls, the run ends for everyone.
   </div>
@@ -657,6 +706,7 @@
 <script src="entities.js"></script>
 <script src="game.js"></script>
 <script src="ai.js"></script>
+<script src="daily.js"></script>
 <script src="survival.js"></script>
 <script src="leaderboard.js"></script>
 <script src="dev.js"></script>

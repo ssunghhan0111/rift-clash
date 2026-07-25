@@ -11,6 +11,8 @@ RC.UI = (function () {
     el.clock = document.getElementById('res-clock');
     el.wave = document.getElementById('res-wave');
     el.waveBox = document.getElementById('wave-box');
+    el.dailyBox = document.getElementById('daily-box');
+    el.daily = document.getElementById('res-daily');
     el.selName = document.getElementById('sel-name');
     el.selInfo = document.getElementById('sel-info');
     el.selStats = document.getElementById('sel-stats');
@@ -66,15 +68,38 @@ RC.UI = (function () {
     const amoveBtn = document.getElementById('tb-amove');
     if (amoveBtn) amoveBtn.addEventListener('click', () => { if (RC.Input.armAttackMove) RC.Input.armAttackMove(); });
 
+    // ⬚ / ✋ — persistent touch control scheme toggle (was a one-shot box-select arm).
+    // ⬚ = one finger draws a selection box, two fingers move the map (default)
+    // ✋ = one finger moves the map, and this button arms a single box drag (legacy)
     const boxBtn = document.getElementById('tb-box');
-    if (boxBtn) boxBtn.addEventListener('click', () => { if (RC.Input.armBoxSelect) RC.Input.armBoxSelect(); });
+    if (boxBtn) {
+      const paint = () => {
+        const s = RC.Input.getScheme ? RC.Input.getScheme() : 'box';
+        boxBtn.textContent = s === 'box' ? '⬚' : '✋';
+        boxBtn.classList.toggle('assigned', s === 'box');
+        boxBtn.title = s === 'box'
+          ? 'One finger = select box · two fingers = move map (tap to switch)'
+          : 'One finger = move map · tap here then drag to select (tap twice to switch)';
+      };
+      let armTimer = null;
+      boxBtn.addEventListener('click', () => {
+        const s = RC.Input.getScheme ? RC.Input.getScheme() : 'box';
+        if (s === 'box') { RC.Input.toggleScheme(); paint(); return; }
+        // Legacy scheme: first tap arms one box drag, a second tap within 600ms
+        // switches back to the one-finger-box scheme.
+        if (armTimer) { clearTimeout(armTimer); armTimer = null; RC.Input.toggleScheme(); paint(); return; }
+        if (RC.Input.armBoxSelect) RC.Input.armBoxSelect();
+        armTimer = setTimeout(() => { armTimer = null; }, 600);
+      });
+      paint();
+    }
 
     document.getElementById('tb-cancel').addEventListener('click', () => {
       g.placing = null; g.selection = [];
     });
 
     document.querySelectorAll('.tb-groups .grp').forEach(btn => {
-      let timer = null, longPressed = false;
+      let timer = null, longPressed = false, lastTap = 0;
       const gid = btn.dataset.g;
 
       const start = e => {
@@ -92,6 +117,11 @@ RC.UI = (function () {
         if (!longPressed) {
           const grp = (g.groups || {})[gid];
           if (grp) g.selection = grp.filter(u => !u.dead);
+          // Double-tap the same group → jump the camera to it. With one-finger
+          // box-select this is the main way to travel without touching the map.
+          const now = performance.now();
+          if (now - lastTap < 400) { if (RC.Input.centerOnGroup) RC.Input.centerOnGroup(gid); lastTap = 0; }
+          else lastTap = now;
         }
       };
       btn.addEventListener('pointerdown', start);
@@ -116,6 +146,11 @@ RC.UI = (function () {
     if (el.waveBox) {
       if (g.survival) { el.waveBox.style.display = ''; el.wave.textContent = g.survivalWave || 0; }
       else el.waveBox.style.display = 'none';
+    }
+    // 데일리 챌린지 — 오늘의 변형을 HUD에 계속 띄워 둔다 (뭘 대비해야 하는지 잊지 않도록)
+    if (el.dailyBox) {
+      if (g.daily) { el.dailyBox.style.display = ''; el.daily.textContent = g.daily.icon + ' ' + g.daily.name; }
+      else el.dailyBox.style.display = 'none';
     }
 
     // 알림
@@ -291,6 +326,24 @@ RC.UI = (function () {
       if (!locked) b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key }); });
       el.cmds.appendChild(b);
     });
+
+    // 궁극기 — 레벨로 해금되고 쿨다운이 길다. 준비되면 눈에 띄게 강조.
+    const ult = h.def.ult;
+    if (ult) {
+      const key = ult.key.toLowerCase();
+      const cd = (h.skillCd && h.skillCd[key]) || 0;
+      const locked = h.level < (ult.minLevel || 6);
+      const ready = !locked && cd <= 0 && h.energy >= ult.cost;
+      const b = document.createElement('button');
+      b.className = 'cmd ability ult' + (ready ? ' ready' : ' off');
+      const sub = locked ? 'Locked — reach Lv ' + (ult.minLevel || 6)
+        : (cd > 0 ? 'Ready in ' + Math.ceil(cd) + 's'
+          : (h.energy < ult.cost ? 'Energy ' + Math.floor(h.energy) + ' / ' + ult.cost : 'READY · E' + ult.cost));
+      b.innerHTML = `<kbd>${ult.key}</kbd><span class="l">★ ${ult.name}</span><span class="s">${sub}</span>`;
+      b.title = `ULTIMATE — ${ult.name}: ${ult.desc || ''} (Energy ${ult.cost}, cooldown ${ult.cd}s, unlocks at level ${ult.minLevel || 6})`;
+      if (!locked) b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key }); });
+      el.cmds.appendChild(b);
+    }
   }
 
   // 스킬 버튼 — 에너지/쿨다운 반영
@@ -388,10 +441,13 @@ RC.UI = (function () {
         race: g.playerRace ? g.playerRace[g.playerOwner] : 'forge',
         mode: RC.online ? 'coop' : 'solo',
       }).then(r => {
+        const where = run.diff === 'daily'
+          ? "today's Daily Challenge"
+          : ((RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(run.diff) : run.diff);
         if (r.rank) {
           msg.innerHTML = r.improved
-            ? `🏆 You are <b>#${r.rank}</b> in the world on ${(RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(run.diff) : run.diff}!`
-            : `Your best on this difficulty is still <b>#${r.rank}</b> — beat it next run!`;
+            ? `🏆 You are <b>#${r.rank}</b> in the world on ${where}!`
+            : `Your best on ${where} is still <b>#${r.rank}</b> — beat it next run!`;
         } else {
           msg.textContent = 'Score sent! Keep climbing to reach the top 100.';
         }
@@ -408,13 +464,18 @@ RC.UI = (function () {
 
   function showOverlay(kind) {
     if (g.survival) {
-      const diff = g.survivalDiff || 'medium';
-      const dn = (RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(diff) : diff;
+      // 데일리 챌린지 런은 난이도 보드가 아니라 전용 데일리 보드로 간다
+      const isDaily = !!g.daily;
+      const diff = isDaily ? 'daily' : (g.survivalDiff || 'medium');
+      const dn = isDaily
+        ? (g.daily.icon + ' ' + g.daily.name + ' · Daily Challenge')
+        : ((RC.Survival && RC.Survival.diffName) ? RC.Survival.diffName(diff) : diff);
       const waves = g.survivalWave || 0, kills = g.survivalKills || 0;
       const score = waves * 100 + kills * 5;
       let best = 0, isNew = false;
       try {
-        const key = 'riftclash_hiscore_' + diff;
+        // the daily best is keyed by day, so a new challenge starts from zero
+        const key = 'riftclash_hiscore_' + diff + (isDaily ? '_' + g.daily.day : '');
         best = parseInt(window.localStorage.getItem(key) || '0', 10) || 0;
         if (score > best) { best = score; isNew = true; window.localStorage.setItem(key, String(best)); }
       } catch (e) { /* localStorage unavailable (e.g. file://) — skip persistence */ }
@@ -423,10 +484,13 @@ RC.UI = (function () {
         `<b class="lose">CRYSTAL SHATTERED</b>` +
         `<span>${dn} — reached <b style="color:var(--cyan)">Wave ${waves}</b> · ${kills} enemies slain</span>` +
         `<span style="font-size:26px;font-weight:700;color:var(--good)">Score ${score}${isNew ? '  🏆 NEW BEST!' : ''}</span>` +
-        `<span style="color:var(--dim)">Best on ${dn}: ${best}</span>` +
+        `<span style="color:var(--dim)">${isDaily ? "Your best on today's challenge" : 'Best on ' + dn}: ${best}</span>` +
+        (isDaily && RC.Daily
+          ? `<span style="color:#ffc857;font-size:12.5px">Everyone plays this exact run today — new challenge in ${RC.Daily.timeLeftLabel()}.</span>`
+          : '') +
         (canPost
           ? `<div id="lb-post">
-               <div class="lb-h">🌍 Send your score to the world leaderboard</div>
+               <div class="lb-h">🌍 Send your score to the ${isDaily ? 'daily' : 'world'} leaderboard</div>
                <div class="lb-row">
                  <input id="lb-name" maxlength="14" placeholder="Your name"
                         value="${escapeAttr(RC.Leaderboard.getName())}">

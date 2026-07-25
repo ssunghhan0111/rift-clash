@@ -201,6 +201,8 @@ window.RC = window.RC || {};
     show('act-survival', m === 'survival', 'flex');
     show('ss-onlinehint', m === 'vs');
     show('ss-survivalhint', m === 'survival');
+    show('ss-daily', m === 'survival', 'block');
+    if (m === 'survival') renderDailyCard();
     const rh = document.getElementById('race-h');
     if (rh) rh.textContent = m === 'survival' ? 'Your faction' : 'Faction (enemy AI takes the other)';
   }
@@ -261,6 +263,25 @@ window.RC = window.RC || {};
     ss.classList.add('hidden');
     overlay.classList.add('hidden');
     started = true;
+  }
+
+  // Daily Challenge — same map, same seed, same twist for everyone today.
+  // Deliberately solo and offline: a co-op run isn't comparable to a solo one,
+  // so letting both onto the same board would make it meaningless.
+  function startDaily() {
+    RC.online = false;
+    game.practice = false;
+    game.heroesEnabled = true;
+    goFullscreen();
+    audioGo();
+    game.setupSurvival({ race: selRace, ally: false, difficulty: 'medium', daily: true });
+    RC.AI.reset();
+    resize();
+    if (game.crystal) RC.Input.centerOn(game.crystal.x, game.crystal.y);
+    ss.classList.add('hidden');
+    overlay.classList.add('hidden');
+    started = true;
+    if (game.daily) game.notify(game.daily.icon + ' ' + game.daily.name + ' — ' + game.daily.desc);
   }
 
   // ── Tutorial: interactive practice match ──
@@ -386,7 +407,10 @@ window.RC = window.RC || {};
     const tabs = document.getElementById('board-tabs');
     if (!tabs) return;
     tabs.innerHTML = '';
-    DIFFS.forEach(d => {
+    // The Daily board sits alongside the difficulty boards. It's the fairest of
+    // the four — everyone on it played the exact same run.
+    const list = DIFFS.concat([{ id: 'daily', name: '⭐ Daily' }]);
+    list.forEach(d => {
       const b = document.createElement('div');
       b.className = 'modebtn' + (d.id === boardDiff ? ' sel' : '');
       b.innerHTML = `<div class="mb-name">${d.name}</div>`;
@@ -407,12 +431,18 @@ window.RC = window.RC || {};
     const myName = (RC.Leaderboard.getName() || '').toLowerCase();
     RC.Leaderboard.top(boardDiff, 25).then(res => {
       list.innerHTML = '';
+      const daily = boardDiff === 'daily';
+      const dinfo = (daily && RC.Daily) ? RC.Daily.today() : null;
       if (!res.rows || !res.rows.length) {
         status.textContent = '';
-        list.innerHTML = '<div id="board-empty">No scores yet on this difficulty — be the first!</div>';
+        list.innerHTML = daily
+          ? `<div id="board-empty">Nobody has finished today's challenge yet — ${dinfo ? dinfo.icon + ' ' + dinfo.name : ''} is wide open. Board resets in ${RC.Daily ? RC.Daily.timeLeftLabel() : 'a while'}.</div>`
+          : '<div id="board-empty">No scores yet on this difficulty — be the first!</div>';
         return;
       }
-      status.textContent = 'Top ' + res.rows.length + ' — beat them and your name goes up here.';
+      status.textContent = daily
+        ? `${dinfo ? dinfo.icon + ' ' + dinfo.name + ' · ' + dinfo.date : "Today's run"} — everyone here played the exact same waves. Resets in ${RC.Daily ? RC.Daily.timeLeftLabel() : 'a while'}.`
+        : 'Top ' + res.rows.length + ' — beat them and your name goes up here.';
       res.rows.forEach((r, i) => {
         const rank = i + 1;
         const race = RC.RACES[r.race] || RC.RACES.forge;
@@ -451,6 +481,21 @@ window.RC = window.RC || {};
 
   document.getElementById('ss-start').addEventListener('click', startGame);
   document.getElementById('ss-survival').addEventListener('click', startSurvival);
+
+  // ── Daily Challenge card ────────────────────────────────
+  // Rendered fresh each time the start screen opens, so a player who leaves the
+  // tab open overnight sees the new day's twist rather than a stale card.
+  function renderDailyCard() {
+    if (!RC.Daily) return;
+    const d = RC.Daily.today();
+    const set = (id, txt) => { const e = document.getElementById(id); if (e) e.textContent = txt; };
+    set('daily-date', d.date + ' · UTC');
+    set('daily-name', d.icon + '  ' + d.name);
+    set('daily-desc', d.desc);
+    set('daily-timer', 'New challenge in ' + RC.Daily.timeLeftLabel());
+  }
+  const dailyBtn = document.getElementById('ss-daily-start');
+  if (dailyBtn) dailyBtn.addEventListener('click', startDaily);
   document.getElementById('tut-learn').addEventListener('click', openTutorial);
   document.getElementById('tut-practice').addEventListener('click', startPractice);
   document.getElementById('tut-close').addEventListener('click', () => document.getElementById('tutorial').classList.add('hidden'));

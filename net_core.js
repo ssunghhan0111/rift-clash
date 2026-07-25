@@ -96,6 +96,13 @@ window.RC = window.RC || {};
       b: (u.surge > 0 ? 1 : 0) | (u.rail > 0 ? 2 : 0) | (u.bulwark > 0 ? 4 : 0) | (u.slow > 0 ? 8 : 0),
       a: u.acidStacks || 0, cg: (u.cargo ? u.cargo.length : 0), hf: u.hitFlash > 0 ? 1 : 0,
       sh: u.maxShield ? Math.round(u.shield) : 0, sm: u.maxShield ? Math.round(u.maxShield) : 0,
+      // 영웅 상태 — 레벨/경험치/스킬 쿨다운이 없으면 클라이언트 스킬 패널이 항상 1레벨로 보인다
+      hr: u.hero ? {
+        l: u.level, xp: Math.round(u.xp),
+        d: u.downed ? 1 : 0, rt: Math.round((u.reviveT || 0) * 10), rc: u.reviveCost || 0,
+        cd: (function () { const o = {}; for (const k in u.skillCd) if (u.skillCd[k] > 0) o[k] = Math.round(u.skillCd[k] * 10); return o; })(),
+      } : null,
+      tp: (u.temp != null) ? 1 : 0,       // 궁극기 소환 유닛 (임시)
     }));
     const B = game.buildings.map(b => ({
       i: b.id, t: b.type, o: b.owner, x: b.x, y: b.y,
@@ -139,6 +146,16 @@ window.RC = window.RC || {};
       // 실드는 서버가 권위 — 클라이언트는 값만 반영하고 반짝임만 로컬로 연출
       if (d.sm) { if (d.sh < u.shield) u.shieldFx = 0.18; u.shield = d.sh; u.maxShield = d.sm; }
       u.cargo = u.def.transport ? new Array(d.cg) : null;
+      // 영웅 — 서버가 권위. 레벨/부활/쿨다운을 그대로 반영해야 스킬·궁극기 버튼이 맞는다
+      if (d.hr && u.hero) {
+        u.level = d.hr.l; u.xp = d.hr.xp;
+        u.downed = !!d.hr.d; u.reviveT = d.hr.rt / 10; u.reviveCost = d.hr.rc;
+        u.skillCd = {};
+        for (const k in d.hr.cd) u.skillCd[k] = d.hr.cd[k] / 10;
+      }
+      // 소환 유닛은 표시만 다르게 (수명은 서버가 관리 — 클라이언트에 temp를 세팅하면
+      // 로컬에서 수명이 흘러 스냅샷과 어긋나므로 표시 전용 플래그만 쓴다)
+      u.summoned = !!d.tp;
       u.dead = false;
     }
     for (const [id, u] of umap) if (!useen.has(id)) umap.delete(id);
@@ -181,6 +198,28 @@ window.RC = window.RC || {};
       game.survivalDiff = s.sv.d || game.survivalDiff || 'medium';
       game.crystal = (s.sv.c != null) ? (bmap.get(s.sv.c) || null) : null;
     }
+
+    // 궁극기 화면 흔들림은 서버가 보내지 않는다 (순수 연출). 스냅샷의 이펙트 중
+    // 처음 보는 궁극기 이펙트를 만나면 클라이언트가 스스로 흔든다.
+    const ULT_SHAKE = { barrage: 1.0, swarm: 0.55, aegis: 0.8 };
+    const seenFx = game._ultFx || (game._ultFx = new Set());
+    const nowKeys = new Set();
+    for (const f of (s.FX || [])) {
+      const amt = ULT_SHAKE[f.abil];
+      if (!amt) continue;
+      const k = f.abil + ':' + Math.round(f.ax) + ':' + Math.round(f.ay);
+      nowKeys.add(k);
+      if (!seenFx.has(k) && game.shake) game.shake(amt);
+    }
+    game._ultFx = nowKeys;
+
+    // 흔들림 감쇠 — 온라인 클라이언트는 game.update()를 돌리지 않으므로 여기서 줄인다
+    if (game.shakeT > 0) {
+      const step = Math.max(0, s.tm - (game._lastShakeTm != null ? game._lastShakeTm : s.tm));
+      game.shakeT = Math.max(0, game.shakeT - step);
+      if (game.shakeT === 0) game.shakeMax = 0;
+    }
+    game._lastShakeTm = s.tm;
 
     game.fx = s.FX || [];
   }

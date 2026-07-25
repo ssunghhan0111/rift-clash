@@ -27,9 +27,40 @@ RC.Input = (function () {
     world: { x: 0, y: 0 },
     dragging: false,
     dragStart: { x: 0, y: 0 },
+    dragTouch: false,       // the active selection box was started by a finger, not a mouse
+    boxCount: 0,            // live count of your units inside the box (drawn above the finger)
     keys: {},
     mouseInside: false,
   };
+
+  // ── Touch control scheme ──────────────────────────────────────────────────
+  // 'box'  (default) — one finger draws a selection box, TWO fingers pan.
+  // 'pan'  (legacy)  — one finger pans; the ⬚ button arms a one-shot box drag.
+  // Panning is the more frequent action, so 'box' only works because long
+  // distance camera moves are covered by the minimap scrub and the group /
+  // home buttons. Players who prefer the old feel can flip this from the
+  // touchbar, and the choice is remembered.
+  const SCHEME_KEY = 'rc_touch_scheme';
+  let touchScheme = 'box';
+  try {
+    const saved = window.localStorage.getItem(SCHEME_KEY);
+    if (saved === 'pan' || saved === 'box') touchScheme = saved;
+  } catch (e) { /* storage unavailable (file://) — stay on the default */ }
+
+  function getScheme() { return touchScheme; }
+  function setScheme(s) {
+    touchScheme = (s === 'pan') ? 'pan' : 'box';
+    boxArmed = false;
+    try { window.localStorage.setItem(SCHEME_KEY, touchScheme); } catch (e) {}
+    return touchScheme;
+  }
+  function toggleScheme() {
+    const s = setScheme(touchScheme === 'box' ? 'pan' : 'box');
+    if (g) g.notify(s === 'box' ? 'One finger = select box · two fingers = move map'
+                                : 'One finger = move map · ⬚ button = select box');
+    snd('select');
+    return s;
+  }
 
   // 활성 포인터(마우스/터치) 추적 — 2개 이상이면 두 손가락 팬
   const pointers = new Map();
@@ -37,7 +68,7 @@ RC.Input = (function () {
   let panMode = false;       // camera-drag active (two-finger, single-finger touch, or middle mouse)
   let panSingle = false;     // pan driven by a single pointer (touch or middle mouse)
   let panMoved = false;      // the pan pointer actually moved (→ it was navigation, not a tap)
-  let boxArmed = false;      // touch: next drag is a selection box instead of a pan
+  let boxArmed = false;      // legacy scheme: next drag is a selection box instead of a pan
   let panLast = null;
   let longPressTimer = null;
   let longPressFired = false;
@@ -78,16 +109,29 @@ RC.Input = (function () {
       if (!e.relatedTarget && !e.toElement) state.mouseInside = false;   // left the browser window
     });
 
-    // 미니맵 탭/클릭 = 카메라 이동
+    // 미니맵 — 탭으로 점프, 드래그로 계속 스크럽 (한 손가락 팬 대체 수단)
+    // Dragging on the minimap scrubs the camera continuously. This is what makes
+    // two-finger panning acceptable: long-distance travel never needs the map
+    // surface at all.
+    let miniDrag = false;
     const jump = e => {
       const r = mini.getBoundingClientRect();
-      const fx = (e.clientX - r.left) / r.width;
-      const fy = (e.clientY - r.top) / r.height;
+      const fx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      const fy = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
       g.camera.x = fx * CFG.WORLD_W - cv.width / 2;
       g.camera.y = fy * CFG.WORLD_H - cv.height / 2;
       clampCam();
     };
-    mini.addEventListener('pointerdown', jump);
+    mini.addEventListener('pointerdown', e => {
+      miniDrag = true;
+      if (mini.setPointerCapture) { try { mini.setPointerCapture(e.pointerId); } catch (err) {} }
+      jump(e);
+    });
+    mini.addEventListener('pointermove', e => { if (miniDrag) jump(e); });
+    const endMini = () => { miniDrag = false; };
+    mini.addEventListener('pointerup', endMini);
+    mini.addEventListener('pointercancel', endMini);
+    window.addEventListener('pointerup', endMini);
     mini.addEventListener('contextmenu', e => e.preventDefault());
 
     window.addEventListener('keydown', e => {
@@ -121,7 +165,11 @@ RC.Input = (function () {
 
     if (pointers.size >= 2) {            // two fingers → pan
       panMode = true; panSingle = false; panMoved = false;
-      clearLongPress(); state.dragging = false; panLast = centroid();
+      clearLongPress();
+      // A second finger landing mid-drag means the player wanted to navigate,
+      // not select — abandon the box silently rather than selecting on release.
+      state.dragging = false; state.dragTouch = false; state.boxCount = 0;
+      panLast = centroid();
       return;
     }
 
@@ -134,25 +182,36 @@ RC.Input = (function () {
     state.dragStart.x = p.x; state.dragStart.y = p.y;
 
     if (e.pointerType !== 'mouse') {
-      // Touch: a single-finger drag PANS the camera (natural navigation); a tap still
-      // selects/commands. Drag a selection box only when the box-select toggle is armed.
-      if (boxArmed) { state.dragging = true; }
-      else { panMode = true; panSingle = true; panMoved = false; panLast = { x: p.x, y: p.y }; }
+      // Touch. In the default 'box' scheme a single-finger drag draws a selection
+      // box and panning is the two-finger gesture; in the legacy 'pan' scheme it
+      // is the other way round and ⬚ arms a one-shot box. A tap (no movement)
+      // always means select/command in both schemes.
+      const wantBox = (touchScheme === 'box') || boxArmed;
+      if (wantBox) {
+        state.dragging = true; state.dragTouch = true; state.boxCount = 0;
+      } else {
+        panMode = true; panSingle = true; panMoved = false; panLast = { x: p.x, y: p.y };
+      }
       longPressFired = false;
       clearLongPress();
-      longPressTimer = setTimeout(() => {
-        longPressFired = true; panMode = false; panSingle = false;   // long-press cancels the pan
-        const ent = g.entityAt(state.world.x, state.world.y, null);
-        if (ent && ent.owner === g.playerOwner) {
-          if (g.selection.includes(ent)) g.selection = g.selection.filter(s => s !== ent);
-          else g.selection.push(ent);
-        }
-      }, 480);
+      // Long-press to add/remove one unit only exists in the legacy scheme — in
+      // 'box' mode the finger is already drawing a box, so a hold-then-drag must
+      // not get hijacked into a single-unit toggle.
+      if (!wantBox) {
+        longPressTimer = setTimeout(() => {
+          longPressFired = true; panMode = false; panSingle = false;   // long-press cancels the pan
+          const ent = g.entityAt(state.world.x, state.world.y, null);
+          if (ent && ent.owner === g.playerOwner) {
+            if (g.selection.includes(ent)) g.selection = g.selection.filter(s => s !== ent);
+            else g.selection.push(ent);
+          }
+        }, 480);
+      }
       return;
     }
 
     // Mouse left-drag = selection box
-    state.dragging = true;
+    state.dragging = true; state.dragTouch = false; state.boxCount = 0;
   }
 
   function onPointerMove(e) {
@@ -182,7 +241,22 @@ RC.Input = (function () {
     if (state.dragging && e.pointerId === primaryId) {
       const dx = Math.abs(p.x - state.dragStart.x), dy = Math.abs(p.y - state.dragStart.y);
       if (dx > 6 || dy > 6) clearLongPress();
+      // On a phone your fingertip covers the units you're trying to select, so
+      // keep a live count that the renderer can draw clear of the finger.
+      if (state.dragTouch) state.boxCount = countInBox().length;
     }
+  }
+
+  // Units of yours currently inside the drag rectangle.
+  function countInBox() {
+    if (!g || !state.dragging) return [];
+    const me = ME();
+    const a = toWorld(state.dragStart.x, state.dragStart.y);
+    const b = state.world;
+    const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x);
+    const y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
+    return g.units.filter(u =>
+      u.owner === me && u.x >= x1 && u.x <= x2 && u.y >= y1 && u.y <= y2 && u.state !== 'build');
   }
 
   function onPointerUp(e) {
@@ -203,7 +277,8 @@ RC.Input = (function () {
     clearLongPress();
 
     if (!state.dragging) return;
-    state.dragging = false;
+    const wasTouch = state.dragTouch;
+    state.dragging = false; state.dragTouch = false; state.boxCount = 0;
 
     const dx = Math.abs(state.screen.x - state.dragStart.x);
     const dy = Math.abs(state.screen.y - state.dragStart.y);
@@ -214,7 +289,7 @@ RC.Input = (function () {
       return;
     }
 
-    boxSelect(e);
+    boxSelect(e, wasTouch);
     boxArmed = false;          // consume the armed box-select after one drag
   }
 
@@ -262,15 +337,17 @@ RC.Input = (function () {
     g.selection = [];
   }
 
-  function boxSelect(e) {
-    const me = ME();
-    const a = toWorld(state.dragStart.x, state.dragStart.y);
-    const b = state.world;
-    const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x);
-    const y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
-    const hits = g.units.filter(u =>
-      u.owner === me && u.x >= x1 && u.x <= x2 && u.y >= y1 && u.y <= y2 &&
-      u.state !== 'build');   // a worker busy constructing is unavailable to select
+  function boxSelect(e, wasTouch) {
+    state.dragging = true;                  // countInBox reads the live drag rect
+    const hits = countInBox();
+    state.dragging = false;
+
+    // On touch, a box that caught nothing must NOT wipe the selection — with a
+    // one-finger box the map surface is now covered in "accidental" drags, and
+    // losing your whole army to a stray swipe is far worse than having to press
+    // ✕ to deselect deliberately. Mouse keeps the familiar clear-on-empty.
+    if (wasTouch && !hits.length) return;
+
     if (e.pointerType === 'mouse' && e.shiftKey) hits.forEach(h => { if (!g.selection.includes(h)) g.selection.push(h); });
     else g.selection = hits;
 
@@ -372,7 +449,8 @@ RC.Input = (function () {
     const casters = g.selection.filter(s =>
       s.kind === 'unit' && s.owner === me && (
         (s.def.ability && s.def.ability.key.toLowerCase() === k) ||
-        (s.def.hero && (s.def.skills || []).some(sk => sk.key.toLowerCase() === k))
+        (s.def.hero && (s.def.skills || []).some(sk => sk.key.toLowerCase() === k)) ||
+        (s.def.hero && s.def.ult && s.def.ult.key.toLowerCase() === k)     // ultimate (R)
       ));
     if (casters.length) { RC.cmd(g, { t: 'cast', ids: casters.map(u => u.id), key: k }); snd('cast'); return; }
 
@@ -463,5 +541,19 @@ RC.Input = (function () {
   function armAttackMove() { amoveArmed = true; if (g) g.notify('Attack-move — tap a destination'); snd('select'); }
   function armBoxSelect() { boxArmed = true; if (g) g.notify('Box-select — drag over your units'); snd('select'); }
 
-  return { init, state, updateCamera, centerOn, clampCam, armAttackMove, armBoxSelect };
+  // Snap the camera onto a control group's centre of mass (double-tap a group button).
+  function centerOnGroup(gid) {
+    const grp = ((g && g.groups) || {})[String(gid)];
+    const live = (grp || []).filter(u => !u.dead);
+    if (!live.length) return false;
+    let x = 0, y = 0;
+    live.forEach(u => { x += u.x; y += u.y; });
+    centerOn(x / live.length, y / live.length);
+    return true;
+  }
+
+  return {
+    init, state, updateCamera, centerOn, centerOnGroup, clampCam,
+    armAttackMove, armBoxSelect, getScheme, setScheme, toggleScheme,
+  };
 })();

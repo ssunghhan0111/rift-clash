@@ -47,6 +47,14 @@ window.RC = window.RC || {};
       opts = opts || {};
       this.survival = true;
       this.survivalDiff = opts.difficulty || 'medium';
+      // 데일리 챌린지 — 모두가 같은 시드와 같은 변형으로 플레이한다.
+      // Armed BEFORE reset() so the seeded stream and the twist are in place
+      // before the first wave, the crystal and starting shards are built.
+      this.daily = null; this._dailyRng = null;
+      if (opts.daily && RC.Daily) {
+        RC.Daily.arm(this, opts.dailyNow);
+        this.survivalDiff = 'medium';        // the twist replaces the difficulty choice
+      }
       const pick = {};
       let players;
       if (opts.players && opts.players.length) {
@@ -85,6 +93,9 @@ window.RC = window.RC || {};
       this.paused = false;
       this.log = [];
       this.groups = {};
+      this.shakeT = 0; this.shakeMax = 0;
+      // 데일리 재도전 — 시드 스트림을 처음부터 되감아야 같은 판이 다시 나온다
+      if (this.daily && RC.Daily) this._dailyRng = RC.Daily.makeRng(this.daily.seed);
 
       // 플레이어 구성
       this.players = this.mode.players.map(p => ({ ...p }));
@@ -103,7 +114,10 @@ window.RC = window.RC || {};
         this.teamMap[p.owner] = p.team;
         p.race = pick[p.owner] || p.race || 'forge';
         this.playerRace[p.owner] = p.race;
-        this.res[p.owner] = { shard: CFG.START_SHARD };
+        // 데일리 챌린지 변형 — 시작 자원이 바뀔 수 있다 (호드 소유자 2는 제외)
+        const dmod = this.daily && this.daily.mod;
+        const start = (dmod && dmod.startShards && !p.waveEnemy) ? dmod.startShards : CFG.START_SHARD;
+        this.res[p.owner] = { shard: start };
         this.upgrades[p.owner] = { atk: 0, arm: 0, eng: 0, spd: 0, crit: 0, frost: 0, tough: 0 };
       });
 
@@ -123,6 +137,14 @@ window.RC = window.RC || {};
     notify(msg) {
       this.log.unshift({ msg, t: 4 });
       if (this.log.length > 4) this.log.pop();
+    }
+
+    // 화면 흔들림 — 궁극기 같은 큰 순간에만. 렌더러가 읽어 카메라를 흔든다.
+    // Purely cosmetic and client-side: the server never needs to know, and a
+    // client that ignores it stays perfectly in sync.
+    shake(amount) {
+      this.shakeT = Math.max(this.shakeT || 0, amount || 0);
+      this.shakeMax = Math.max(this.shakeMax || 0.001, this.shakeT);
     }
 
     // ── 종족 ──────────────────────────────────────────
@@ -420,6 +442,12 @@ window.RC = window.RC || {};
       // 지킬 크리스탈 (방어자 소유)
       const cOwner = team1[0].owner;
       this.crystal = new RC.Building('crystal', map.crystal.x, map.crystal.y, cOwner, true);
+      // 데일리 '풍족하지만 약한' 변형 — 크리스탈이 더 잘 깨진다
+      const cmod = this.daily && this.daily.mod;
+      if (cmod && cmod.crystalHp) {
+        this.crystal.maxHp = Math.max(1, Math.round(this.crystal.maxHp * cmod.crystalHp));
+        this.crystal.hp = this.crystal.maxHp;
+      }
       this.buildings.push(this.crystal);
       this.enemySpawn = { x: map.enemySpawn.x, y: map.enemySpawn.y };
 
@@ -567,7 +595,7 @@ window.RC = window.RC || {};
     supply(owner) {
       let used = 0, max = 0;
       this.units.forEach(u => {
-        if (u.owner === owner && !u.dead) {
+        if (u.owner === owner && !u.dead && !u.free) {   // 궁극기로 부화한 임시 유닛은 인구 미차지
           used += u.def.supply;
           if (u.cargo) u.cargo.forEach(c => used += c.def.supply);   // 탑승 유닛도 인구 차지
         }
@@ -802,6 +830,10 @@ window.RC = window.RC || {};
       this.fx = this.fx.filter(f => f.t > 0);
       this.log.forEach(l => l.t -= dt);
       this.log = this.log.filter(l => l.t > 0);
+      if (this.shakeT > 0) {
+        this.shakeT = Math.max(0, this.shakeT - dt);
+        if (this.shakeT === 0) this.shakeMax = 0;
+      }
 
       // 전장의 안개 — 주기적으로 시야 재계산
       if (CFG.FOG_ENABLED && this.visNow) {

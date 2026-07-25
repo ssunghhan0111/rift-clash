@@ -316,7 +316,21 @@ window.RC = window.RC || {};
     _skillByKey(key) {
       const list = this.def.skills || [];
       for (let i = 0; i < list.length; i++) if (list[i].key.toLowerCase() === key) return { sk: list[i], idx: i };
+      const ult = this.def.ult;
+      if (ult && ult.key.toLowerCase() === key) return { sk: ult, idx: -1, ult: true };
       return null;
+    }
+    // Ultimates unlock at a level rather than ranking up, so they get their own
+    // gate. Returns 0 when still locked, otherwise the hero's level.
+    ultRank() {
+      const u = this.def.ult;
+      if (!u || !this.hero) return 0;
+      return this.level >= (u.minLevel || 6) ? this.level : 0;
+    }
+    ultReady() {
+      const u = this.def.ult;
+      if (!u || this.downed || !this.ultRank()) return false;
+      return (this.skillCd[u.key.toLowerCase()] || 0) <= 0 && this.energy >= u.cost;
     }
     _effSkill(sk, rank) {
       const ab = Object.assign({}, sk);
@@ -324,6 +338,15 @@ window.RC = window.RC || {};
       if (sk.healPerRank) ab.heal = (sk.heal || 0) + (rank - 1) * sk.healPerRank;
       if (sk.distPerRank) ab.dist = (sk.dist || 0) + (rank - 1) * sk.distPerRank;
       if (sk.shieldHealPerRank) ab.shieldHeal = (sk.shieldHeal || 0) + (rank - 1) * sk.shieldHealPerRank;
+      return ab;
+    }
+    // Ultimates scale off the hero's level above the unlock level, not a rank.
+    _effUlt(u) {
+      const ab = Object.assign({}, u);
+      const over = Math.max(0, this.level - (u.minLevel || 6));
+      if (u.dmgPerLevel) ab.dmg = (u.dmg || 0) + over * u.dmgPerLevel;
+      if (u.shieldPerLevel) ab.shieldGrant = (u.shieldGrant || 0) + over * u.shieldPerLevel;
+      if (u.countPerLevel) ab.count = Math.min(u.maxCount || 99, Math.floor((u.count || 0) + over * u.countPerLevel));
       return ab;
     }
     gainXp(n) {
@@ -503,6 +526,7 @@ window.RC = window.RC || {};
       s *= (1 + this._up(game, 'spd') * RC.CFG.UP_SPD_MOVE);  // 기동 강화 = 이속↑
       const t = this.terr(game);                               // 늪 = 진창에 발이 묶인다
       if (t && t.mud) s *= (RC.CFG.TERRAIN.mud.speed || 1);
+      if (this.speedMul) s *= this.speedMul;                   // 데일리 챌린지 변형 (스프린터 등)
       return s;
     }
     effMaxEnergy(game) { return this.maxEnergy + this._up(game, 'eng') * RC.CFG.UP_ENG_MAXE; }
@@ -514,6 +538,15 @@ window.RC = window.RC || {};
         this.reviveT -= dt;
         if (this.reviveT <= 0 && game.reviveHero) game.reviveHero(this);
         return;
+      }
+      // 궁극기로 소환된 임시 유닛 — 수명이 다하면 사라진다 (전리품/경험치 없음)
+      if (this.temp != null) {
+        this.temp -= dt;
+        if (this.temp <= 0) {
+          this.dead = true;
+          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.3, radius: this.r, owner: this.owner });
+          return;
+        }
       }
       this.cd = Math.max(0, this.cd - dt);
       this.hitFlash = Math.max(0, this.hitFlash - dt);
@@ -754,7 +787,9 @@ window.RC = window.RC || {};
       if (this.hero) {
         if (this.downed) return false;
         const s = this._skillByKey((key || '').toLowerCase());
-        if (!s || this.heroRank(s.idx) <= 0) return false;
+        if (!s) return false;
+        if (s.ult) return this.ultReady();
+        if (this.heroRank(s.idx) <= 0) return false;
         return (this.skillCd[s.sk.key.toLowerCase()] || 0) <= 0 && this.energy >= s.sk.cost;
       }
       const ab = this.def.ability;
@@ -766,8 +801,21 @@ window.RC = window.RC || {};
         if (this.downed) return false;
         const s = this._skillByKey((key || '').toLowerCase());
         if (!s) return false;
-        const rank = this.heroRank(s.idx);
         const kk = s.sk.key.toLowerCase();
+
+        if (s.ult) {                                   // ULTIMATE
+          if (!this.ultReady()) return false;
+          const ab = this._effUlt(s.sk);
+          if (!this._applyAbility(game, ab)) return false;
+          this.energy -= s.sk.cost;
+          this.skillCd[kk] = s.sk.cd;
+          this.castFx = 0.9;                           // longer glow than a normal skill
+          game.shake(ab.shake || 0.8);
+          game.notify(this.def.name + ' — ' + s.sk.name + '!');
+          return true;
+        }
+
+        const rank = this.heroRank(s.idx);
         if (rank <= 0 || (this.skillCd[kk] || 0) > 0 || this.energy < s.sk.cost) return false;
         const ab = this._effSkill(s.sk, rank);
         if (!this._applyAbility(game, ab)) return false;   // 대상 없으면 소모 안 함
@@ -877,6 +925,78 @@ window.RC = window.RC || {};
           this.surge = ab.dur;
           return true;
         }
+        // ── ULTIMATES ─────────────────────────────────────────────────────
+        case 'barrage': {   // 아이언클래드 워든 — 궤도 폭격
+          // Lands on the current foe if there is one, otherwise straight ahead.
+          let cx = this.x + Math.cos(this.facing) * 150, cy = this.y + Math.sin(this.facing) * 150;
+          if (this.foe && !this.foe.dead) { cx = this.foe.x; cy = this.foe.y; }
+          cx = Math.max(0, Math.min(RC.CFG.WORLD_W, cx));
+          cy = Math.max(0, Math.min(RC.CFG.WORLD_H, cy));
+          let any = false;
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(cx, cy, u.x, u.y) > ab.radius) continue;
+            this._hit(u, ab.dmg, game);
+            u.slow = Math.max(u.slow || 0, ab.stun || 0);   // survivors are left reeling
+            any = true;
+          }
+          for (const b of game.buildings) {
+            if (b.dead || !b.done || !game.areEnemies(b.owner, this.owner)) continue;
+            if (RC.dist(cx, cy, b.x, b.y) > ab.radius) continue;
+            this._hit(b, ab.dmg * 0.6, game);             // buildings take a reduced share
+            any = true;
+          }
+          // The ult always fires — a miss is the player's call, not a refund case.
+          game.fx.push({ abil: 'barrage', ax: cx, ay: cy, t: 1.1, radius: ab.radius, owner: this.owner });
+          return true;
+        }
+        case 'swarm': {   // 브루드 매트리아크 — 무리 부화
+          const type = ab.spawn || 'globling';
+          if (!RC.UNITS[type]) return false;
+          const n = Math.max(1, ab.count | 0);
+          for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2 + this.facing;
+            const d = (ab.radius || 100) * (0.45 + 0.55 * ((i % 3) / 2));
+            const nx = Math.max(20, Math.min(RC.CFG.WORLD_W - 20, this.x + Math.cos(a) * d));
+            const ny = Math.max(20, Math.min(RC.CFG.WORLD_H - 20, this.y + Math.sin(a) * d));
+            const u = new RC.Unit(type, nx, ny, this.owner);
+            u.temp = ab.life || 25;      // hatchlings are free but expire (no supply, no upkeep)
+            u.free = true;
+            u.summoned = true;           // 렌더러가 임시 유닛임을 표시
+            game.units.push(u);
+            game.fx.push({ abil: 'warp', ax: nx, ay: ny, t: 0.4, radius: u.r + 8, owner: this.owner });
+          }
+          game.fx.push({ abil: 'swarm', ax: this.x, ay: this.y, t: 0.9, radius: ab.radius, owner: this.owner });
+          return true;
+        }
+        case 'aegis': {   // 레이디언트 아콘 — 이지스 폭풍
+          let hitAny = false;
+          for (const u of game.units) {
+            if (u.dead) continue;
+            const d = RC.dist(this.x, this.y, u.x, u.y);
+            if (d > ab.radius) continue;
+            if (game.areEnemies(u.owner, this.owner)) {
+              this._hit(u, ab.dmg, game);
+              // blast them outward from the Archon
+              const a = Math.atan2(u.y - this.y, u.x - this.x);
+              const push = (1 - d / ab.radius) * 70;
+              u.x = Math.max(u.r, Math.min(RC.CFG.WORLD_W - u.r, u.x + Math.cos(a) * push));
+              u.y = Math.max(u.r, Math.min(RC.CFG.WORLD_H - u.r, u.y + Math.sin(a) * push));
+              hitAny = true;
+            } else if (u.owner === this.owner) {
+              if (u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + (ab.heal || 0));
+              if (u.maxShield) RC.restoreShield(u, ab.shieldGrant || 0);
+            }
+          }
+          for (const b of game.buildings) {
+            if (b.dead || b.owner !== this.owner || !b.done) continue;
+            if (RC.dist(this.x, this.y, b.x, b.y) > ab.radius) continue;
+            if (b.maxShield) RC.restoreShield(b, ab.shieldGrant || 0);
+          }
+          void hitAny;   // the ult fires whether or not an enemy was in range
+          game.fx.push({ abil: 'aegis', ax: this.x, ay: this.y, t: 1.0, radius: ab.radius, owner: this.owner });
+          return true;
+        }
         case 'unload': {   // 페리 수송선 — 전원 하차
           if (!this.cargo || !this.cargo.length) return false;
           const list = this.cargo.slice();
@@ -898,6 +1018,20 @@ window.RC = window.RC || {};
 
     // AI 영웅 자동 시전 — 습득한 스킬을 상황에 맞게
     _heroAutoCast(game) {
+      // 궁극기 — 값이 비싸므로 정말 값어치할 때만 (적이 여럿 몰려 있을 때)
+      const ult = this.def.ult;
+      if (ult && this.ultReady()) {
+        const r = ult.radius || 200;
+        let foes = 0;
+        for (const u of game.units) {
+          if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+          if (RC.dist(this.x, this.y, u.x, u.y) <= r) foes++;
+        }
+        // 'swarm' is a reinforcement ult — worth using whenever a real fight starts.
+        const need = ult.id === 'swarm' ? 2 : 4;
+        if (foes >= need) { this.cast(game, ult.key.toLowerCase()); return; }
+      }
+
       const list = this.def.skills || [];
       for (let i = 0; i < list.length; i++) {
         const sk = list[i];

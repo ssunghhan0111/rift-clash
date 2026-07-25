@@ -359,6 +359,11 @@ RC.UNITS = {
       { id: 'warp',  name: 'Warp Charge',  key: 'C', cost: 25, cd: 6, dist: 240, distPerRank: 40,
         desc: 'Blinks forward to close in or escape.' },
     ],
+    // ── ULTIMATE ── one per hero. Unlocks at a level, costs most of the energy
+    //    bar, very long cooldown, and is meant to be the moment of the match.
+    ult: { id: 'barrage', name: 'Orbital Barrage', key: 'R', cost: 120, cd: 80, minLevel: 6,
+      radius: 300, dmg: 180, dmgPerLevel: 15, stun: 2.2, shake: 1.0,
+      desc: 'Calls down an orbital bombardment. Massive damage across a huge area, and survivors are left reeling.' },
     desc: 'A towering war machine. Grows stronger with every battle — you need it to win.'
   },
   matriarch: {
@@ -376,6 +381,9 @@ RC.UNITS = {
       { id: 'weld',  name: 'Regenerate',     key: 'G', cost: 35, cd: 7, radius: 180, heal: 90, healPerRank: 55, target: 'repair',
         desc: 'Rapidly heals the most-wounded nearby ally.' },
     ],
+    ult: { id: 'swarm', name: 'Hatch the Brood', key: 'R', cost: 110, cd: 80, minLevel: 6,
+      count: 6, countPerLevel: 0.5, maxCount: 12, spawn: 'globling', life: 26, radius: 110, shake: 0.55,
+      desc: 'Splits open the ground and hatches a swarm of free globlings that fight for a short time.' },
     desc: 'Acid-spewing matriarch. Feeds on the fallen to grow — essential to victory.'
   },
   archon: {
@@ -392,6 +400,9 @@ RC.UNITS = {
       { id: 'warp',  name: 'Rift Walk', key: 'C', cost: 25, cd: 6, dist: 250, distPerRank: 45,
         desc: 'Steps through the rift to reappear further ahead.' },
     ],
+    ult: { id: 'aegis', name: 'Aegis Storm', key: 'R', cost: 115, cd: 80, minLevel: 6,
+      radius: 260, dmg: 95, dmgPerLevel: 9, shieldGrant: 200, shieldPerLevel: 22, heal: 80, shake: 0.8,
+      desc: 'A radiant shockwave: enemies are blasted back while every nearby ally is healed and wrapped in a fresh shield.' },
     desc: 'A being of pure energy wrapped in a colossal shield. Grows radiant with every kill.'
   },
 };

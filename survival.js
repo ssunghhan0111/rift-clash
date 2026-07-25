@@ -16,13 +16,35 @@ RC.Survival = (function () {
     medium: { name: 'Medium',     size: 4, sizeGrow: 1.5, hpBase: 1.00, hpGrow: 0.12, atkEvery: 4, armEvery: 6,  unlock: 0 },
     insane: { name: 'Crazy Hard', size: 5, sizeGrow: 2.3, hpBase: 1.35, hpGrow: 0.18, atkEvery: 3, armEvery: 4,  unlock: -2 },
   };
-  function diffOf(g) { return DIFF[g && g.survivalDiff] || DIFF.medium; }
+  // Daily Challenge always runs on the Medium curve with the day's twist applied
+  // on top, so the only thing separating two players on the daily board is how
+  // they played — not which difficulty they picked.
+  function diffOf(g) {
+    const base = DIFF[g && g.survivalDiff] || DIFF.medium;
+    const m = g && g.daily && g.daily.mod;
+    if (!m) return base;
+    const d = Object.assign({}, DIFF.medium);
+    if (m.size) { d.size = Math.max(2, Math.round(d.size * m.size)); d.sizeGrow = d.sizeGrow * m.size; }
+    if (m.hp) { d.hpBase = d.hpBase * m.hp; d.hpGrow = d.hpGrow * m.hp; }
+    if (m.upgradePace) {
+      d.atkEvery = Math.max(1, Math.round(d.atkEvery * m.upgradePace));
+      d.armEvery = Math.max(1, Math.round(d.armEvery * m.upgradePace));
+    }
+    if (m.airEarly) d.unlock = d.unlock + 6;   // air types unlock six waves sooner
+    d.name = m.name;
+    return d;
+  }
+  function prepOf(g) { const m = g && g.daily && g.daily.mod; return PREP * ((m && m.prep) || 1); }
+  function gapOf(g) { const m = g && g.daily && g.daily.mod; return GAP * ((m && m.gap) || 1); }
+  // Daily runs draw from a seeded stream so every player faces the same waves;
+  // ordinary runs stay pleasantly unpredictable.
+  function rnd(g) { return (RC.Daily && g && g.daily) ? RC.Daily.rand(g) : Math.random(); }
 
   // Wave state lives on the GAME (g._sv), not in module scope, so the server can run
   // many survival rooms at once without them sharing a wave counter. Cleared in
   // game.reset(). reset() is kept for the offline caller but is a no-op now.
   function st(g) {
-    if (!g._sv) g._sv = { wave: 0, timer: PREP, queue: [], spawnT: 0, clearing: false };
+    if (!g._sv) g._sv = { wave: 0, timer: prepOf(g), queue: [], spawnT: 0, clearing: false };
     return g._sv;
   }
   function reset() { }
@@ -43,7 +65,7 @@ RC.Survival = (function () {
     if (w >= 18 + u) pool.push('bastion');   // late-game shielded siege
     const count = Math.max(3, D.size + Math.round(w * D.sizeGrow));
     const list = [];
-    for (let i = 0; i < count; i++) list.push(pool[(Math.random() * pool.length) | 0]);
+    for (let i = 0; i < count; i++) list.push(pool[(rnd(g) * pool.length) | 0]);
     if (w % 5 === 0) list.push('bloat', 'bloat');   // heavier push every 5th wave
     return list;
   }
@@ -89,8 +111,11 @@ RC.Survival = (function () {
     const s = st(g);
     const type = s.queue.shift();
     const o = g.enemySpawn;
-    const u = new RC.Unit(type, o.x + (Math.random() * 120 - 60), o.y + (Math.random() * 500 - 250), ENEMY);
+    const u = new RC.Unit(type, o.x + (rnd(g) * 120 - 60), o.y + (rnd(g) * 500 - 250), ENEMY);
     scaleHp(u, s.wave, g);
+    // 데일리 '스프린터' — 호드 전체가 빨라진다 (유닛별 이동속도 배율)
+    const m = g.daily && g.daily.mod;
+    if (m && m.speed) u.speedMul = m.speed;
     if (g.initUnit) g.initUnit(u);
     g.units.push(u);
     u.attackMoveTo(g.crystal.x, g.crystal.y);   // fight through defenders, but keep pressing the crystal
@@ -122,8 +147,8 @@ RC.Survival = (function () {
       // current wave fully cleared → 5s breather, then the next (heavier) wave
       if (!s.clearing) {
         s.clearing = true;
-        s.timer = GAP;
-        g.notify('Wave ' + s.wave + ' cleared — next in ' + GAP + 's');
+        s.timer = gapOf(g);
+        g.notify('Wave ' + s.wave + ' cleared — next in ' + Math.max(1, Math.round(s.timer)) + 's');
       }
       s.timer -= dt;
       if (s.timer <= 0) startWave(g);
@@ -133,5 +158,6 @@ RC.Survival = (function () {
     steer(g);
   }
 
-  return { reset, update, compose, scaleHp, diffName: k => (DIFF[k] || DIFF.medium).name };
+  return { reset, update, compose, scaleHp, diffOf, prepOf, gapOf,
+           diffName: k => (DIFF[k] || DIFF.medium).name };
 })();

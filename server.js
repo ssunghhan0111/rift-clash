@@ -17,6 +17,7 @@ require('./pathfind.js');
 require('./entities.js');
 require('./game.js');
 require('./ai.js');
+require('./daily.js');          // Daily Challenge seed + twist table (shared with the client)
 require('./survival.js');       // online co-op Survival wave director
 require('./net_core.js');
 const RC = global.RC;
@@ -31,11 +32,21 @@ const DIR = __dirname;
 // survives restarts of the process but is wiped by a redeploy. That's fine for
 // a friendly high-score board; swap in a hosted DB later if it needs to persist.
 const SCORES_FILE = path.join(DIR, 'scores.json');
-const DIFFS = ['easy', 'medium', 'insane'];
+// 'daily' is a board like any other, except rows carry the UTC day they were set
+// on and only today's are ever shown. That means the daily board "resets" every
+// midnight UTC with no scheduled job and no cleanup step — yesterday's rows just
+// stop matching. They're pruned on write so the file can't grow forever.
+const DIFFS = ['easy', 'medium', 'insane', 'daily'];
 const MAX_ROWS = 100;                    // rows kept per difficulty
 const MAX_BODY = 4096;                   // reject oversized POST bodies
 
-let scores = { easy: [], medium: [], insane: [] };
+// Must match RC.Daily.EPOCH / dayNumber() in daily.js — the client and server
+// have to agree on which day it is or nobody's score shows up on their own board.
+const DAILY_EPOCH = Date.UTC(2026, 0, 1);
+const DAY_MS = 86400000;
+function dayNumber(now) { return Math.floor(((now == null ? Date.now() : now) - DAILY_EPOCH) / DAY_MS); }
+
+let scores = { easy: [], medium: [], insane: [], daily: [] };
 try {
   const raw = JSON.parse(fs.readFileSync(SCORES_FILE, 'utf8'));
   DIFFS.forEach(d => { if (Array.isArray(raw[d])) scores[d] = raw[d].slice(0, MAX_ROWS); });
@@ -78,13 +89,25 @@ function validate(b) {
   if (kills > wave * 400 + 200) return 'kills do not match waves';
   const mode = (b.mode === 'coop') ? 'coop' : 'solo';
   const race = (RC.RACES && RC.RACES[b.race]) ? b.race : 'forge';
-  return { diff: b.diff, wave, kills, mode, race,
-           score: wave * 100 + kills * 5, name: cleanName(b.name), at: Date.now() };
+  const entry = { diff: b.diff, wave, kills, mode, race,
+                  score: wave * 100 + kills * 5, name: cleanName(b.name), at: Date.now() };
+  if (b.diff === 'daily') {
+    // The day is stamped SERVER-side. A client claiming a different day would
+    // otherwise be able to park a score on tomorrow's board.
+    entry.day = dayNumber(entry.at);
+  }
+  return entry;
 }
 
 // One row per name per difficulty — keeps the board varied instead of letting a
 // single player occupy every slot.
 function submitScore(entry) {
+  // Daily board: drop everything that isn't today's challenge before comparing,
+  // so yesterday's leader doesn't block today's players out of the top spot.
+  if (entry.diff === 'daily') {
+    const today = dayNumber();
+    scores.daily = scores.daily.filter(r => r.day === today);
+  }
   const list = scores[entry.diff];
   const key = entry.name.toLowerCase();
   const prev = list.findIndex(r => String(r.name).toLowerCase() === key);
@@ -134,6 +157,11 @@ const server = http.createServer((req, res) => {
     const q = new URLSearchParams(url.split('?')[1] || '');
     const diff = DIFFS.indexOf(q.get('diff')) >= 0 ? q.get('diff') : 'medium';
     const limit = Math.max(1, Math.min(MAX_ROWS, parseInt(q.get('limit') || '25', 10) || 25));
+    if (diff === 'daily') {
+      const today = dayNumber();
+      sendJson(res, 200, { diff, day: today, rows: scores.daily.filter(r => r.day === today).slice(0, limit) });
+      return;
+    }
     sendJson(res, 200, { diff, rows: scores[diff].slice(0, limit) });
     return;
   }
