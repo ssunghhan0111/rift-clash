@@ -3,7 +3,13 @@
 // no population limit, instant buildings and units, max upgrades, fast-forward, and
 // one-click squad spawning.
 //
-// Turn it on with  ?dev=1  in the address bar, or press  Ctrl+Shift+D  anywhere.
+// Three ways in:
+//   1. press the  `  key (backtick/tilde, above Tab)
+//   2. tap the "Made in ... Game Studio" credit on the start screen 5 times (works on
+//      tablets and phones, no keyboard needed)
+//   3. put  ?dev=yourcode  in the address bar
+// (Ctrl+Shift+D is NOT used — Chrome reserves it for "Bookmark all tabs" and a web page
+// is not allowed to intercept it.)
 // Either way it asks for a PASSCODE first. The code itself is deliberately NOT written
 // anywhere in this file — only a hash of it — so it can't be read straight out of the
 // source. To set your own: run  RC.Dev.hashOf('yournewcode')  in the browser console and
@@ -208,7 +214,7 @@ RC.Dev = (function () {
       `<button class="btn" data-a="win">🏆 Force win</button>` +
       `<button class="btn" data-a="lose">💀 Force lose</button>` +
       `<button class="btn exit" data-a="off">✖ Exit dev mode</button>` +
-      `<div class="note">Ctrl+Shift+D hides/shows this. Offline only — online games run on the server.</div>`;
+      `<div class="note">Press \` to hide/show this panel. Offline only — online games run on the server.</div>`;
 
     panel.querySelectorAll('.row').forEach(el => el.addEventListener('click', () => {
       const k = el.dataset.t;
@@ -411,12 +417,33 @@ RC.Dev = (function () {
       }
     }
 
+    // Backtick/tilde — the classic dev-console key, and one of the few the browser
+    // does not claim for itself. Ignored while typing so it can't fire from a text box.
     window.addEventListener('keydown', e => {
-      if (!(e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd'))) return;
+      if (e.key !== '`' && e.key !== '~' && e.code !== 'Backquote') return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       e.preventDefault();
       if (unlocked) setOpen(!open);
       else promptCode();                 // locked → ask for the passcode first
     });
+
+    // Secret tap: hit the studio credit on the start screen 5 times in a row. Gives a
+    // keyboard-free way in on a tablet or phone, where there is no ` key to press.
+    const credit = document.getElementById('ss-credit');
+    if (credit) {
+      let taps = 0, last = 0;
+      credit.style.cursor = 'default';
+      credit.addEventListener('click', () => {
+        const now = new Date().getTime();
+        taps = (now - last < 3000) ? taps + 1 : 1;      // must be a deliberate run of taps
+        last = now;
+        if (taps >= 5) {
+          taps = 0;
+          if (unlocked) setOpen(!open); else promptCode();
+        }
+      });
+    }
   }
 
   if (typeof document !== 'undefined') {
