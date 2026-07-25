@@ -11,8 +11,6 @@ RC.UI = (function () {
     el.clock = document.getElementById('res-clock');
     el.wave = document.getElementById('res-wave');
     el.waveBox = document.getElementById('wave-box');
-    el.weatherBox = document.getElementById('weather-box');
-    el.weather = document.getElementById('res-weather');
     el.dailyBox = document.getElementById('daily-box');
     el.daily = document.getElementById('res-daily');
     el.selName = document.getElementById('sel-name');
@@ -160,7 +158,8 @@ RC.UI = (function () {
     const rows = st.peers.filter(p => p.state !== 'closed');
     if (!st.joined || !rows.length) { hud.classList.add('hidden'); hud.innerHTML = ''; return; }
     hud.classList.remove('hidden');
-    hud.innerHTML = rows.map(p =>
+    const tapNote = st.needsGesture ? '<div class="talking">Tap the screen to hear voice</div>' : '';
+    hud.innerHTML = tapNote + rows.map(p =>
       '<div class="' + (p.speaking ? 'talking' : '') + '">' +
       (p.speaking ? '🔊 ' : (p.state === 'failed' ? '⚠ ' : '· ')) + esc(p.name) +
       (p.state === 'connected' ? '' : ' (' + p.state + ')') + '</div>').join('');
@@ -278,18 +277,6 @@ RC.UI = (function () {
     el.pop.className = (s.used >= s.max) ? 'val warn' : 'val';
     const m = Math.floor(g.time / 60), sec = Math.floor(g.time % 60);
     el.clock.textContent = `${m}:${String(sec).padStart(2, '0')}`;
-
-    // 날씨 — 지금 무슨 날씨이고, 시야가 얼마나 깎였는지. 시야가 줄었는데 이유를
-    // 알 수 없으면 버그처럼 느껴지므로 숫자까지 그대로 보여준다.
-    if (el.weatherBox && el.weather) {
-      if (RC.Weather && RC.CFG.WEATHER_ENABLED !== false) {
-        const mul = RC.Weather.sightMul(g);
-        const cut = Math.round((1 - mul) * 100);
-        el.weatherBox.style.display = '';
-        el.weather.textContent = RC.Weather.label(g) + (cut >= 3 ? ' −' + cut + '%' : (cut <= -3 ? ' +' + (-cut) + '%' : ''));
-        el.weather.style.color = cut >= 25 ? '#ff9d6b' : (cut >= 3 ? '#ffd08a' : '#bfe3ff');
-      } else el.weatherBox.style.display = 'none';
-    }
 
     // 생존 모드 — 웨이브 표시
     if (el.waveBox) {

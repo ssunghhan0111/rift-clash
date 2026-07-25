@@ -627,7 +627,6 @@
     <div class="res">Pop <span class="val" id="res-pop">0 / 0</span></div>
     <div class="res">Time <span class="val" id="res-clock">0:00</span></div>
     <div class="res" id="wave-box" style="display:none">Wave <span class="val" id="res-wave" style="color:var(--cyan)">0</span></div>
-    <div class="res" id="weather-box" style="display:none" title="Current weather, and how much it is cutting unit sight. Identical for every player in the match."><span class="val" id="res-weather" style="color:#bfe3ff">—</span></div>
     <div class="res" id="daily-box" style="display:none; color:#ffc857" title="Daily Challenge — the same run for every player today"><span class="val" id="res-daily" style="color:#ffe9a8">—</span></div>
     <div id="hint">Drag to pan (middle-mouse or two fingers) · arrows/edges also pan · Left-click select, ⬚ to box-select · Right-click command · A = attack-move · Workers build towers</div>
     <button id="mute-btn" title="Sound on/off" style="margin-left:10px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">🔊</button>
@@ -895,7 +894,7 @@
   </div>
 </div>
 
-<div id="voice-sink" style="position:absolute;width:0;height:0;overflow:hidden"></div>
+<div id="voice-sink" style="position:fixed;left:-9999px;top:0;width:1px;height:1px"></div>
 
 <div id="rotate-note">
   <div>
@@ -912,7 +911,6 @@
 <script src="game.js"></script>
 <script src="ai.js"></script>
 <script src="daily.js"></script>
-<script src="weather.js"></script>
 <script src="voice.js"></script>
 <script src="survival.js"></script>
 <script src="leaderboard.js"></script>

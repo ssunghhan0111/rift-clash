@@ -30,12 +30,20 @@ RC.Voice = (function () {
   const SPEAK_OFF = 0.028;     // and below which we stop (hysteresis, or it flickers)
   const CONNECT_TIMEOUT = 15000;
 
+  // iOS only lets a media element play if a user gesture unlocked it, and the
+  // remote track does not arrive until several seconds after the button press.
+  // So we create and unlock a small pool of <audio> elements DURING the click and
+  // hand them out later when tracks show up. A tiny silent WAV is enough to unlock.
+  const SILENT_WAV = 'data:audio/wav;base64,UklGRqQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+  const POOL_SIZE = 3;         // room cap is 4, so at most 3 remote voices
+
   let myId = null;
   let send = null;             // injected: RC.NetClient.send
   let stream = null;           // our microphone
   let joined = false;          // we are in the voice channel
   let micOn = true;            // mic live vs muted (still joined)
   let audioCtx = null;
+  let deaf = false;            // declared up here: attachAudio applies it to new elements
   let meterTimer = null;
   let lastError = '';
   const peers = new Map();     // peerId -> { pc, el, name, state, analyser, data, speaking }
@@ -110,7 +118,7 @@ RC.Voice = (function () {
       const nowLocal = localSpeaking ? lv > SPEAK_OFF : lv > SPEAK_ON;
       if (nowLocal !== localSpeaking) { localSpeaking = nowLocal; changed = true; }
       for (const p of peers.values()) {
-        const v = p.meter ? rms(p.meter) : 0;
+        const v = remoteLevel(p);
         const now = p.speaking ? v > SPEAK_OFF : v > SPEAK_ON;
         if (now !== p.speaking) { p.speaking = now; changed = true; }
       }
@@ -152,30 +160,96 @@ RC.Voice = (function () {
     return p;
   }
 
-  function attachAudio(p, ms) {
-    if (!p.el) {
-      const el = document.createElement('audio');
-      el.autoplay = true;
-      el.playsInline = true;
-      el.muted = false;
-      el.setAttribute('data-voice-peer', String(p.id));
-      const sink = document.getElementById('voice-sink') || document.body;
-      sink.appendChild(el);
-      p.el = el;
+  // ── Audio element pool (the iOS unlock) ──────────────
+  let pool = [];
+  let needsGesture = false;    // a play() was refused; retry on the next tap
+  function makeAudioEl() {
+    const el = document.createElement('audio');
+    el.autoplay = true;
+    el.playsInline = true;
+    el.setAttribute('playsinline', '');        // older WebKit reads the attribute, not the property
+    el.setAttribute('autoplay', '');
+    el.muted = false;
+    el.volume = 1;
+    const sink = document.getElementById('voice-sink') || document.body;
+    sink.appendChild(el);
+    return el;
+  }
+  // Must be called synchronously inside the click that starts voice.
+  function primePool() {
+    while (pool.length < POOL_SIZE) {
+      const el = makeAudioEl();
+      try {
+        el.src = SILENT_WAV;
+        const pr = el.play();
+        if (pr && pr.catch) pr.catch(() => {});
+      } catch (e) {}
+      pool.push(el);
     }
+  }
+  function takeEl() {
+    for (const el of pool) if (!el.srcObject && !el.__inUse) { el.__inUse = true; return el; }
+    const el = makeAudioEl(); el.__inUse = true; pool.push(el);
+    return el;
+  }
+  function releaseEl(el) {
+    if (!el) return;
+    try { el.srcObject = null; } catch (e) {}
+    el.__inUse = false;
+  }
+  // If the browser refused to start playback, the very next tap anywhere retries it.
+  function armGestureRetry() {
+    if (needsGesture) return;
+    needsGesture = true;
+    const retry = () => {
+      needsGesture = false;
+      document.removeEventListener('pointerdown', retry, true);
+      document.removeEventListener('touchend', retry, true);
+      if (audioCtx && audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
+      for (const p of peers.values()) {
+        if (p.el && p.el.srcObject && p.el.paused) { const pr = p.el.play(); if (pr && pr.catch) pr.catch(() => {}); }
+      }
+      fire();
+    };
+    document.addEventListener('pointerdown', retry, true);
+    document.addEventListener('touchend', retry, true);
+    fire();
+  }
+
+  function attachAudio(p, ms) {
+    if (!p.el) { p.el = takeEl(); p.el.setAttribute('data-voice-peer', String(p.id)); }
     p.el.srcObject = ms;
+    p.el.muted = deaf;
     const play = p.el.play();
-    if (play && play.catch) play.catch(() => { /* autoplay blocked until a gesture; the mic button is one */ });
+    if (play && play.catch) play.catch(() => armGestureRetry());
+    // Local metering uses Web Audio; for REMOTE streams Safari is unreliable there,
+    // so this analyser is only a fallback — see remoteLevel().
     p.meter = meterFor(ms);
     p.state = 'connected';
     fire();
+  }
+
+  // How loud a peer is right now. Preferred source is the level the RTP stack
+  // already reports (works on Safari/iOS, where a Web Audio node fed from a remote
+  // MediaStream often reads pure silence); the analyser is the fallback.
+  function remoteLevel(p) {
+    try {
+      const rs = p.pc.getReceivers ? p.pc.getReceivers() : [];
+      for (const r of rs) {
+        if (!r || !r.track || r.track.kind !== 'audio' || !r.getSynchronizationSources) continue;
+        const src = r.getSynchronizationSources();
+        if (src && src.length && typeof src[0].audioLevel === 'number') return src[0].audioLevel;
+      }
+    } catch (e) { /* fall through to the analyser */ }
+    return p.meter ? rms(p.meter) : 0;
   }
 
   function dropPeer(peerId) {
     const p = peers.get(peerId);
     if (!p) return;
     try { p.pc.close(); } catch (e) {}
-    if (p.el) { try { p.el.srcObject = null; p.el.remove(); } catch (e) {} }
+    releaseEl(p.el);          // back to the pool — recreating it would lose the iOS unlock
+    p.el = null;
     peers.delete(peerId);
     fire();
   }
@@ -235,6 +309,10 @@ RC.Voice = (function () {
     lastError = '';
     const why = unavailableReason();
     if (why) { lastError = why; fire(); return false; }
+    // Do this FIRST: we are inside the click here, and everything after the first
+    // await has lost the user gesture as far as iOS is concerned.
+    ensureCtx();
+    primePool();
     try {
       await getMic();
     } catch (e) {
@@ -261,6 +339,9 @@ RC.Voice = (function () {
     for (const id of [...peers.keys()]) dropPeer(id);
     stopMeters();
     stopMic();
+    for (const el of pool) { try { el.srcObject = null; el.removeAttribute('src'); el.load(); el.remove(); } catch (e) {} }
+    pool = [];
+    needsGesture = false;
     localMeter = null; localSpeaking = false;
     fire();
   }
@@ -274,10 +355,10 @@ RC.Voice = (function () {
   function toggleMic() { setMicEnabled(!micOn); return micOn; }
 
   // Deafen — stop hearing everyone without giving up our own mic.
-  let deaf = false;
   function setDeaf(on) {
     deaf = !!on;
     for (const p of peers.values()) if (p.el) p.el.muted = deaf;
+    for (const el of pool) if (!el.__inUse) el.muted = deaf;
     fire();
   }
   function toggleDeaf() { setDeaf(!deaf); return deaf; }
@@ -285,7 +366,7 @@ RC.Voice = (function () {
   function status() {
     return {
       supported: supported(), secure: secure(), reason: unavailableReason(),
-      joined, micOn, deaf, error: lastError, myId,
+      joined, micOn, deaf, error: lastError, myId, needsGesture,
       speaking: joined && micOn && localSpeaking,
       peers: [...peers.values()].map(p => ({ id: p.id, name: p.name, state: p.state, speaking: p.speaking })),
     };

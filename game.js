@@ -491,12 +491,11 @@ window.RC = window.RC || {};
       this.updateVision();
     }
 
-    // 엔티티 시야 반경 — 지형과 날씨가 함께 보정한다.
-    // 유닛의 effSight()와 반드시 같은 값을 내야 한다: 하나는 안개를, 다른 하나는
-    // 자동 교전 거리를 결정하므로 어긋나면 "보이는데 안 쏜다"가 된다.
+    // 엔티티 시야 반경 — 유닛의 effSight()와 반드시 같은 값을 내야 한다:
+    // 하나는 안개를, 다른 하나는 자동 교전 거리를 결정하므로 어긋나면
+    // "보이는데 안 쏜다"가 된다.
     _sightOf(e) {
-      const w = RC.Weather ? RC.Weather.sightMul(this) : 1;
-      return this._baseSight(e) * this._sightTerrainMul(e) * w;
+      return this._baseSight(e) * this._sightTerrainMul(e);
     }
     // 고지대에 서면 더 멀리 본다 (공중 유닛은 해당 없음)
     _sightTerrainMul(e) {

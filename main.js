@@ -732,7 +732,9 @@ window.RC = window.RC || {};
     if (join) { join.disabled = !!st.reason; join.title = st.reason || 'Ask for microphone access and join the call'; }
 
     const err = document.getElementById('voice-error');
-    if (err) err.textContent = st.error || '';
+    if (err) err.textContent = st.needsGesture
+      ? 'Tap anywhere to let the browser start playing the incoming audio.'
+      : (st.error || '');
 
     const list = document.getElementById('voice-list');
     if (!list) return;
@@ -993,7 +995,6 @@ window.RC = window.RC || {};
   let last = performance.now();
   let overlayShown = false;
   let faceAcc = 0;
-  let lastWeatherN = -1;      // which weather cycle we last announced
 
   function frame(now) {
     let dt = (now - last) / 1000;
@@ -1014,15 +1015,6 @@ window.RC = window.RC || {};
         const uset = new Set(game.units), bset = new Set(game.buildings);
         game.selection = game.selection.filter(e => uset.has(e) || bset.has(e));
         if (RC.CFG.FOG_ENABLED && game.visNow) game.updateVision();
-      }
-      // 날씨가 바뀌는 순간을 알려준다. 시야가 갑자기 줄었는데 아무 설명이 없으면
-      // 플레이어는 그걸 버그로 읽는다.
-      if (RC.Weather && RC.CFG.WEATHER_ENABLED !== false) {
-        const w = RC.Weather.at(game);
-        if (w.n !== lastWeatherN) {
-          lastWeatherN = w.n;
-          if (w.ev.id !== 'clear') game.notify(w.ev.icon + ' ' + w.ev.name + ' — ' + w.ev.desc);
-        }
       }
       if (game.marks && game.marks.length) { for (const m of game.marks) m.t -= dt; game.marks = game.marks.filter(m => m.t > 0); }
       RC.Renderer.draw(game, RC.Input.state);

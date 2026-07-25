@@ -18,7 +18,6 @@ require('./entities.js');
 require('./game.js');
 require('./ai.js');
 require('./daily.js');          // Daily Challenge seed + twist table (shared with the client)
-require('./weather.js');        // per-planet weather — derived from game.time, so no sync needed
 require('./survival.js');       // online co-op Survival wave director
 require('./net_core.js');
 const RC = global.RC;
