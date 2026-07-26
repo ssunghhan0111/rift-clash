@@ -133,13 +133,23 @@ RC.CFG = {
 //   waveGap       : seconds between attack waves
 //   armyCap       : hard ceiling on combat units the bot will build (stops Easy from
 //                   hoarding a death-ball while it waits for its first wave)
+//   maxBarracks   : how many production buildings the bot expands to
 //   secondFactory : seconds before the bot expands to a 2nd production building / air
 //   tower / tech  : whether the bot builds defensive towers / researches upgrades
+//
+// Note: Normal used to mirror the historical 8-worker / no-research economy, which
+// the AI could never actually spend (it sat at 5–70 shards for whole matches and
+// never teched). That made every match end before the mid/late game existed. Normal
+// and Hard now run a REAL economy — more workers, research reserved up front — so the
+// pop cap, upgrades, air tier and hero levels get used. Easy is deliberately shallow.
 RC.AI_DIFF = {
-  easy:   { id: 'easy',   name: 'Easy',   income: 0.70, workerCap: 5,  firstWave: 240, waveSize: 3, waveGrowth: 1, waveGap: 160, armyCap: 6,   secondFactory: 400, tower: false, tech: false },
-  normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 8,  firstWave: 210, waveSize: 5, waveGrowth: 2, waveGap: 120, armyCap: 999, secondFactory: 300, tower: true,  tech: true  },
-  hard:   { id: 'hard',   name: 'Hard',   income: 1.25, workerCap: 12, firstWave: 120, waveSize: 4, waveGrowth: 2, waveGap: 75,  armyCap: 999, secondFactory: 190, tower: true,  tech: true  },
+  easy:   { id: 'easy',   name: 'Easy',   income: 0.70, workerCap: 5,  firstWave: 240, waveSize: 3, waveGrowth: 1, waveGap: 160, armyCap: 6,   maxBarracks: 1, secondFactory: 400, tower: false, tech: false },
+  normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 13, firstWave: 210, waveSize: 5, waveGrowth: 2, waveGap: 120, armyCap: 999, maxBarracks: 2, secondFactory: 280, tower: true,  tech: true  },
+  hard:   { id: 'hard',   name: 'Hard',   income: 1.30, workerCap: 18, firstWave: 120, waveSize: 4, waveGrowth: 2, waveGap: 75,  armyCap: 999, maxBarracks: 3, secondFactory: 180, tower: true,  tech: true  },
 };
+// Minimum shards the bot keeps in reserve to guarantee it can afford research when a
+// lab is up (the old economy never saved this, so it never teched).
+RC.AI_RESEARCH_MIN = 140;
 RC.AI_DIFF_ORDER = ['easy', 'normal', 'hard'];
 
 // 색상 — 플레이어 4명 각자 색

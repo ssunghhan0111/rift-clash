@@ -18,15 +18,16 @@ let pass = 0, fail = 0;
 function ok(c, msg) { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg); } }
 
 // ── 1. Normal == the old constants (choosing Normal changes nothing) ────────
-console.log('Normal profile reproduces the historical AI tuning');
+console.log('Normal keeps the historical aggression timing, with no economy cheat');
 {
   const K = RC.CFG, N = RC.AI_DIFF.normal;
-  ok(N.workerCap === K.AI_WORKER_CAP, 'workerCap matches AI_WORKER_CAP (' + N.workerCap + ')');
-  ok(N.firstWave === K.AI_FIRST_WAVE, 'firstWave matches AI_FIRST_WAVE (' + N.firstWave + ')');
-  ok(N.waveSize === K.AI_WAVE_SIZE, 'waveSize matches AI_WAVE_SIZE (' + N.waveSize + ')');
-  ok(N.waveGap === K.AI_WAVE_GAP, 'waveGap matches AI_WAVE_GAP (' + N.waveGap + ')');
-  ok(N.secondFactory === K.AI_SECOND_FACTORY, 'secondFactory matches AI_SECOND_FACTORY (' + N.secondFactory + ')');
-  ok(N.income === 1, 'income is 1.0 (no economy cheat on Normal)');
+  ok(N.firstWave === K.AI_FIRST_WAVE, 'first-wave timing unchanged from the original game (' + N.firstWave + ')');
+  ok(N.waveSize === K.AI_WAVE_SIZE, 'wave size unchanged (' + N.waveSize + ')');
+  ok(N.waveGap === K.AI_WAVE_GAP, 'wave gap unchanged (' + N.waveGap + ')');
+  ok(N.income === 1, 'income is 1.0 — Normal never cheats on economy (only Hard/Easy scale it)');
+  // Economy DEPTH (worker cap, research, expansion) is intentionally deeper than the old
+  // 8-worker cap now — see aiecon_test — so we assert "deeper", not "equal".
+  ok(N.workerCap > K.AI_WORKER_CAP, 'Normal now runs a deeper economy than the legacy cap (' + N.workerCap + ' > ' + K.AI_WORKER_CAP + ')');
 }
 
 // ── 2. The difficulties are ordered the way the labels promise ──────────────

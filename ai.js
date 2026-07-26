@@ -24,9 +24,12 @@ RC.AI = (function () {
   }
 
   function findSpot(g, type, near, own) {
-    for (let tries = 0; tries < 60; tries++) {
+    // Search an expanding ring: close in first, then further out as tries grow. A base
+    // near the pop cap is crowded, and the old fixed 130–350px band would fill up and
+    // the bot would simply stop building — no lab, no supply, a stalled economy.
+    for (let tries = 0; tries < 90; tries++) {
       const a = Math.random() * Math.PI * 2;
-      const rad = 130 + Math.random() * 220;
+      const rad = 120 + Math.random() * (200 + tries * 4);   // grows to ~120–680px
       const x = near.x + Math.cos(a) * rad;
       const y = near.y + Math.sin(a) * rad;
       if (g.canPlace(type, x, y, own)) return { x, y };
@@ -108,7 +111,7 @@ RC.AI = (function () {
     const P = (g.aiProfile && g.aiProfile(own)) || (RC.AI_DIFF && RC.AI_DIFF.normal) || {
       workerCap: K.AI_WORKER_CAP, firstWave: K.AI_FIRST_WAVE, waveSize: K.AI_WAVE_SIZE,
       waveGrowth: K.AI_WAVE_GROWTH, waveGap: K.AI_WAVE_GAP, armyCap: 999,
-      secondFactory: K.AI_SECOND_FACTORY, tower: true, tech: true,
+      maxBarracks: 2, secondFactory: K.AI_SECOND_FACTORY, tower: true, tech: true,
     };
     const armyCap = P.armyCap == null ? 999 : P.armyCap;   // 전투 유닛 상한 (Easy 데스볼 방지)
     if (!s.diffInit) { s.waveTimer = P.firstWave; s.diffInit = true; }   // 첫 공격 타이밍은 난이도가 정한다
@@ -124,7 +127,14 @@ RC.AI = (function () {
     const workers = myUnits(g, own, R.worker);
     const barracks = myBuildings(g, own, R.barracks).filter(b => b.done);
     const shard = g.res[own].shard;
+    const labCost = (R.tech && RC.BUILDINGS[R.tech]) ? RC.BUILDINGS[R.tech].cost : 200;
     const idleWorker = () => workers.find(u => u.state !== 'build') || workers[0];
+    // The research lab is the LAST building in the priority list, so extra barracks,
+    // air and towers used to grab every spare shard and it was never built. Once the
+    // bot is ready to tech, hold the lab's cost back from those optional buildings.
+    const wantsLab = P.tech && R.tech && myBuildings(g, own, R.tech).length === 0 &&
+                     g.time > K.AI_ARCLAB && workers.length >= 6;
+    const techReserve = wantsLab ? labCost : 0;
 
     // Defence runs BEFORE the economy branches — several of those `return` early
     // after placing a building, and the crystal cannot be left undefended for a
@@ -150,31 +160,61 @@ RC.AI = (function () {
     // 3) 일꾼 보충
     if (workers.length < P.workerCap && core.queue.length === 0 && shard >= 50) g.train(core, R.worker);
 
-    // 4) 병영
+    // 4) 병영 — 첫 병영은 우선(병력을 뽑아야 하므로), 추가 병영은 랩 자금을 남기고 짓는다
     const barracksAll = myBuildings(g, own, R.barracks);
-    const barracksCap = g.time > P.secondFactory ? 2 : 1;
-    if (barracksAll.length < barracksCap && shard >= 150 && workers.length >= 5) {
+    const barracksCap = g.time > P.secondFactory ? (P.maxBarracks || 2) : 1;
+    const firstBarracks = barracksAll.length === 0;
+    const barBudget = firstBarracks ? shard : shard - techReserve;
+    if (barracksAll.length < barracksCap && barBudget >= 150 && workers.length >= 5) {
       const spot = findSpot(g, R.barracks, core, own);
       if (spot) { g.placeBuilding(R.barracks, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
-    // 4.5) 공중 건물 (후반)
-    if (R.air && myBuildings(g, own, R.air).length === 0 && g.time > P.secondFactory && shard >= 180 && workers.length >= 6) {
+    // 4.5) 공중 건물 (후반) — 역시 랩 자금은 남긴다
+    if (R.air && myBuildings(g, own, R.air).length === 0 && g.time > P.secondFactory && (shard - techReserve) >= 180 && workers.length >= 6) {
       const spot = findSpot(g, R.air, core, own);
       if (spot) { g.placeBuilding(R.air, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
     // 4.6) 테크/연구 건물
-    if (R.tech && P.tech && myBuildings(g, own, R.tech).length === 0 && g.time > K.AI_ARCLAB && shard >= 200 && workers.length >= 6) {
+    if (R.tech && P.tech && myBuildings(g, own, R.tech).length === 0 && g.time > K.AI_ARCLAB && shard >= labCost && workers.length >= 6) {
       const spot = findSpot(g, R.tech, core, own);
       if (spot) { g.placeBuilding(R.tech, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
-    // 4.7) 방어 타워 (본진 방어)
-    if (R.tower && P.tower && g.time > K.AI_TOWER && myBuildings(g, own, R.tower).length < 2 && shard >= 130 && workers.length >= 5) {
+    // 4.7) 방어 타워 (본진 방어) — 랩 자금은 남긴다
+    if (R.tower && P.tower && g.time > K.AI_TOWER && myBuildings(g, own, R.tower).length < 2 && (shard - techReserve) >= 130 && workers.length >= 5) {
       const spot = findSpot(g, R.tower, core, own);
       if (spot) { g.placeBuilding(R.tower, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
+
+    // 4.8) 연구 — 유닛 생산보다 먼저 처리한다. 예전엔 병력 생산이 자원을 다 쓴 뒤에야
+    //      연구를 시도해 20분 동안 업그레이드를 하나도 못 하는 문제가 있었다. 이제
+    //      랩이 서 있고 여유분(AI_RESEARCH_MIN)이 있으면 유닛보다 먼저 연구를 건다.
+    if (P.tech) {
+      const rmin = RC.AI_RESEARCH_MIN || 140;
+      myBuildings(g, own, R.tech).filter(b => b.done && b.def.research && !b.research).forEach(lab => {
+        if (shard < rmin) return;
+        const order = ['atk', 'spd', 'arm', 'crit', 'tough', 'eng', 'frost'];
+        for (const kind of order) {
+          if (g.upLevel(own, kind) < RC.UPGRADES[kind].costs.length) { if (g.research(lab, kind)) break; }
+        }
+      });
+    }
+
+    // 자원 규율 — 유닛 생산이 랩·연구 자금까지 먹어버리지 않게 여유분을 남긴다.
+    // 랩이 아직 없으면 랩값만큼, 있으면 남은 업그레이드가 있는 동안 연구비만큼 비축.
+    let reserveFloor = 0;
+    if (P.tech && R.tech) {
+      const labs = myBuildings(g, own, R.tech);
+      if (labs.length === 0 && g.time > K.AI_ARCLAB && workers.length >= 6) reserveFloor = labCost;
+      else if (labs.some(b => b.done)) {
+        let upgradesLeft = false;
+        for (const k of (RC.UPGRADE_ORDER || [])) { if (g.upLevel(own, k) < RC.UPGRADES[k].costs.length) { upgradesLeft = true; break; } }
+        if (upgradesLeft) reserveFloor = RC.AI_RESEARCH_MIN || 140;
+      }
+    }
+    const spendable = Math.max(0, shard - reserveFloor);
 
     // 5) 지상 유닛 생산 (공중/상급 유닛용 인구 예약)
     // 난이도 상한 — Easy는 병력을 소규모로 묶어 데스볼을 만들지 못하게 한다.
@@ -185,24 +225,17 @@ RC.AI = (function () {
     const reserve = (hasAir ? 5 : 0) + (hasTech ? 4 : 0);
     if (underCap) barracks.forEach(f => {
       if (sup.used >= sup.max - reserve) return;   // 공중/캐스터가 들어갈 인구 남겨둠
-      trainFromList(g, own, f, R.barracksUnits, shard);
+      trainFromList(g, own, f, R.barracksUnits, spendable);
     });
 
     // 5.5) 공중 유닛
     if (R.air && underCap) myBuildings(g, own, R.air).filter(b => b.done).forEach(pad => {
-      trainFromList(g, own, pad, R.airUnits, shard);
+      trainFromList(g, own, pad, R.airUnits, spendable);
     });
 
-    // 5.6) 테크 — 연구 + 상급 유닛
+    // 5.6) 테크 — 상급 유닛 (연구는 위 4.8에서 유닛보다 먼저 처리했다)
     if (R.tech) myBuildings(g, own, R.tech).filter(b => b.done).forEach(lab => {
-      // 여유 자원이 있으면 업그레이드 연구 (번갈아)
-      if (lab.def.research && P.tech && !lab.research && shard >= 200) {
-        const order = ['atk', 'spd', 'arm', 'crit', 'tough', 'eng', 'frost'];
-        for (const kind of order) {
-          if (g.upLevel(own, kind) < RC.UPGRADES[kind].costs.length) { if (g.research(lab, kind)) break; }
-        }
-      }
-      if (underCap && combatNow >= 4) trainFromList(g, own, lab, R.techUnits, shard);
+      if (underCap && combatNow >= 4) trainFromList(g, own, lab, R.techUnits, spendable);
     });
 
     // 6) 공격 웨이브 — 가장 가까운 적 팀 코어로

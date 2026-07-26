@@ -187,6 +187,8 @@ window.RC = window.RC || {};
     buildSquad();
     buildDiff();
     buildVsDiff();
+    renderDailyCard();     // Daily banner is always on the front page now
+    renderProfile();       // your local record, under the banner
   }
 
   // Versus (1v1 / 2v2) bot difficulty picker
@@ -290,8 +292,7 @@ window.RC = window.RC || {};
     show('act-survival', m === 'survival', 'flex');
     show('ss-onlinehint', m === 'vs');
     show('ss-survivalhint', m === 'survival');
-    show('ss-daily', m === 'survival', 'block');
-    if (m === 'survival') renderDailyCard();
+    // Daily now lives in the always-visible front-page banner (rendered in buildStartScreen).
     const rh = document.getElementById('race-h');
     if (rh) rh.textContent = m === 'survival' ? 'Your faction' : 'Faction (enemy AI takes the other)';
   }
@@ -594,9 +595,56 @@ window.RC = window.RC || {};
     set('daily-name', d.icon + '  ' + d.name);
     set('daily-desc', d.desc);
     set('daily-timer', 'New challenge in ' + RC.Daily.timeLeftLabel());
+    // Your progress on today's run, and — if online — your rank on the daily board.
+    const extra = document.getElementById('daily-extra');
+    if (extra) {
+      const best = RC.Profile ? RC.Profile.dailyBest() : 0;
+      extra.innerHTML = best > 0
+        ? 'Your best today: <b>wave ' + best + '</b> · <span class="rank">checking rank…</span>'
+        : '<span class="none">You haven’t played today’s run yet.</span>';
+      const rankEl = () => extra.querySelector('.rank');
+      if (best > 0 && RC.Leaderboard && RC.Leaderboard.available && RC.Leaderboard.available()) {
+        const me = (RC.Leaderboard.getName() || '').trim().toLowerCase();
+        RC.Leaderboard.top('daily', 100).then(res => {
+          const rows = (res && res.rows) || [];
+          let rank = 0;
+          for (let i = 0; i < rows.length && me; i++) {
+            if ((rows[i].name || '').trim().toLowerCase() === me) { rank = i + 1; break; }
+          }
+          const el = rankEl(); if (el) el.textContent = rank ? ('you’re rank #' + rank) : 'not yet on the board';
+        }).catch(() => { const el = rankEl(); if (el) el.textContent = ''; });
+      } else if (best > 0) {
+        const el = rankEl(); if (el) el.textContent = '';
+      }
+    }
+  }
+
+  // Compact local record shown under the daily banner (hidden until you've played one match).
+  function renderProfile() {
+    const el = document.getElementById('profile-strip');
+    if (!el || !RC.Profile) return;
+    const p = RC.Profile.get();
+    if (!p.matches) { el.innerHTML = ''; return; }
+    const bw = p.bestWave || {};
+    const bestSurv = Math.max(bw.easy || 0, bw.medium || 0, bw.insane || 0);
+    const parts = [];
+    parts.push('<span class="ps-item">Matches <b>' + p.matches + '</b></span>');
+    parts.push('<span class="ps-item">Versus <b>' + (p.wins || 0) + '–' + (p.losses || 0) + '</b></span>');
+    if (bestSurv > 0) parts.push('<span class="ps-item">Best wave <b>' + bestSurv + '</b></span>');
+    let bestRace = null, bestW = 0;
+    for (const r of (RC.RACE_ORDER || [])) { const f = p.faction[r] || { w: 0 }; if ((f.w || 0) > bestW) { bestW = f.w; bestRace = r; } }
+    if (bestRace) { const rr = RC.RACES[bestRace]; parts.push('<span class="ps-item">Top faction <b style="color:' + rr.tint + '">' + rr.name + '</b></span>'); }
+    el.innerHTML = parts.join('<span class="ps-sep">·</span>');
   }
   const dailyBtn = document.getElementById('ss-daily-start');
   if (dailyBtn) dailyBtn.addEventListener('click', startDaily);
+  // Keep the countdown fresh while the player lingers on the menu (twist rolls at UTC midnight).
+  setInterval(() => {
+    if (ss && !ss.classList.contains('hidden') && RC.Daily) {
+      const e = document.getElementById('daily-timer');
+      if (e) e.textContent = 'New challenge in ' + RC.Daily.timeLeftLabel();
+    }
+  }, 30000);
   document.getElementById('tut-learn').addEventListener('click', openTutorial);
   document.getElementById('tut-practice').addEventListener('click', startPractice);
   document.getElementById('tut-close').addEventListener('click', () => document.getElementById('tutorial').classList.add('hidden'));
@@ -1439,6 +1487,7 @@ window.RC = window.RC || {};
 
       if (game.over && !overlayShown) {
         overlayShown = true;
+        if (RC.Profile) RC.Profile.recordMatchEnd(game);   // update the local record once, at match end
         RC.UI.showOverlay(game.over);
         if (RC.Audio) RC.Audio.play(game.over === 'win' ? 'win' : 'lose');
       }
