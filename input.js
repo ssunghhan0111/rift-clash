@@ -34,32 +34,37 @@ RC.Input = (function () {
   };
 
   // ── Touch control scheme ──────────────────────────────────────────────────
-  // 'box'  (default) — one finger draws a selection box, TWO fingers pan.
-  // 'pan'  (legacy)  — one finger pans; the ⬚ button arms a one-shot box drag.
-  // Panning is the more frequent action, so 'box' only works because long
-  // distance camera moves are covered by the minimap scrub and the group /
-  // home buttons. Players who prefer the old feel can flip this from the
-  // touchbar, and the choice is remembered.
+  // ONE RULE ON TOUCH: only two fingers move the map. One finger selects, boxes
+  // or commands — never pans. There used to be a switchable legacy scheme where a
+  // single finger panned; it is gone, and any stored preference for it is wiped,
+  // because "the map wanders while I am trying to select" is worse than any
+  // convenience it bought.
   const SCHEME_KEY = 'rc_touch_scheme';
-  let touchScheme = 'box';
-  try {
-    const saved = window.localStorage.getItem(SCHEME_KEY);
-    if (saved === 'pan' || saved === 'box') touchScheme = saved;
-  } catch (e) { /* storage unavailable (file://) — stay on the default */ }
+  try { window.localStorage.removeItem(SCHEME_KEY); } catch (e) {}
 
-  function getScheme() { return touchScheme; }
-  function setScheme(s) {
-    touchScheme = (s === 'pan') ? 'pan' : 'box';
-    boxArmed = false;
-    try { window.localStorage.setItem(SCHEME_KEY, touchScheme); } catch (e) {}
-    return touchScheme;
+  function getScheme() { return 'box'; }
+  function setScheme() { return 'box'; }
+  function toggleScheme() { return 'box'; }
+
+  // Which input the player is ACTUALLY using. Only a genuine pointer event can
+  // set this — a synthetic mouse event is not a pointer event, so it cannot lie
+  // its way into re-enabling edge-scroll on a tablet.
+  let lastPointerType = '';
+  let lastTouchAt = -1e9;
+  const SYNTH_MS = 900;          // how long after a touch synthetic mouse events keep arriving
+  function notePointer(e) {
+    if (!e || !e.pointerType) return;
+    lastPointerType = e.pointerType;
+    if (e.pointerType !== 'mouse') {
+      lastTouchAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      state.mouseInside = false;          // a finger must never leave edge-scroll armed
+    }
   }
-  function toggleScheme() {
-    const s = setScheme(touchScheme === 'box' ? 'pan' : 'box');
-    if (g) g.notify(s === 'box' ? 'One finger = select box · two fingers = move map'
-                                : 'One finger = move map · ⬚ button = select box');
-    snd('select');
-    return s;
+  // True while we should treat this as a touch session and ignore mouse input.
+  function isTouchSession() {
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (now - lastTouchAt < SYNTH_MS) return true;      // synthetic echo of a real touch
+    return lastPointerType !== '' && lastPointerType !== 'mouse';
   }
 
   // 활성 포인터(마우스/터치) 추적 — 2개 이상이면 두 손가락 팬
@@ -68,7 +73,6 @@ RC.Input = (function () {
   let panMode = false;       // camera-drag active (two-finger, single-finger touch, or middle mouse)
   let panSingle = false;     // pan driven by a single pointer (touch or middle mouse)
   let panMoved = false;      // the pan pointer actually moved (→ it was navigation, not a tap)
-  let boxArmed = false;      // legacy scheme: next drag is a selection box instead of a pan
   let panLast = null;
   let longPressTimer = null;
   let longPressFired = false;
@@ -98,7 +102,14 @@ RC.Input = (function () {
     // drag runs off the canvas), but only ARM edge-scroll while the cursor is
     // actually over the battlefield. Parking the mouse on the bottom command
     // panel, the minimap or the touchbar must NOT keep scrolling the map.
+    // A tablet fires SYNTHETIC mouse events after every touch, for compatibility
+    // with old pages. Those were setting mouseInside and the cursor position, so
+    // edge-scroll armed itself from a finger — and then never disarmed, because
+    // a finger produces no mouseout. That is why the map crept on its own on an
+    // iPad. Synthetic events land within a few hundred ms of the touch, so
+    // anything that close to one is ignored outright.
     window.addEventListener('mousemove', e => {
+      if (isTouchSession()) return;
       const r = cv.getBoundingClientRect();
       const x = e.clientX - r.left, y = e.clientY - r.top;
       state.screen.x = x;
@@ -142,6 +153,7 @@ RC.Input = (function () {
   }
 
   function onPointerDown(e) {
+    notePointer(e);
     const r = cv.getBoundingClientRect();
     const p = rectPoint(e, r);
 
@@ -182,31 +194,12 @@ RC.Input = (function () {
     state.dragStart.x = p.x; state.dragStart.y = p.y;
 
     if (e.pointerType !== 'mouse') {
-      // Touch. In the default 'box' scheme a single-finger drag draws a selection
-      // box and panning is the two-finger gesture; in the legacy 'pan' scheme it
-      // is the other way round and ⬚ arms a one-shot box. A tap (no movement)
-      // always means select/command in both schemes.
-      const wantBox = (touchScheme === 'box') || boxArmed;
-      if (wantBox) {
-        state.dragging = true; state.dragTouch = true; state.boxCount = 0;
-      } else {
-        panMode = true; panSingle = true; panMoved = false; panLast = { x: p.x, y: p.y };
-      }
+      // Touch: one finger draws a selection box. It does NOT pan, ever — the map
+      // moves only under two fingers, plus the minimap scrub and the group/home
+      // buttons for long trips. A tap without movement still means select/command.
+      state.dragging = true; state.dragTouch = true; state.boxCount = 0;
       longPressFired = false;
       clearLongPress();
-      // Long-press to add/remove one unit only exists in the legacy scheme — in
-      // 'box' mode the finger is already drawing a box, so a hold-then-drag must
-      // not get hijacked into a single-unit toggle.
-      if (!wantBox) {
-        longPressTimer = setTimeout(() => {
-          longPressFired = true; panMode = false; panSingle = false;   // long-press cancels the pan
-          const ent = g.entityAt(state.world.x, state.world.y, null);
-          if (ent && ent.owner === g.playerOwner) {
-            if (g.selection.includes(ent)) g.selection = g.selection.filter(s => s !== ent);
-            else g.selection.push(ent);
-          }
-        }, 480);
-      }
       return;
     }
 
@@ -215,6 +208,7 @@ RC.Input = (function () {
   }
 
   function onPointerMove(e) {
+    notePointer(e);
     const r = cv.getBoundingClientRect();
     const p = rectPoint(e, r);
 
@@ -290,7 +284,6 @@ RC.Input = (function () {
     }
 
     boxSelect(e, wasTouch);
-    boxArmed = false;          // consume the armed box-select after one drag
   }
 
   function clearLongPress() { clearTimeout(longPressTimer); longPressTimer = null; }
@@ -518,7 +511,9 @@ RC.Input = (function () {
       dy += (ky / len) * CFG.CAM_SPEED * dt;
     }
 
-    if (state.mouseInside) {
+    // Edge-scroll is a MOUSE affordance. On a tablet there is no resting cursor,
+    // so a finger anywhere near an edge would slide the map forever.
+    if (state.mouseInside && !isTouchSession()) {
       const zone = CFG.EDGE_PAN;
       const sx = state.screen.x, sy = state.screen.y;
       let ex = 0, ey = 0;
@@ -540,7 +535,6 @@ RC.Input = (function () {
   }
 
   function armAttackMove() { amoveArmed = true; if (g) g.notify('Attack-move — tap a destination'); snd('select'); }
-  function armBoxSelect() { boxArmed = true; if (g) g.notify('Box-select — drag over your units'); snd('select'); }
 
   // Snap the camera onto a control group's centre of mass (double-tap a group button).
   function centerOnGroup(gid) {
@@ -555,6 +549,6 @@ RC.Input = (function () {
 
   return {
     init, state, updateCamera, centerOn, centerOnGroup, clampCam,
-    armAttackMove, armBoxSelect, getScheme, setScheme, toggleScheme,
+    armAttackMove, getScheme, setScheme, toggleScheme,
   };
 })();

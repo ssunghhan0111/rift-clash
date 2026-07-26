@@ -67,9 +67,11 @@ const BASE = 'http://127.0.0.1:' + PORT + '/index.html';
     await p.waitForFunction(() => window.GAME && !document.getElementById('startscreen').offsetParent, null, { timeout: 8000 });
     await sleep(300);
     ok(await p.evaluate(() => !document.getElementById('tb-stop')), 'the Stop button is still in the page');
-    for (const id of ['#tb-pause', '#tb-gamemenu', '#tb-voice', '#tb-idle', '#tb-home', '#tb-hero', '#tb-amove', '#tb-box', '#tb-cancel']) {
+    for (const id of ['#tb-pause', '#tb-gamemenu', '#tb-voice', '#tb-idle', '#tb-home', '#tb-hero', '#tb-amove', '#tb-cancel']) {
       ok(await vis(p, id), 'touchbar lost ' + id);
     }
+    // ⬚ existed only to switch to a one-finger-pan scheme, which is gone
+    ok(await p.evaluate(() => !document.getElementById('tb-box')), 'the ⬚ scheme toggle is still there');
     // the S key must still issue the order
     const moved = await p.evaluate(async () => {
       const g = window.GAME;
@@ -81,7 +83,7 @@ const BASE = 'http://127.0.0.1:' + PORT + '/index.html';
       return before + '->' + u.state;
     });
     ok(/->idle$/.test(moved), 'the S key no longer stops a unit (' + moved + ')');
-    console.log('  ■ removed, 9 buttons remain, S key still stops units (' + moved + ') ✓');
+    console.log('  ■ and ⬚ removed, 8 buttons remain, S key still stops units (' + moved + ') ✓');
     ok(p.__errs.length === 0, 'page errors: ' + p.__errs.join(' | '));
     await p.context().close();
   }

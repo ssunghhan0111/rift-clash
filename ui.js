@@ -204,32 +204,6 @@ RC.UI = (function () {
     const amoveBtn = document.getElementById('tb-amove');
     if (amoveBtn) amoveBtn.addEventListener('click', () => { if (RC.Input.armAttackMove) RC.Input.armAttackMove(); });
 
-    // ⬚ / ✋ — persistent touch control scheme toggle (was a one-shot box-select arm).
-    // ⬚ = one finger draws a selection box, two fingers move the map (default)
-    // ✋ = one finger moves the map, and this button arms a single box drag (legacy)
-    const boxBtn = document.getElementById('tb-box');
-    if (boxBtn) {
-      const paint = () => {
-        const s = RC.Input.getScheme ? RC.Input.getScheme() : 'box';
-        boxBtn.textContent = s === 'box' ? '⬚' : '✋';
-        boxBtn.classList.toggle('assigned', s === 'box');
-        boxBtn.title = s === 'box'
-          ? 'One finger = select box · two fingers = move map (tap to switch)'
-          : 'One finger = move map · tap here then drag to select (tap twice to switch)';
-      };
-      let armTimer = null;
-      boxBtn.addEventListener('click', () => {
-        const s = RC.Input.getScheme ? RC.Input.getScheme() : 'box';
-        if (s === 'box') { RC.Input.toggleScheme(); paint(); return; }
-        // Legacy scheme: first tap arms one box drag, a second tap within 600ms
-        // switches back to the one-finger-box scheme.
-        if (armTimer) { clearTimeout(armTimer); armTimer = null; RC.Input.toggleScheme(); paint(); return; }
-        if (RC.Input.armBoxSelect) RC.Input.armBoxSelect();
-        armTimer = setTimeout(() => { armTimer = null; }, 600);
-      });
-      paint();
-    }
-
     document.getElementById('tb-cancel').addEventListener('click', () => {
       g.placing = null; g.selection = [];
     });
