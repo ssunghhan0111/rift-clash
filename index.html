@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -678,6 +678,88 @@
   #voice-hud div.talking { color: var(--good); border-color: var(--good); }
   .tbtn.live { background: var(--good); color: #07230f; }
   .tbtn.muted { background: var(--bad); color: #fff; }
+
+  /* ── Per-player mute (voice list) ── */
+  .vrow .vmute {
+    flex: none; margin-left: 8px; width: 30px; height: 24px; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; font-size: 12px; line-height: 1;
+  }
+  .vrow .vmute:hover { filter: brightness(1.3); }
+  .vrow .vmute.on { background: #4a2020; border-color: #7a3030; }
+  .vrow.mutedrow { opacity: .55; }
+  #voice-room { background: #3a2a18 !important; border-color: #6a4a22 !important; }
+  #voice-room.on { background: #24402a !important; border-color: #3d7a4a !important; }
+
+  /* ── Chat (lobby) ── */
+  #chat-panel { display: flex; flex-direction: column; gap: 8px; width: min(560px, 92vw); }
+  #chat-log {
+    height: 150px; overflow-y: auto; text-align: left; font-size: 12.5px; line-height: 1.5;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  #chat-row { display: flex; gap: 8px; }
+  #chat-row input, #gc-row input {
+    flex: 1 1 auto; min-width: 0; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px; font-size: 13px;
+    font-family: inherit;
+  }
+  #chat-row button, #gc-row button {
+    flex: none; background: var(--blue); color: #fff; border: 0; border-radius: 6px;
+    padding: 9px 16px; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  #chat-row button:hover, #gc-row button:hover { filter: brightness(1.15); }
+  .cmsg { margin: 1px 0; word-wrap: break-word; overflow-wrap: anywhere; }
+  .cmsg .cwho { font-weight: 700; color: var(--cyan); }
+  .cmsg.me .cwho { color: var(--orange); }
+  .cmsg.sys { color: var(--dim); font-style: italic; }
+  #chat-empty { color: var(--dim); font-style: italic; }
+
+  /* ── Chat (in match) ── */
+  #gamechat {
+    position: absolute; left: 12px; bottom: 12px; z-index: 24;
+    width: min(420px, 62vw); display: flex; flex-direction: column; gap: 6px;
+  }
+  #gamechat.hidden { display: none; }
+  #gc-log {
+    max-height: 150px; overflow-y: auto; text-align: left; font-size: 12.5px; line-height: 1.45;
+    background: rgba(11, 16, 23, .82); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 9px; backdrop-filter: blur(3px);
+  }
+  #gc-row { display: flex; gap: 6px; }
+  /* Unread marker on the touchbar button */
+  #tb-chat.unread { background: var(--blue); color: #fff; }
+
+  /* ── Reconnect banner ── */
+  #reconnect {
+    position: absolute; inset: 0; z-index: 60; display: flex; align-items: center;
+    justify-content: center; background: rgba(6, 10, 15, .8);
+  }
+  #reconnect.hidden { display: none; }
+  .rc-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 26px 30px; text-align: center; max-width: 380px;
+  }
+  #rc-text { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .rc-sub { font-size: 12.5px; color: var(--dim); }
+  #reconnect.failed .rc-sub { display: none; }
+  #reconnect.failed #rc-text { color: var(--bad, #e0503f); }
+  .rc-spin {
+    width: 26px; height: 26px; margin: 0 auto 14px; border-radius: 50%;
+    border: 3px solid var(--line); border-top-color: var(--cyan);
+    animation: rcspin 0.9s linear infinite;
+  }
+  .rc-spin.hidden { display: none; }
+  @keyframes rcspin { to { transform: rotate(360deg); } }
+  #rc-back {
+    margin-top: 16px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    padding: 9px 20px; font-size: 13px; font-weight: 700; border-radius: 6px; cursor: pointer;
+  }
+  #rc-back.hidden { display: none; }
+
+  /* ── Legal links ── */
+  #ss-legal { font-size: 11px; color: var(--dim); margin-top: 2px; }
+  #ss-legal a { color: var(--dim); text-decoration: underline; }
+  #ss-legal a:hover { color: var(--cyan); }
 </style>
 </head>
 <body>
@@ -702,6 +784,7 @@
       <button class="tbtn" id="tb-pause" title="Pause (P)">⏸</button>
       <button class="tbtn" id="tb-gamemenu" title="End match — restart or quit">⏹</button>
       <button class="tbtn" id="tb-voice" title="Voice chat — talk to the other players">🎤</button>
+      <button class="tbtn" id="tb-chat" title="Chat with the other players (Enter)">💬</button>
       <button class="tbtn" id="tb-idle" title="Find idle worker (F)">👷</button>
       <button class="tbtn" id="tb-home" title="Go to base (Space)">🏠</button>
       <button class="tbtn" id="tb-hero" title="Select hero (H)">⭐</button>
@@ -739,6 +822,28 @@
     </div>
 
     <div id="voice-hud" class="hidden"></div>
+
+    <!-- In-match text chat. Enter opens it, Enter sends, Esc closes. Typing never
+         reaches the game hotkeys — input.js ignores keys aimed at a text field. -->
+    <div id="gamechat" class="hidden">
+      <div id="gc-log"></div>
+      <div id="gc-row">
+        <input id="gc-input" maxlength="200" placeholder="Message your game — Enter to send, Esc to close" autocomplete="off">
+        <button id="gc-send">Send</button>
+      </div>
+    </div>
+
+    <!-- Shown when the connection drops mid-match. The server holds the seat for
+         90 seconds; this is what the player looks at while we get it back. -->
+    <div id="reconnect" class="hidden">
+      <div class="rc-card">
+        <div id="rc-spin" class="rc-spin"></div>
+        <div id="rc-text">Connection lost — reconnecting…</div>
+        <div class="rc-sub">Your army is being held for you. Stay on this screen.</div>
+        <button id="rc-back" class="hidden">Back to menu</button>
+      </div>
+    </div>
+
     <div id="paused-tag" class="hidden">⏸ PAUSED</div>
   </div>
 
@@ -765,6 +870,7 @@
   <div id="ss-title">RIFT<b>CLASH</b></div>
   <div id="ss-sub">Choose how you want to play</div>
   <div id="ss-credit">Made in Jayden Game Studio</div>
+  <div id="ss-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <span>Online play is 13+</span></div>
   <div id="who-row">Playing as <span id="who-name">—</span><button id="who-edit">change</button>
     <button id="fs-btn2" title="Fullscreen">⛶ Fullscreen</button></div>
 
@@ -922,10 +1028,22 @@
       <button id="voice-mic" class="hidden">Mute mic</button>
       <button id="voice-deaf" class="hidden">Deafen</button>
       <button id="voice-leave" class="hidden">Leave Voice</button>
+      <button id="voice-room" class="hidden">Disable voice for this game</button>
     </div>
     <div id="voice-list"></div>
     <button id="voice-tap" class="hidden">👆 Tap here to turn the sound on</button>
     <div id="voice-error"></div>
+  </div>
+
+  <div class="ss-h" style="display:flex; align-items:center; gap:10px;">💬 Chat
+    <span style="font-size:11px; color:var(--dim); font-weight:400;">Everyone in this game can read it. Keep it friendly.</span>
+  </div>
+  <div id="chat-panel">
+    <div id="chat-log"></div>
+    <div id="chat-row">
+      <input id="chat-input" maxlength="200" placeholder="Say something…" autocomplete="off">
+      <button id="chat-send">Send</button>
+    </div>
   </div>
 
   <div class="ss-h" style="display:flex; align-items:center; gap:10px;">Invite Players

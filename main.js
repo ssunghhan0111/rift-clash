@@ -299,6 +299,18 @@ window.RC = window.RC || {};
     started = true;
   }
 
+  // Open a run with the server so it can be posted to the world board later. The
+  // token is single-use and the server checks the finished run's pacing against the
+  // moment it was issued, so a run cannot be invented after the fact. Best-effort:
+  // offline, on file:// or with the server asleep this simply comes back null and
+  // the end screen says the run can't be posted rather than failing the game.
+  function openRunToken(diff) {
+    game.runToken = null;
+    if (!RC.Leaderboard || !RC.Leaderboard.startRun) return;
+    const startedFor = game;
+    RC.Leaderboard.startRun(diff).then(tok => { if (startedFor === game) game.runToken = tok; });
+  }
+
   // ── Survival ──
   function startSurvival() {
     RC.online = false;
@@ -307,6 +319,7 @@ window.RC = window.RC || {};
     goFullscreen();
     audioGo();
     game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
+    openRunToken(selDiff);
     RC.AI.reset();
     resize();
     if (game.crystal) RC.Input.centerOn(game.crystal.x, game.crystal.y);
@@ -325,6 +338,7 @@ window.RC = window.RC || {};
     goFullscreen();
     audioGo();
     game.setupSurvival({ race: selRace, ally: false, difficulty: 'medium', daily: true });
+    openRunToken('daily');
     RC.AI.reset();
     resize();
     if (game.crystal) RC.Input.centerOn(game.crystal.x, game.crystal.y);
@@ -398,7 +412,7 @@ window.RC = window.RC || {};
       body.innerHTML =
         `<h3>🎓 Tutorial</h3><p>These reference screens plus a guided practice match against a gentle bot.</p>
          <h3>⚔️ Versus</h3><p><b>1 vs 1</b> — you against one bot. <b>2 vs 2</b> — you and an allied bot against two bots. Also playable online against friends on iPad/tablet.</p>
-         <h3>🛡️ Survival</h3><p>Defend the <b>Rift Crystal</b> from waves of enemies that march in from the far side. A new wave arrives every few seconds and each is stronger than the last. Build defense towers and an army to hold out as long as you can — it never ends, so chase a high wave count. Play solo or with an allied bot.</p>`;
+         <h3>🛡️ Survival</h3><p>Defend the <b>Rift Crystal</b> from waves of enemies that march in from the far side. <b>The next wave only comes once you have wiped out the current one</b>, then a few seconds' breathing space — so enemies never pile up, and the time between waves is yours to spend on towers, upgrades and army. Each wave is bigger and tougher than the last. It never ends, so chase a high wave count. Play solo or with an allied bot.</p>`;
     } else if (tab === 'Factions') {
       body.innerHTML = RC.RACE_ORDER.map(rid => {
         const r = RC.RACES[rid];
@@ -437,6 +451,8 @@ window.RC = window.RC || {};
 
   function openMenu() {
     started = false;
+    openGameChat(false);
+    clearResume();
     if (RC.Voice && RC.Voice.joined) RC.Voice.leave(false);   // quitting to the menu hangs up, but keeps auto-join armed
     if (RC.online) { RC.NetClient.close(); RC.online = false; }
     document.getElementById('lobby').classList.add('hidden');
@@ -451,6 +467,9 @@ window.RC = window.RC || {};
   }
   // The ⏹ end-match dialog in ui.js needs a way home without reaching into this closure.
   RC.openMenu = openMenu;
+  // ui.js restarts a Survival run without going through this file; a restarted run is
+  // a NEW run and needs its own leaderboard token.
+  RC.openRunToken = (diff) => openRunToken(diff);
 
   // ── World leaderboard screen ────────────────────────────
   const boardEl = document.getElementById('board');
@@ -698,6 +717,19 @@ window.RC = window.RC || {};
   // The in-match control is the 🎤 touchbar button; this is where you actually
   // join, leave, mute and see who is on the call.
   let voiceRoster = [];
+  let voiceAllowed = true;          // host switch for the whole room
+
+  // ── Voice policy ──
+  // A private or invited game is people who already arranged to play together, so the
+  // mic comes up by itself exactly as it used to. A PUBLIC room is strangers, and an
+  // automatically live microphone is not something to hand strangers: there, voice
+  // waits for a deliberate tap, and text chat is the default way to talk.
+  function maybeAutoVoice() {
+    if (!RC.Voice) return;
+    if (roomPublic || !voiceAllowed) { renderVoice(); return; }
+    RC.Voice.autoJoin().then(renderVoice);
+  }
+
   function renderVoice() {
     const panel = document.getElementById('voice-panel');
     if (!panel || !RC.Voice) return;
@@ -709,11 +741,15 @@ window.RC = window.RC || {};
     show('voice-leave', st.joined);
 
     const note = document.getElementById('voice-note');
-    if (note) note.textContent = st.joined
-      ? 'Mic and speaker are on — audio goes straight between players, not through the server.'
-      : (st.reason || (st.auto
-          ? 'Voice turns on by itself when you join a game. Press Join Voice to start it now.'
-          : 'Voice is off because you left the call. Press Join Voice to turn it back on.'));
+    if (note) note.textContent = !voiceAllowed
+      ? 'The host has turned voice chat off for this game. Use the chat box to talk.'
+      : (st.joined
+        ? 'Mic and speaker are on — audio goes straight between players, not through the server.'
+        : (st.reason || (roomPublic
+            ? 'This is a public game, so your microphone stays off until you press Join Voice. You can type to everyone in the chat box instead.'
+            : (st.auto
+              ? 'Voice turns on by itself in private games. Press Join Voice to start it now.'
+              : 'Voice is off because you left the call. Press Join Voice to turn it back on.'))));
 
     const mic = document.getElementById('voice-mic');
     if (mic) { mic.textContent = st.micOn ? 'Mute mic' : 'Unmute mic'; mic.classList.toggle('on', !st.micOn); }
@@ -732,13 +768,23 @@ window.RC = window.RC || {};
       tap.classList.toggle('hidden', !blocked);
     }
 
+    // Host-only switch to turn voice off for the entire room. The one control that
+    // actually helps when a public game turns unpleasant.
+    const roomBtn = document.getElementById('voice-room');
+    if (roomBtn) {
+      roomBtn.classList.toggle('hidden', !isHost);
+      roomBtn.textContent = voiceAllowed ? 'Disable voice for this game' : 'Enable voice for this game';
+      roomBtn.classList.toggle('on', !voiceAllowed);
+    }
+
     const list = document.getElementById('voice-list');
     if (!list) return;
     // everyone in the room who has voice on, us first
     const rows = [];
     if (st.joined) rows.push({ me: true, name: myName() || 'You', state: 'connected', speaking: st.speaking, micOn: st.micOn });
     st.peers.forEach(p => rows.push({
-      me: false, name: p.name, state: p.state, speaking: p.speaking, micOn: true,
+      me: false, id: p.id, name: p.name, state: p.state, speaking: p.speaking, micOn: true,
+      muted: !!p.muted,
       trouble: RC.Voice.troubleWith(p),
       detail: p.state === 'connected'
         ? ((p.receiving ? 'receiving' : 'no audio in') + ' · ' + (p.playing ? 'playing' : 'not playing'))
@@ -750,21 +796,40 @@ window.RC = window.RC || {};
     (lobbyData ? lobbyData.players : []).forEach(pl => {
       if (pl.id === myId || onCall.has(pl.id)) return;
       if (voiceRoster.some(v => v.id === pl.id)) return;
-      rows.push({ me: false, name: pl.name, state: 'off', speaking: false, micOn: false });
+      rows.push({ me: false, id: pl.id, name: pl.name, state: 'off', speaking: false, micOn: false });
     });
-    if (!rows.length) { list.innerHTML = '<div id="voice-empty">Nobody is on the call yet — press Join Voice.</div>'; return; }
+    if (!rows.length) {
+      list.innerHTML = '<div id="voice-empty">' + (voiceAllowed
+        ? 'Nobody is on the call yet — press Join Voice.'
+        : 'Voice is off for this game.') + '</div>';
+      return;
+    }
     const STATE_TEXT = { connected: 'connected', connecting: 'connecting…', reconnecting: 'reconnecting…',
                          failed: 'could not connect', off: 'not on voice' };
-    list.innerHTML = rows.map(r => {
+    // Built as elements rather than one innerHTML string because each row now carries
+    // a per-player mute button — silencing one person without deafening yourself to
+    // everyone was the missing control that made voice unusable among strangers.
+    list.innerHTML = '';
+    rows.forEach(r => {
       const right = r.me ? (r.micOn ? 'mic on' : 'mic muted')
-                         : (r.trouble || r.detail || STATE_TEXT[r.state] || r.state);
-      return '<div class="vrow' + (r.speaking ? ' talking' : '') +
-        ((r.state === 'failed' || r.trouble) ? ' failed' : '') + '">' +
-        '<div class="vdot"></div>' +
+                         : (r.muted ? 'muted by you' : (r.trouble || r.detail || STATE_TEXT[r.state] || r.state));
+      const row = document.createElement('div');
+      row.className = 'vrow' + (r.speaking && !r.muted ? ' talking' : '') +
+                      ((r.state === 'failed' || r.trouble) ? ' failed' : '') +
+                      (r.muted ? ' mutedrow' : '');
+      row.innerHTML = '<div class="vdot"></div>' +
         '<div class="vnm">' + esc(r.name) + (r.me ? ' (you)' : '') + '</div>' +
-        '<div class="vst">' + esc(right) + '</div>' +
-        '</div>';
-    }).join('');
+        '<div class="vst">' + esc(right) + '</div>';
+      if (!r.me && r.state !== 'off') {
+        const mb = document.createElement('button');
+        mb.className = 'vmute' + (r.muted ? ' on' : '');
+        mb.textContent = r.muted ? '🔇' : '🔊';
+        mb.title = (r.muted ? 'Unmute ' : 'Mute ') + r.name + ' (only for you)';
+        mb.addEventListener('click', () => { RC.Voice.togglePeerMute(r.id); renderVoice(); });
+        row.appendChild(mb);
+      }
+      list.appendChild(row);
+    });
   }
   (function initVoicePanel() {
     if (!RC.Voice) return;
@@ -778,6 +843,8 @@ window.RC = window.RC || {};
     if (d) d.addEventListener('click', () => { RC.Voice.toggleDeaf(); renderVoice(); });
     const l = document.getElementById('voice-leave');
     if (l) l.addEventListener('click', () => { RC.Voice.leave(true); renderVoice(); });
+    const rv = document.getElementById('voice-room');
+    if (rv) rv.addEventListener('click', () => N.send({ t: 'roomVoice', on: !voiceAllowed }));
     // The banner's job is simply to BE a user gesture — the click handler in
     // voice.js does the retry; this just gives the player somewhere to press.
     const tap = document.getElementById('voice-tap');
@@ -787,12 +854,147 @@ window.RC = window.RC || {};
   // Not an explicit hang-up: the room ended or the socket dropped, so auto-join stays armed.
   function leaveVoice() { if (RC.Voice && RC.Voice.joined) RC.Voice.leave(false); voiceRoster = []; renderVoice(); }
 
+  // ── Reconnect ──────────────────────────────────────────
+  // A dropped connection used to convert your seat to AI permanently, with no way
+  // back — the flaw a real player hits within their first few online games. The
+  // server now holds the seat open for a grace period and hands it back on proof of
+  // a token it issued at match start. This side keeps that token (in sessionStorage,
+  // so a refresh or an accidental back-navigation survives too) and re-offers it.
+  const RESUME_KEY = 'rc_resume';
+  let resumeInfo = null;      // { roomId, token, at }
+  let resuming = false;       // send a resume on the next open socket
+
+  function saveResume(roomId, token) {
+    if (!roomId || !token) return;
+    resumeInfo = { roomId, token, at: Date.now() };
+    try { window.sessionStorage.setItem(RESUME_KEY, JSON.stringify(resumeInfo)); } catch (e) {}
+  }
+  function loadResume() {
+    try { return JSON.parse(window.sessionStorage.getItem(RESUME_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function clearResume() {
+    resumeInfo = null; resuming = false;
+    try { window.sessionStorage.removeItem(RESUME_KEY); } catch (e) {}
+  }
+
+  const rcBox = () => document.getElementById('reconnect');
+  function showReconnect(text, failed) {
+    const box = rcBox();
+    if (!box) return;
+    const t = document.getElementById('rc-text');
+    if (t) t.textContent = text;
+    box.classList.toggle('failed', !!failed);
+    const back = document.getElementById('rc-back');
+    if (back) back.classList.toggle('hidden', !failed);
+    const spin = document.getElementById('rc-spin');
+    if (spin) spin.classList.toggle('hidden', !!failed);
+    box.classList.remove('hidden');
+  }
+  function hideReconnect() { const b = rcBox(); if (b) b.classList.add('hidden'); }
+  (function initReconnect() {
+    const back = document.getElementById('rc-back');
+    if (back) back.addEventListener('click', () => {
+      hideReconnect(); clearResume();
+      N.close(); RC.online = false; started = false;
+      openMenu();
+    });
+  })();
+
+  function socketUrl() {
+    return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+  }
+
+  // ── Text chat ──────────────────────────────────────────
+  // There was no way to say anything to anyone without turning on a microphone,
+  // which is a lot to ask of strangers in a public game. One log, rendered into two
+  // places: the lobby panel and a small overlay during the match.
+  const CHAT_MAX = 60;
+  let chatLog = [];
+  let chatOpen = false;
+  let chatUnread = false;
+
+  function chatClear() { chatLog = []; chatUnread = false; renderChat(); }
+  function chatPush(entry) {
+    chatLog.push(entry);
+    if (chatLog.length > CHAT_MAX) chatLog.shift();
+    if (started && !chatOpen && !entry.system) chatUnread = true;
+    renderChat();
+  }
+  function chatRowHtml(m) {
+    if (m.system) return '<div class="cmsg sys">' + esc(m.msg) + '</div>';
+    return '<div class="cmsg' + (m.from === myId ? ' me' : '') + '">' +
+           '<span class="cwho">' + esc(m.name) + ':</span> ' + esc(m.msg) + '</div>';
+  }
+  function renderChat() {
+    const html = chatLog.length
+      ? chatLog.map(chatRowHtml).join('')
+      : '<div id="chat-empty">No messages yet.</div>';
+    ['chat-log', 'gc-log'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = html;
+      el.scrollTop = el.scrollHeight;      // newest message stays in view
+    });
+    const btn = document.getElementById('tb-chat');
+    if (btn) {
+      btn.classList.toggle('hidden', !RC.online);
+      btn.classList.toggle('unread', chatUnread);
+    }
+  }
+  function sendChat(inputId) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    const text = (el.value || '').trim().slice(0, 200);
+    el.value = '';
+    if (!text) return;
+    // The socket being up is what matters, not RC.online — that flag only turns true
+    // once a MATCH starts, and the lobby is exactly where people need to talk first.
+    if (!N.connected) { chatPush({ system: true, msg: 'Chat needs a connection to the game server.' }); return; }
+    N.send({ t: 'chat', msg: text });
+  }
+  function openGameChat(on) {
+    chatOpen = !!on;
+    const box = document.getElementById('gamechat');
+    if (box) box.classList.toggle('hidden', !chatOpen || !RC.online);
+    const input = document.getElementById('gc-input');
+    if (chatOpen && input) { chatUnread = false; renderChat(); setTimeout(() => input.focus(), 20); }
+    else if (input) { input.blur(); }
+    renderChat();
+  }
+  (function initChat() {
+    const send = document.getElementById('chat-send');
+    if (send) send.addEventListener('click', () => sendChat('chat-input'));
+    const inp = document.getElementById('chat-input');
+    if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sendChat('chat-input'); } });
+
+    const gsend = document.getElementById('gc-send');
+    if (gsend) gsend.addEventListener('click', () => sendChat('gc-input'));
+    const ginp = document.getElementById('gc-input');
+    if (ginp) ginp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); sendChat('gc-input'); }
+      else if (e.key === 'Escape') { e.preventDefault(); openGameChat(false); }
+    });
+    const tb = document.getElementById('tb-chat');
+    if (tb) tb.addEventListener('click', () => openGameChat(!chatOpen));
+
+    // Enter opens the in-match chat box. Deliberately NOT registered inside
+    // input.js: that module owns game commands, and this is the one key that has to
+    // work while nothing is selected and stop being a game key once it has focus.
+    window.addEventListener('keydown', e => {
+      if (!started || !RC.online) return;
+      const tag = (e.target && e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+      if (e.key === 'Enter') { e.preventDefault(); openGameChat(true); }
+    });
+    renderChat();
+  })();
+
   function openBrowser(kind) {
     // No nickname yet? Ask first — other players are about to see this name.
     if (!myName()) { openNickname(() => openBrowser(kind)); return; }
     renderWho();
     onlineKind = kind;
-    const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+    const url = socketUrl();
     const title = document.getElementById('browser-title');
     if (title) title.innerHTML = kind === 'survival'
       ? 'RIFT<b>CLASH</b> · Online Co-op'
@@ -816,12 +1018,14 @@ window.RC = window.RC || {};
   });
   document.getElementById('browser-back').addEventListener('click', () => {
     leaveVoice();
+    clearResume();
     N.close(); RC.online = false; started = false;
     presence = []; hideInvite();
     browserEl.classList.add('hidden'); openMenu();
   });
   document.getElementById('btn-menu2').addEventListener('click', () => {
     leaveVoice();                       // leaving the room leaves the call
+    clearResume();
     N.send({ t: 'leave' });
     lobbyEl.classList.add('hidden'); showBrowser(); setBrowserStatus('Pick or create a game.');
   });
@@ -853,19 +1057,77 @@ window.RC = window.RC || {};
   });
 
   N.on('__open', () => {
-    setBrowserStatus('Connected. Invite someone below, or create a game.');
     N.send({ t: 'setName', name: myName() });     // claim our name before anyone sees the list
+    // Coming back to a match beats everything else this socket could be doing.
+    if (resuming && resumeInfo) {
+      showReconnect('Reconnecting to your match…');
+      N.send({ t: 'resume', roomId: resumeInfo.roomId, token: resumeInfo.token });
+      return;
+    }
+    setBrowserStatus('Connected. Invite someone below, or create a game.');
     N.send({ t: 'list' });
   });
-  N.on('__error', () => setBrowserStatus('Could not connect — the server may be waking up. Wait ~30s, then press Back and Online again.'));
-  N.on('__close', () => { presence = []; renderPresence(); hideInvite(); leaveVoice(); if (!started) setBrowserStatus('Disconnected. Press Back, then Online to reconnect.'); });
+  N.on('__error', () => { if (!resuming) setBrowserStatus('Could not connect — the server may be waking up. Wait ~30s, then press Back and Online again.'); });
+  N.on('__retry', (m) => {
+    if (!resuming) return;
+    showReconnect('Connection lost — reconnecting… (attempt ' + m.attempt + ')');
+  });
+  N.on('__close', () => {
+    presence = []; renderPresence(); hideInvite(); leaveVoice();
+    // Mid-match drop: the seat is being held for us, so arm a resume rather than
+    // dumping the player back to the menu.
+    if (started && RC.online && resumeInfo) {
+      resuming = true;
+      N.setRetry(true);
+      showReconnect('Connection lost — reconnecting…');
+      return;
+    }
+    if (!started) setBrowserStatus('Disconnected. Press Back, then Online to reconnect.');
+  });
+
+  N.on('seat', m => {
+    if (!started) return;
+    if (m.status === 'disconnected') game.notify('⚠ ' + (m.name || 'A player') + ' dropped — their seat is held for ' + Math.round((m.graceMs || 90000) / 1000) + 's');
+    else if (m.status === 'back') game.notify('✔ ' + (m.name || 'A player') + ' is back');
+    else if (m.status === 'gone') game.notify((m.name || 'A player') + ' did not come back — the bot keeps their army');
+  });
+  N.on('resumed', m => {
+    resuming = false;
+    hideReconnect();
+    saveResume(m.roomId, m.token);
+    myRace = m.rosters && m.rosters.find(r => r.owner === m.owner) ? m.rosters.find(r => r.owner === m.owner).race : myRace;
+    startOnline(m);            // rebuild the local world; snapshots repopulate every entity
+    game.notify('Reconnected — you have your army back.');
+  });
+  N.on('resumeFailed', m => {
+    resuming = false;
+    clearResume();
+    N.setRetry(false);
+    showReconnect((m && m.msg) || 'Could not get back into that match.', true);
+    started = false; RC.online = false;
+  });
 
   N.on('welcome', m => {
     myId = m.id;
     if (RC.Voice) RC.Voice.init(myId, msg => N.send(msg));   // the id decides who offers
     renderPresence();
   });
-  N.on('voicePeers', m => { voiceRoster = m.peers || []; if (RC.Voice) RC.Voice.setRoster(voiceRoster); renderVoice(); });
+  N.on('voicePeers', m => {
+    voiceRoster = m.peers || [];
+    if (m.allowed != null) voiceAllowed = !!m.allowed;
+    // The host switched voice off for everyone — hang up rather than sitting on a
+    // call the room no longer permits. Not an explicit hang-up, so auto-join stays
+    // armed for the next private game.
+    if (!voiceAllowed && RC.Voice && RC.Voice.joined) RC.Voice.leave(false);
+    if (RC.Voice) RC.Voice.setRoster(voiceAllowed ? voiceRoster : []);
+    renderVoice();
+  });
+  N.on('voiceDenied', m => { voiceAllowed = false; renderVoice(); if (started) game.notify('🎤 ' + ((m && m.msg) || 'Voice is off for this game.')); });
+  N.on('chat', m => {
+    chatPush(m.system ? { system: true, msg: m.msg } : { from: m.from, name: m.name, msg: m.msg });
+    // A message that arrives while the box is closed still deserves to be noticed.
+    if (started && !chatOpen && !m.system) game.notify('💬 ' + m.name + ': ' + m.msg);
+  });
   N.on('rtc', m => { if (RC.Voice) RC.Voice.onSignal(m); });
   N.on('rooms', m => renderRooms(m.rooms));
   N.on('presence', m => { presence = m.players || []; renderPresence(); });
@@ -875,17 +1137,28 @@ window.RC = window.RC || {};
   N.on('inviteError', m => setBrowserStatus(m.msg || 'That invite could not be sent.'));
   N.on('joined', m => {
     roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null;
+    voiceAllowed = m.voiceAllowed !== false;
+    chatClear();
     showLobby();
-    // Mic and speaker come up automatically on entering a room.
-    if (RC.Voice) { RC.Voice.resetAuto(); RC.Voice.autoJoin().then(renderVoice); }
+    if (RC.Voice) RC.Voice.resetAuto();
+    maybeAutoVoice();
+    renderVoice();
   });
   N.on('joinError', m => setBrowserStatus(m.msg || 'Could not join that game.'));
-  N.on('lobby', m => { lobbyData = m; isHost = (m.hostId === myId); RC.isHost = isHost; if (m.code) roomCode = m.code; roomPublic = m.public; renderLobby(); renderPresence(); renderVoice(); });
-  N.on('toLobby', () => { started = false; game.over = null; overlayShown = false; overlay.classList.add('hidden'); showLobby(); });
+  N.on('lobby', m => {
+    lobbyData = m; isHost = (m.hostId === myId); RC.isHost = isHost;
+    if (m.code) roomCode = m.code;
+    roomPublic = m.public;
+    if (m.voiceAllowed != null) voiceAllowed = !!m.voiceAllowed;
+    renderLobby(); renderPresence(); renderVoice();
+  });
+  N.on('toLobby', () => { clearResume(); N.setRetry(false); started = false; game.over = null; overlayShown = false; overlay.classList.add('hidden'); showLobby(); });
 
   N.on('start', m => {
+    saveResume(m.roomId, m.resume);   // the seat is ours to come back to if the line drops
+    N.setRetry(true);
     startOnline(m);
-    if (RC.Voice) RC.Voice.autoJoin().then(renderVoice);
+    maybeAutoVoice();
   });
   N.on('snap', m => {
     if (!started || !RC.online) return;
@@ -903,10 +1176,17 @@ window.RC = window.RC || {};
       game.survivalWave = m.wave || game.survivalWave || 0;
       game.survivalKills = m.kills || game.survivalKills || 0;
       game.survivalDiff = m.diff || game.survivalDiff || 'medium';
+      // A co-op run was simulated by the server, so the run log and the token come
+      // from there rather than from anything this client counted.
+      game.waveTimes = m.waveTimes || game.waveTimes || [];
+      game.runToken = m.token || null;
       game.over = 'lose';
+      clearResume();
       return;
     }
     game.over = (m.team === myTeam) ? 'win' : 'lose';
+    clearResume();
+    N.setRetry(false);
   });
 
   function renderLobby() {
@@ -1026,6 +1306,8 @@ window.RC = window.RC || {};
     resize();
     lobbyEl.classList.add('hidden'); ss.classList.add('hidden'); overlay.classList.add('hidden');
     started = true;
+    openGameChat(false);       // the box starts closed each match; Enter opens it
+    renderChat();
   }
 
   // ── ?join=CODE ─────────────────────────────────────────
@@ -1065,6 +1347,26 @@ window.RC = window.RC || {};
     return true;
   }
 
+  // ── Rejoin after a refresh ─────────────────────────────
+  // A resume token lives in sessionStorage, so closing the tab by accident or
+  // hitting reload mid-match is recoverable too, not just a dropped socket. Only
+  // attempted while the seat could still plausibly be held (the server's grace is
+  // 90s; a little slack for the page to load).
+  function tryResumeOnLoad() {
+    const r = loadResume();
+    if (!r || !r.token || !r.roomId) { clearResume(); return false; }
+    if (Date.now() - (r.at || 0) > 120000) { clearResume(); return false; }
+    if (!myName()) { openNickname(() => tryResumeOnLoad()); return true; }
+    resumeInfo = r;
+    resuming = true;
+    RC.online = true;
+    ss.classList.add('hidden');
+    showReconnect('Rejoining your match…');
+    N.connect(socketUrl());
+    N.setRetry(true);
+    return true;
+  }
+
   buildStartScreen();
   applyGameMode(selGameMode);
   renderWho();
@@ -1073,8 +1375,9 @@ window.RC = window.RC || {};
   if (RC.Fullscreen) RC.Fullscreen.armFirstGesture();
   // First launch — ask who they are before the menu. Anyone who already has a name
   // (including from posting a leaderboard score) walks straight past this.
-  if (!myName() && !pendingJoinCode) openNickname(null);
-  followJoinLink();          // an invite link overrides the menu
+  if (!myName() && !pendingJoinCode && !loadResume()) openNickname(null);
+  // A match we were dropped out of outranks both the menu and an invite link.
+  if (!tryResumeOnLoad()) followJoinLink();
 
   // ── 루프 ──────────────────────────────────────────
   let last = performance.now();

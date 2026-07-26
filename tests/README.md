@@ -25,10 +25,18 @@ npm run test:browser  # real Chromium, real WebSockets, real WebRTC
 | `sharetest.js` | The share card renders and the `?join=` deep link works |
 | `herotest.js` | Heroes in every mode incl. online: skills, cooldowns, casting |
 | `zoomtest.js` | Wheel + pinch zoom, cursor anchoring, clicks while zoomed, pop cap |
+| `hardentest.js` | Abuse limits, leaderboard run tokens + pacing, reconnect, chat, voice policy — **pure Node, no browser** |
+| `resumetest.js` | The client half: reconnect banner + auto-rejoin, refresh mid-match, chat UI, voice defaults, the typing guard |
 | `shots.js` | Renders each planet to `shots/` for eyeballing (not a test) |
 
 ## Notes
 
+- `hardentest.js` runs in `test:sim` — it needs no browser at all, only Node. It
+  spawns the real `server.js` as a child process and speaks raw HTTP and RFC6455
+  to it, so what it asserts is asserted against shipped code.
+- `hardentest.js` and `resumetest.js` were both written against the PRE-change
+  code first and confirmed to fail there. A test that passes before and after
+  proves nothing.
 - The browser suites need Playwright and a Chromium build. They **skip cleanly**
   (exit 0 with a SKIP line) if Playwright is not installed, so `npm test` still
   runs the headless half on a bare machine.

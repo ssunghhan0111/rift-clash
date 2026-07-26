@@ -194,10 +194,28 @@ RC.Input = (function () {
     mini.addEventListener('contextmenu', e => e.preventDefault());
 
     window.addEventListener('keydown', e => {
+      // Typing into a text field is not a game command. Without this, every letter
+      // of a chat message is also a hotkey — 'a' arms attack-move, 'p' pauses, 's'
+      // stops the army — and holding a key would leave state.keys stuck scrolling
+      // the camera. (The nickname box had the same problem; it just did less damage
+      // because no match was running.)
+      if (typing(e.target)) return;
       state.keys[e.key.toLowerCase()] = true;
       onKey(e);
     });
-    window.addEventListener('keyup', e => { state.keys[e.key.toLowerCase()] = false; });
+    window.addEventListener('keyup', e => {
+      if (typing(e.target)) return;
+      state.keys[e.key.toLowerCase()] = false;
+    });
+    // Focus can move INTO a field while a key is held (clicking the chat box with a
+    // camera key down); clear the held keys so the camera does not keep drifting.
+    window.addEventListener('focusin', e => { if (typing(e.target)) state.keys = {}; });
+  }
+
+  function typing(el) {
+    if (!el) return false;
+    const tag = (el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable === true;
   }
 
   function onPointerDown(e) {

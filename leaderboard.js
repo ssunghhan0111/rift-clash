@@ -50,7 +50,24 @@ RC.Leaderboard = (function () {
                    '&limit=' + (limit || 25));
   }
 
+  // ── Run tokens ──
+  // A run has to be OPENED with the server before it can be submitted. The board
+  // used to accept a bare {wave, kills} from anyone, which meant one request could
+  // park the maximum possible score on it forever. Now the server issues a signed,
+  // single-use token when the run starts and checks the finished run's pacing
+  // against it. Failing to get a token is not fatal — the run simply can't be
+  // posted, and everything else about the game carries on.
+  function startRun(diff) {
+    if (!available()) return Promise.resolve(null);
+    return request('/api/run/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ diff: diff || 'medium' }),
+    }).then(r => (r && r.token) || null).catch(() => null);
+  }
+
   // Submit a finished run → { ok, rank, improved, score, name, rows }
+  // `token` and `waveTimes` come from the run itself (see game.runToken / game.waveTimes).
   function submit(run) {
     const name = cleanName(run.name) || 'Anonymous';
     setName(name);
@@ -64,9 +81,11 @@ RC.Leaderboard = (function () {
         kills: run.kills || 0,
         race: run.race || 'forge',
         mode: run.mode || 'solo',
+        token: run.token || '',
+        waveTimes: run.waveTimes || [],
       }),
     });
   }
 
-  return { available, top, submit, getName, setName, cleanName };
+  return { available, top, startRun, submit, getName, setName, cleanName };
 })();

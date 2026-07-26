@@ -40,6 +40,10 @@ RC.UI = (function () {
   function restartMatch() {
     if (RC.online) { RC.NetClient.send({ t: 'restart' }); return; }   // host returns everyone to lobby
     g.reset();
+    // reset() cleared the wave log and the run token with it. A restarted Survival
+    // run is a new run, so it opens a new one — otherwise the second run of a session
+    // could never be posted to the world board.
+    if (g.survival && RC.openRunToken) RC.openRunToken(g.daily ? 'daily' : (g.survivalDiff || 'medium'));
     if (RC.AI) RC.AI.reset();
     RC.Input.clampCam();
     g.paused = false;
@@ -592,6 +596,10 @@ RC.UI = (function () {
         name: name, diff: run.diff, wave: run.waves, kills: run.kills,
         race: g.playerRace ? g.playerRace[g.playerOwner] : 'forge',
         mode: RC.online ? 'coop' : 'solo',
+        // Proof the run was opened with the server, plus the wave-by-wave timings it
+        // is checked against. Both come from the run itself: offline they are filled
+        // in as the run plays, online the server sends its own with the `over` message.
+        token: g.runToken || '', waveTimes: g.waveTimes || [],
       }).then(r => {
         const where = run.diff === 'daily'
           ? "today's Daily Challenge"
@@ -631,7 +639,13 @@ RC.UI = (function () {
         best = parseInt(window.localStorage.getItem(key) || '0', 10) || 0;
         if (score > best) { best = score; isNew = true; window.localStorage.setItem(key, String(best)); }
       } catch (e) { /* localStorage unavailable (e.g. file://) — skip persistence */ }
-      const canPost = RC.Leaderboard && RC.Leaderboard.available();
+      // Posting needs three things: an API to talk to, a run token the server issued
+      // when this run began, and a wave log to check it against. A run played offline
+      // or started while the server was asleep has no token, and says so plainly
+      // instead of offering a Submit button that would always be refused.
+      const apiUp = !!(RC.Leaderboard && RC.Leaderboard.available());
+      const haveRun = !!(g.runToken && g.waveTimes && g.waveTimes.length);
+      const canPost = apiUp && haveRun;
       el.overlayText.innerHTML =
         `<b class="lose">CRYSTAL SHATTERED</b>` +
         `<span>${dn} — reached <b style="color:var(--cyan)">Wave ${waves}</b> · ${kills} enemies slain</span>` +
@@ -650,7 +664,11 @@ RC.UI = (function () {
                </div>
                <div id="lb-msg"></div>
              </div>`
-          : `<div id="lb-post"><div class="lb-h" style="color:var(--dim)">Play the online version to post your score to the world leaderboard.</div></div>`);
+          : `<div id="lb-post"><div class="lb-h" style="color:var(--dim)">${
+                apiUp
+                  ? 'This run could not be verified with the server, so it can’t go on the world board. Your personal best above is still saved.'
+                  : 'Play the online version to post your score to the world leaderboard.'
+             }</div></div>`);
       if (canPost) wireScoreSubmit({ diff, waves, kills, score });
       wireShare({
         title: dn,

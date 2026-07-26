@@ -227,6 +227,13 @@ RC.Survival = (function () {
     const s = st(g);
     s.wave++;
     g.survivalWave = s.wave;
+    // Run log — the game time each wave began at. The leaderboard checks a submitted
+    // run against it: this director cannot start wave N+1 before wave N has finished
+    // spawning and the between-wave gap has passed, so a claimed run that outruns its
+    // own spawn timings never happened. Recorded HERE rather than in the client so a
+    // solo run and a server-simulated co-op run produce the same log from the same code.
+    if (!g.waveTimes) g.waveTimes = [];
+    if (g.waveTimes.length < 600) g.waveTimes.push(Math.round((g.time || 0) * 100) / 100);
     s.queue = compose(s.wave, g);
     s.spawnT = 0;
     s.clearing = false;
@@ -292,6 +299,24 @@ RC.Survival = (function () {
     steer(g);
   }
 
-  return { reset, update, compose, scaleHp, diffOf, prepOf, gapOf, waveSize, weightAt, ROSTER,
+  // ── The pacing floor ──────────────────────────────────────────────────────
+  // The shortest possible time between the start of wave w and the start of wave
+  // w+1: every unit in wave w has to spawn (SPAWN_STEP apart), the wave has to be
+  // wiped out, and only then does the gap run. Killing takes more than zero time,
+  // so this is a floor no run can beat.
+  //
+  // The leaderboard uses it to check a submitted run's wave log. It lives HERE
+  // rather than in the server because it is made entirely of this file's own
+  // constants — the server used to carry its own copies of SPAWN_STEP and GAP with
+  // a "must match survival.js" comment, which is the kind of duplication that
+  // silently drifts. `g` is any object the director understands, so daily twists
+  // that change wave size or the gap (Blitz cuts it to 30%, Elite Guard shrinks
+  // the waves) are accounted for instead of failing honest runs.
+  function minSpacing(w, g) {
+    return waveSize(w, diffOf(g)) * SPAWN_STEP + gapOf(g);
+  }
+
+  return { reset, update, compose, scaleHp, diffOf, prepOf, gapOf, waveSize, weightAt, minSpacing, ROSTER,
+           SPAWN_STEP, GAP,
            diffName: k => (DIFF[k] || DIFF.medium).name };
 })();

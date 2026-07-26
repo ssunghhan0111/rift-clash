@@ -134,7 +134,8 @@ RC.Voice = (function () {
     if (p) return p;
     const pc = new RTCPeerConnection({ iceServers: ICE });
     p = { id: peerId, name: name || ('Player ' + peerId), pc, el: null, meter: null,
-          speaking: false, state: 'connecting', failedAt: 0 };
+          speaking: false, state: 'connecting', failedAt: 0,
+          muted: isPeerMuted(peerId) };      // a mute set earlier still applies if they rejoin
     peers.set(peerId, p);
 
     if (stream) stream.getTracks().forEach(t => pc.addTrack(t, stream));
@@ -230,7 +231,7 @@ RC.Voice = (function () {
     el.removeAttribute('src');
     el.srcObject = null;
     el.srcObject = ms;
-    el.muted = deaf;
+    el.muted = deaf || !!p.muted;      // a per-player mute survives a renegotiated stream
     el.volume = 1;
     p.stream = ms;
     tryPlay(p);
@@ -443,11 +444,29 @@ RC.Voice = (function () {
   // Deafen — stop hearing everyone without giving up our own mic.
   function setDeaf(on) {
     deaf = !!on;
-    for (const p of peers.values()) if (p.el) p.el.muted = deaf;
+    for (const p of peers.values()) if (p.el) p.el.muted = deaf || !!p.muted;
     for (const el of pool) if (!el.__inUse) el.muted = deaf;
     fire();
   }
   function toggleDeaf() { setDeaf(!deaf); return deaf; }
+
+  // ── Per-player mute ──────────────────────────────────
+  // Silencing ONE person was the control this was missing. Deafen is all-or-nothing,
+  // so the only way to escape a single unpleasant voice was to give up hearing your
+  // own team as well — which in practice means leaving the game. A mute here is local
+  // and private: nothing is sent to the server and the muted player is never told.
+  // Kept in a set keyed by player id so it survives a peer reconnecting mid-match.
+  const mutedIds = new Set();
+  function setPeerMute(id, on) {
+    const key = String(id);
+    if (on) mutedIds.add(key); else mutedIds.delete(key);
+    const p = peers.get(id) || peers.get(Number(id)) || peers.get(key);
+    if (p) { p.muted = !!on; if (p.el) p.el.muted = deaf || !!on; if (on) p.speaking = false; }
+    fire();
+    return !!on;
+  }
+  function isPeerMuted(id) { return mutedIds.has(String(id)); }
+  function togglePeerMute(id) { return setPeerMute(id, !isPeerMuted(id)); }
 
   // A single sentence describing why a peer might be inaudible, or '' when fine.
   function troubleWith(p) {
@@ -470,10 +489,12 @@ RC.Voice = (function () {
         recvBytes: p.recvBytes || 0,
         playing: !!(p.el && p.el.srcObject && !p.el.paused),
         blocked: !!p.blocked,                      // the browser refused to start playback
+        muted: isPeerMuted(p.id),                  // silenced by us, locally
       })),
     };
   }
 
   return { init, join, autoJoin, resetAuto, leave, toggleMic, setMicEnabled, toggleDeaf, setDeaf,
+           setPeerMute, togglePeerMute, isPeerMuted,
            onSignal, setRoster, status, troubleWith, on, get joined() { return joined; } };
 })();

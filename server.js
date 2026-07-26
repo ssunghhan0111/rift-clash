@@ -3,6 +3,18 @@
 //   Deploy behind an HTTPS host (e.g. Render) and the client auto-uses wss://.
 // Serves the game files AND hosts MANY concurrent games (public + private "rooms")
 // over WebSocket, each with its own authoritative 30 Hz simulation.
+//
+// ── Operational environment variables ──────────────────────────────────────
+//   PORT              listen port (default 8080)
+//   DATA_DIR          writable directory for scores.json. On Render, attach a
+//                     Persistent Disk mounted at /var/data and set DATA_DIR=/var/data.
+//                     Without it the board lives next to the server and is WIPED
+//                     by every redeploy, which is what used to happen.
+//   RUN_SECRET        HMAC key for leaderboard run tokens. Set it in production; a
+//                     random per-boot key is used if absent, which only means runs
+//                     opened before a restart cannot be submitted after it.
+//   ALLOWED_ORIGINS   comma-separated origins allowed to open a WebSocket. Default
+//                     is "same host as the request", which is correct for Render.
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -26,19 +38,39 @@ RC.CFG.FOG_ENABLED = false;               // server is omniscient; clients compu
 const PORT = process.env.PORT || 8080;
 const DIR = __dirname;
 
+// ══ Abuse limits ══════════════════════════════════════════════════════════
+// Every one of these guards something a single unauthenticated client could
+// previously do without any limit at all. They are deliberately generous — a real
+// player never comes close to any of them.
+const LIMITS = {
+  MAX_FRAME: 64 * 1024,       // largest WebSocket frame accepted (a command is ~100 bytes)
+  MAX_BUFFER: 256 * 1024,     // largest partial-frame buffer held per socket
+  MAX_SOCKETS: 400,           // total concurrent connections
+  MAX_PER_IP: 8,              // concurrent connections from one address
+  MAX_ROOMS: 120,             // total live rooms
+  MAX_ROOMS_PER_CLIENT: 3,    // rooms one client may have created and still own
+  ROOM_CREATE_MS: 2000,       // minimum gap between one client's room creations
+  MSG_PER_SEC: 60,            // sustained message rate per socket (commands + chat)
+  MSG_BURST: 180,             // token-bucket ceiling
+  MAX_QUEUED_CMDS: 240,       // per room, per tick — anything beyond is dropped
+  CHAT_PER_10S: 8,            // chat messages per client per 10 seconds
+  CHAT_LEN: 200,              // characters
+};
+
 // ══ Global Survival leaderboard ═══════════════════════════════════════════
-// Top scores per difficulty, kept in a JSON file next to the server.
-// NOTE: on a free Render instance the filesystem is EPHEMERAL — the board
-// survives restarts of the process but is wiped by a redeploy. That's fine for
-// a friendly high-score board; swap in a hosted DB later if it needs to persist.
-const SCORES_FILE = path.join(DIR, 'scores.json');
+// Top scores per difficulty. Lives in DATA_DIR when one is configured (a Render
+// Persistent Disk), so it survives redeploys; otherwise next to the server, which
+// is fine locally and is the old behaviour.
+const DATA_DIR = process.env.DATA_DIR || DIR;
+try { if (DATA_DIR !== DIR) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { /* falls back to reads failing, handled below */ }
+const SCORES_FILE = path.join(DATA_DIR, 'scores.json');
 // 'daily' is a board like any other, except rows carry the UTC day they were set
 // on and only today's are ever shown. That means the daily board "resets" every
 // midnight UTC with no scheduled job and no cleanup step — yesterday's rows just
 // stop matching. They're pruned on write so the file can't grow forever.
 const DIFFS = ['easy', 'medium', 'insane', 'daily'];
 const MAX_ROWS = 100;                    // rows kept per difficulty
-const MAX_BODY = 4096;                   // reject oversized POST bodies
+const MAX_BODY = 8192;                   // reject oversized POST bodies
 
 // Must match RC.Daily.EPOCH / dayNumber() in daily.js — the client and server
 // have to agree on which day it is or nobody's score shows up on their own board.
@@ -50,7 +82,7 @@ let scores = { easy: [], medium: [], insane: [], daily: [] };
 try {
   const raw = JSON.parse(fs.readFileSync(SCORES_FILE, 'utf8'));
   DIFFS.forEach(d => { if (Array.isArray(raw[d])) scores[d] = raw[d].slice(0, MAX_ROWS); });
-  console.log('leaderboard loaded:', DIFFS.map(d => d + '=' + scores[d].length).join(' '));
+  console.log('leaderboard loaded from ' + SCORES_FILE + ':', DIFFS.map(d => d + '=' + scores[d].length).join(' '));
 } catch (e) { /* first run, or unreadable/corrupt file — start with an empty board */ }
 
 let saveTimer = null;
@@ -76,9 +108,92 @@ function cleanName(s) {
   return t || 'Anonymous';
 }
 
-// The client is not trusted: the score is RECOMPUTED here from waves+kills, and
-// implausible runs are rejected outright. This is a friendly game, so the goal is
-// to stop casual tampering, not to be unforgeable.
+// ══ Run tokens ════════════════════════════════════════════════════════════
+// A Survival score used to be a bare POST of {wave, kills}. The server recomputed
+// the SCORE from those, which stopped a client inventing the number — but nothing
+// stopped it inventing the wave and kill counts themselves. One request could put
+// the maximum possible score (wave 500, 200k kills = 1,050,000) on the board, and
+// because only a HIGHER score replaces a name's row, that entry could never be
+// displaced by anyone. The board was one request away from being permanently dead.
+//
+// A run must now be opened before it can be submitted:
+//   POST /api/run/start  ->  { token }        HMAC-signed, single use, 6h TTL
+//   POST /api/score      <-  { token, wave, kills, waveTimes[] }
+// and the submission has to be physically consistent with the wave director that
+// actually ships in survival.js: wave N cannot have started before wave N-1 finished
+// spawning plus the between-wave gap, and the run cannot claim more game time than
+// has passed on the wall clock since the token was issued.
+//
+// This is not unforgeable and does not try to be — someone determined can drive the
+// real client for real hours. It only has to cost more than the reward, and now it does.
+const RUN_SECRET = process.env.RUN_SECRET || crypto.randomBytes(32).toString('hex');
+const RUN_TTL = 6 * 3600 * 1000;         // a run token is good for six hours
+const runTokens = new Map();             // id -> { diff, issuedAt, used }
+const MAX_RUN_TOKENS = 20000;
+
+function signRun(id, issuedAt, diff) {
+  return crypto.createHmac('sha256', RUN_SECRET)
+    .update(id + '.' + issuedAt + '.' + diff).digest('base64url').slice(0, 24);
+}
+function issueRunToken(diff) {
+  if (runTokens.size >= MAX_RUN_TOKENS) pruneRunTokens(true);
+  const id = crypto.randomBytes(9).toString('base64url');
+  const issuedAt = Date.now();
+  runTokens.set(id, { diff, issuedAt, used: false });
+  return id + '.' + issuedAt + '.' + signRun(id, issuedAt, diff);
+}
+// Returns the token record, or a string describing why it is not acceptable.
+function checkRunToken(tok, diff) {
+  if (typeof tok !== 'string' || tok.length > 120) return 'missing run token';
+  const parts = tok.split('.');
+  if (parts.length !== 3) return 'malformed run token';
+  const id = parts[0], issuedAt = Number(parts[1]), sig = parts[2];
+  if (!isFinite(issuedAt)) return 'malformed run token';
+  const want = signRun(id, issuedAt, diff);
+  // constant-time compare so the signature cannot be probed byte by byte
+  if (sig.length !== want.length ||
+      !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return 'run token does not match this run';
+  const rec = runTokens.get(id);
+  if (!rec) return 'that run has expired — play it again to post a score';
+  if (rec.used) return 'that run was already submitted';
+  if (rec.diff !== diff) return 'run token does not match this run';
+  if (Date.now() - rec.issuedAt > RUN_TTL) { runTokens.delete(id); return 'that run has expired — play it again to post a score'; }
+  return rec;
+}
+function consumeRunToken(tok) {
+  const rec = runTokens.get(String(tok).split('.')[0]);
+  if (rec) rec.used = true;
+}
+function pruneRunTokens(force) {
+  const now = Date.now();
+  for (const entry of [...runTokens]) {
+    const id = entry[0], r = entry[1];
+    if (now - r.issuedAt > RUN_TTL || (r.used && now - r.issuedAt > 60000)) runTokens.delete(id);
+  }
+  if (force && runTokens.size >= MAX_RUN_TOKENS) {
+    // still full of live tokens — drop the oldest half rather than refuse new runs
+    const byAge = [...runTokens.entries()].sort((a, b) => a[1].issuedAt - b[1].issuedAt);
+    for (let i = 0; i < byAge.length / 2; i++) runTokens.delete(byAge[i][0]);
+  }
+}
+setInterval(() => pruneRunTokens(false), 600000).unref?.();
+
+// The physical floor on how fast wave w can be followed by wave w+1 comes from the
+// wave director itself (RC.Survival.minSpacing) rather than from copies of its
+// constants kept here. A daily run is reconstructed for the day it was STARTED on,
+// not the day it was submitted: a run can be posted up to six hours later and the
+// twist changes at UTC midnight. This matters — the Blitz twist cuts the gap to 30%
+// and Elite Guard shrinks the waves, so a fixed floor would have rejected honest
+// runs on two days out of every seven.
+function minWaveSpacing(w, diff, startedAt) {
+  if (!RC.Survival || !RC.Survival.minSpacing) return 0;
+  const gameLike = { survivalDiff: diff === 'daily' ? 'medium' : diff };
+  if (diff === 'daily' && RC.Daily && RC.Daily.today) gameLike.daily = RC.Daily.today(startedAt);
+  return RC.Survival.minSpacing(w, gameLike);
+}
+
+// The client is not trusted: the score is RECOMPUTED here from waves+kills, the run
+// has to have been opened here, and its pacing has to be possible.
 function validate(b) {
   if (!b || typeof b !== 'object') return 'bad payload';
   if (DIFFS.indexOf(b.diff) < 0) return 'bad difficulty';
@@ -87,6 +202,26 @@ function validate(b) {
   if (!isFinite(wave) || wave < 1 || wave > 500) return 'bad wave';
   if (!isFinite(kills) || kills < 0 || kills > 200000) return 'bad kills';
   if (kills > wave * 400 + 200) return 'kills do not match waves';
+
+  const rec = checkRunToken(b.token, b.diff);
+  if (typeof rec === 'string') return rec;
+
+  // ── pacing ──
+  const times = Array.isArray(b.waveTimes) ? b.waveTimes.map(Number) : null;
+  if (!times || times.length !== wave) return 'run log does not match the wave count';
+  for (let i = 0; i < times.length; i++) if (!isFinite(times[i]) || times[i] < 0) return 'bad run log';
+  for (let i = 1; i < times.length; i++) {
+    if (times[i] <= times[i - 1]) return 'run log out of order';
+    const need = minWaveSpacing(i, b.diff, rec.issuedAt);   // spacing between wave i and wave i+1
+    if (times[i] - times[i - 1] < need * 0.9) return 'run log is faster than the game allows';
+  }
+  const elapsed = times[times.length - 1];
+  const wall = (Date.now() - rec.issuedAt) / 1000;
+  // Backgrounding a tab freezes game time but not the clock, so wall >= elapsed
+  // always holds for an honest run. The reverse means the run was fast-forwarded —
+  // which also closes the dev-mode panel as a route onto the world board.
+  if (elapsed > wall * 1.1 + 5) return 'run finished faster than real time';
+
   const mode = (b.mode === 'coop') ? 'coop' : 'solo';
   const race = (RC.RACES && RC.RACES[b.race]) ? b.race : 'forge';
   const entry = { diff: b.diff, wave, kills, mode, race,
@@ -96,6 +231,7 @@ function validate(b) {
     // otherwise be able to park a score on tomorrow's board.
     entry.day = dayNumber(entry.at);
   }
+  entry._token = b.token;
   return entry;
 }
 
@@ -116,7 +252,10 @@ function submitScore(entry) {
     if (list[prev].score >= entry.score) { improved = false; }
     else list.splice(prev, 1);
   }
-  if (improved) list.push(entry);
+  const row = { diff: entry.diff, wave: entry.wave, kills: entry.kills, mode: entry.mode,
+                race: entry.race, score: entry.score, name: entry.name, at: entry.at };
+  if (entry.day != null) row.day = entry.day;
+  if (improved) list.push(row);
   list.sort((a, b) => b.score - a.score || a.at - b.at);
   scores[entry.diff] = list.slice(0, MAX_ROWS);
   saveScores();
@@ -127,8 +266,9 @@ function submitScore(entry) {
 
 // Light per-IP rate limit so nobody can spam the board.
 const rate = new Map();
-function rateOk(ip) {
-  const now = Date.now(), win = 3600000, cap = 40;
+function rateOk(ip, cap, win) {
+  const now = Date.now();
+  cap = cap || 40; win = win || 3600000;
   const r = rate.get(ip);
   if (!r || now > r.reset) { rate.set(ip, { n: 1, reset: now + win }); return true; }
   if (r.n >= cap) return false;
@@ -136,19 +276,43 @@ function rateOk(ip) {
 }
 setInterval(() => {                                    // drop expired buckets
   const now = Date.now();
-  for (const [ip, r] of rate) if (now > r.reset) rate.delete(ip);
+  for (const entry of [...rate]) if (now > entry[1].reset) rate.delete(entry[0]);
 }, 600000).unref?.();
+
+function ipOf(req) {
+  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+         (req.socket && req.socket.remoteAddress) || 'unknown';
+}
 
 function sendJson(res, code, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(body);
 }
+function readBody(req, res, cb) {
+  let body = '', aborted = false;
+  req.on('data', c => {
+    body += c;
+    if (body.length > MAX_BODY) { aborted = true; sendJson(res, 413, { ok: false, error: 'too large' }); req.destroy(); }
+  });
+  req.on('end', () => {
+    if (aborted) return;
+    let parsed;
+    try { parsed = JSON.parse(body || '{}'); } catch (e) { sendJson(res, 400, { ok: false, error: 'bad json' }); return; }
+    cb(parsed);
+  });
+}
 
 // ── Static file server (+ leaderboard API) ──
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
                '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
-               '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
+               '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json',
+               '.txt': 'text/plain' };
+// Never served, however the path is spelled. The server source and the score file
+// have no business going out to every visitor, and neither does the test suite.
+const PRIVATE_FILES = new Set(['server.js', 'scores.json', 'scores.json.tmp', 'package.json']);
+const PRIVATE_DIRS = ['tests'];
+
 const server = http.createServer((req, res) => {
   const url = req.url || '/';
   let p = decodeURIComponent(url.split('?')[0]);
@@ -166,22 +330,23 @@ const server = http.createServer((req, res) => {
     sendJson(res, 200, { diff, rows: scores[diff].slice(0, limit) });
     return;
   }
-  if (p === '/api/score' && req.method === 'POST') {
-    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-               req.socket.remoteAddress || 'unknown';
-    if (!rateOk(ip)) { sendJson(res, 429, { ok: false, error: 'too many submissions — try again later' }); return; }
-    let body = '';
-    let aborted = false;
-    req.on('data', c => {
-      body += c;
-      if (body.length > MAX_BODY) { aborted = true; sendJson(res, 413, { ok: false, error: 'too large' }); req.destroy(); }
+  // Open a run. Called when Survival wave 1 starts; the token comes back at the end.
+  if (p === '/api/run/start' && req.method === 'POST') {
+    const ip = ipOf(req);
+    if (!rateOk('run:' + ip, 120, 3600000)) { sendJson(res, 429, { ok: false, error: 'too many runs — try again later' }); return; }
+    readBody(req, res, (b) => {
+      const diff = DIFFS.indexOf(b && b.diff) >= 0 ? b.diff : 'medium';
+      sendJson(res, 200, { ok: true, token: issueRunToken(diff), diff });
     });
-    req.on('end', () => {
-      if (aborted) return;
-      let parsed;
-      try { parsed = JSON.parse(body); } catch (e) { sendJson(res, 400, { ok: false, error: 'bad json' }); return; }
+    return;
+  }
+  if (p === '/api/score' && req.method === 'POST') {
+    const ip = ipOf(req);
+    if (!rateOk(ip)) { sendJson(res, 429, { ok: false, error: 'too many submissions — try again later' }); return; }
+    readBody(req, res, (parsed) => {
       const entry = validate(parsed);
       if (typeof entry === 'string') { sendJson(res, 400, { ok: false, error: entry }); return; }
+      consumeRunToken(entry._token);
       const r = submitScore(entry);
       sendJson(res, 200, {
         ok: true, rank: r.rank, improved: r.improved, score: entry.score,
@@ -195,23 +360,56 @@ const server = http.createServer((req, res) => {
   if (p === '/') p = '/index.html';
   const file = path.join(DIR, path.normalize(p).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(DIR)) { res.writeHead(403); res.end(); return; }
-  if (path.basename(file) === 'scores.json') { res.writeHead(404); res.end('not found'); return; }
+  const rel = path.relative(DIR, file).split(path.sep);
+  if (PRIVATE_FILES.has(rel[rel.length - 1]) || PRIVATE_DIRS.indexOf(rel[0]) >= 0) {
+    res.writeHead(404); res.end('not found'); return;
+  }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+    });
     res.end(data);
   });
 });
 
 // ── Minimal RFC6455 WebSocket ──
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+// A browser always sends Origin. A non-browser client (our own test harness) may
+// not, and that is allowed — the point of this check is to stop a page on someone
+// else's domain from driving this server, not to authenticate anybody.
+function originOk(req) {
+  const o = String(req.headers.origin || '').trim().toLowerCase();
+  if (!o) return true;
+  if (ALLOWED_ORIGINS.length) return ALLOWED_ORIGINS.indexOf(o) >= 0;
+  const host = String(req.headers.host || '').toLowerCase();
+  if (!host) return false;
+  return o === 'http://' + host || o === 'https://' + host;
+}
+
+const ipSockets = new Map();             // ip -> count
+function ipCount(ip, delta) {
+  const n = (ipSockets.get(ip) || 0) + delta;
+  if (n <= 0) ipSockets.delete(ip); else ipSockets.set(ip, n);
+  return n;
+}
+
 server.on('upgrade', (req, socket) => {
   const key = req.headers['sec-websocket-key'];
   if (!key) { socket.destroy(); return; }
+  if (!originOk(req)) { try { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); } catch (e) {} socket.destroy(); return; }
+  const ip = ipOf(req);
+  if (sockets.size >= LIMITS.MAX_SOCKETS) { try { socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n'); } catch (e) {} socket.destroy(); return; }
+  if ((ipSockets.get(ip) || 0) >= LIMITS.MAX_PER_IP) { try { socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n'); } catch (e) {} socket.destroy(); return; }
   const accept = crypto.createHash('sha1').update(key + GUID).digest('base64');
   socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n' +
                'Connection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
-  onConnect(socket);
+  onConnect(socket, ip);
 });
 
 function wsFrame(str, opcode) {
@@ -225,20 +423,35 @@ function wsFrame(str, opcode) {
   return Buffer.concat([header, payload]);
 }
 function wsSend(socket, str) { try { socket.write(wsFrame(str, 0x1)); } catch (e) { /* closed */ } }
+function wsSendBuf(socket, buf) { try { socket.write(buf); } catch (e) { /* closed */ } }
 function wsPing(socket) { try { socket.write(Buffer.from([0x89, 0x00])); } catch (e) { } }   // opcode 0x9, empty
 function wsPong(socket) { try { socket.write(Buffer.from([0x8A, 0x00])); } catch (e) { } }   // opcode 0xA, empty
 
 // Frame parser (masking, 7/16/64-bit lengths). Handles text + close + ping/pong.
-function makeParser(onMsg, onClose, onPing, onPong) {
+//
+// The length field is 64 bits wide and used to be trusted: a client could declare a
+// 4 GB frame and this parser would keep Buffer.concat-ing chunks until the process
+// died. Both the declared length and the accumulated buffer are now bounded, and
+// breaching either kills that one connection instead of the server.
+function makeParser(onMsg, onClose, onPing, onPong, onAbuse) {
   let buf = Buffer.alloc(0);
+  let dead = false;
   return (chunk) => {
+    if (dead) return;
     buf = Buffer.concat([buf, chunk]);
+    if (buf.length > LIMITS.MAX_BUFFER) { dead = true; onAbuse('frame buffer overflow'); return; }
     while (buf.length >= 2) {
       const opcode = buf[0] & 0x0f;
       const masked = (buf[1] & 0x80) !== 0;
       let len = buf[1] & 0x7f, off = 2;
       if (len === 126) { if (buf.length < 4) return; len = buf.readUInt16BE(2); off = 4; }
-      else if (len === 127) { if (buf.length < 10) return; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+      else if (len === 127) {
+        if (buf.length < 10) return;
+        const big = buf.readBigUInt64BE(2);
+        if (big > BigInt(LIMITS.MAX_FRAME)) { dead = true; onAbuse('oversized frame'); return; }
+        len = Number(big); off = 10;
+      }
+      if (len > LIMITS.MAX_FRAME) { dead = true; onAbuse('oversized frame'); return; }
       const need = off + (masked ? 4 : 0) + len;
       if (buf.length < need) return;
       let ps = off, mask = null;
@@ -272,9 +485,14 @@ function send(c, obj) { wsSend(c.socket, JSON.stringify(obj)); }
 function roomBroadcast(room, obj) { const s = JSON.stringify(obj); room.clients.forEach(c => wsSend(c.socket, s)); }
 function isHost(c) { return c.room && c.room.clients.length && c.room.clients[0] === c; }
 
-function onConnect(socket) {
-  const c = { socket, id: nextClientId++, name: 'Player ' + nextClientId, race: 'forge', room: null, voice: false };
+function onConnect(socket, ip) {
+  const c = {
+    socket, ip, id: nextClientId++, name: 'Player ' + nextClientId, race: 'forge', room: null,
+    voice: false,
+    tokens: LIMITS.MSG_BURST, lastRefill: Date.now(), chatTimes: [],
+  };
   sockets.add(c);
+  ipCount(ip, +1);
   send(c, {
     t: 'welcome', id: c.id,
     maps: RC.MAPS.map(m => ({ id: m.id, name: m.name })),
@@ -285,19 +503,55 @@ function onConnect(socket) {
   send(c, presencePayload());
   broadcastPresence();
 
+  const kill = () => {
+    try { socket.write(Buffer.from([0x88, 0x00])); } catch (e) {}
+    try { socket.destroy(); } catch (e) {}
+    onClose(c);
+  };
+
+  // A close frame has to be answered with a close frame, and then the socket has to
+  // actually end. Without this the peer sits in CLOSING until its own timeout fires:
+  // a browser that closed cleanly never gets its `onclose` event, so the client's
+  // reconnect never even starts. Invisible until there was something to reconnect TO.
+  const closeHandshake = () => {
+    try { socket.write(Buffer.from([0x88, 0x00])); } catch (e) {}
+    try { socket.end(); } catch (e) {}
+    onClose(c);
+  };
+
   const parse = makeParser(
-    (text) => { let m; try { m = JSON.parse(text); } catch (e) { return; } onMsg(c, m); },
-    () => onClose(c),
+    (text) => {
+      if (!allowMsg(c)) { kill(); return; }
+      let m; try { m = JSON.parse(text); } catch (e) { return; }
+      try { onMsg(c, m); } catch (e) { console.log('message handler error:', e && e.message); }
+    },
+    closeHandshake,
     () => wsPong(socket),        // reply to client ping
-    () => { }                    // pong received — connection is alive
+    () => { },                   // pong received — connection is alive
+    () => kill()
   );
   socket.on('data', parse);
   socket.on('error', () => onClose(c));
   socket.on('close', () => onClose(c));
 }
 
+// Token bucket: a normal client sends a handful of messages a second; a flooder
+// drains the bucket in well under a second and gets disconnected.
+function allowMsg(c) {
+  const now = Date.now();
+  const refill = (now - c.lastRefill) / 1000 * LIMITS.MSG_PER_SEC;
+  if (refill > 0) { c.tokens = Math.min(LIMITS.MSG_BURST, c.tokens + refill); c.lastRefill = now; }
+  if (c.tokens < 1) return false;
+  c.tokens -= 1;
+  return true;
+}
+
+const closing = new WeakSet();
 function onClose(c) {
+  if (closing.has(c)) return;
+  closing.add(c);
   sockets.delete(c);
+  ipCount(c.ip, -1);
   if (c.room) leaveRoom(c);
   broadcastPresence();
 }
@@ -306,6 +560,7 @@ function onClose(c) {
 // 방 정원 — 대전은 모드 인원수, 생존은 방어자 최대 4명(맵의 base 수)
 const SURVIVAL_CAP = 4;
 const SURVIVAL_SEATS = [1, 3, 4, 5];       // owner 2 is reserved for the wave horde
+const RESUME_GRACE_MS = 90000;             // how long a dropped seat is held open
 function roomCap(room) {
   if (room.lobby.gameMode === 'survival') return SURVIVAL_CAP;
   return (RC.MODES[room.lobby.modeId] || {}).count || 4;
@@ -319,10 +574,15 @@ function createRoom(host, name, isPublic, gameMode) {
     clients: [],
     game: null, loop: null, tickN: 0, cmdQueue: [],
     ownerOf: new Map(), teamOf: {},
+    seats: new Map(),                      // owner -> { token, name, race, clientId, goneAt }
+    creator: host.id,
     // gameMode: 'vs' (map + 1v1/2v2) | 'survival' (co-op vs endless waves, difficulty instead of map)
     lobby: {
       mapId: RC.MAPS[0].id, modeId: '1v1', started: false,
       gameMode: (gameMode === 'survival' ? 'survival' : 'vs'), diff: 'medium',
+      // Host switch. Voice is available in every room, but the host can turn it off
+      // for everyone — which matters the moment a public room turns unpleasant.
+      voice: true,
     },
   };
   rooms.set(room.id, room);
@@ -333,8 +593,12 @@ function createRoom(host, name, isPublic, gameMode) {
 function joinRoom(c, room) {
   if (c.room) leaveRoom(c);
   c.room = room;
+  c.voice = false;                       // voice never starts live for a new arrival
   room.clients.push(c);
-  send(c, { t: 'joined', roomId: room.id, code: room.code, name: room.name, public: room.public });
+  send(c, {
+    t: 'joined', roomId: room.id, code: room.code, name: room.name, public: room.public,
+    voiceAllowed: room.lobby.voice,
+  });
   send(c, voiceRoster(room));            // who is already on the call
   pushLobby(room);
   broadcastRoomList();
@@ -349,14 +613,57 @@ function leaveRoom(c) {
   room.clients = room.clients.filter(x => x !== c);
   if (room.lobby.started && room.game) {
     const owner = room.ownerOf.get(c.socket);
-    if (owner != null) { const p = room.game.players.find(pp => pp.owner === owner); if (p) p.ai = true; room.ownerOf.delete(c.socket); }
-    if (room.ownerOf.size === 0) stopMatch(room);   // everyone left → end match
+    if (owner != null) {
+      // The seat is NOT given away. Its army is handed to the AI so the match keeps
+      // moving, and the seat is held open for RESUME_GRACE_MS so a player whose wifi
+      // blinked — or who backgrounded the browser on a phone — can come back to it.
+      // This used to be a permanent conversion with no way home, and it is the flaw
+      // a real player hits in their first few online games.
+      const p = room.game.players.find(pp => pp.owner === owner);
+      if (p) p.ai = true;
+      room.ownerOf.delete(c.socket);
+      const seat = room.seats.get(owner);
+      if (seat) { seat.goneAt = Date.now(); seat.clientId = null; }
+      roomBroadcast(room, { t: 'seat', owner, status: 'disconnected', name: seat ? seat.name : '', graceMs: RESUME_GRACE_MS });
+    }
+    if (room.ownerOf.size === 0 && !hasReservedSeat(room)) stopMatch(room);
   }
-  if (room.clients.length === 0) destroyRoom(room);
+  // A room with nobody in it is normally destroyed — unless a match is running and a
+  // seat is still being held for someone, in which case the simulation has to keep
+  // ticking or there is nothing to come back to.
+  if (room.clients.length === 0 && !(room.lobby.started && hasReservedSeat(room))) destroyRoom(room);
   else { pushLobby(room); pushVoiceRoster(room); }
   broadcastRoomList();
   broadcastPresence();
 }
+
+function hasReservedSeat(room) {
+  const now = Date.now();
+  for (const s of room.seats.values()) {
+    if (s.goneAt && now - s.goneAt < RESUME_GRACE_MS) return true;
+  }
+  return false;
+}
+
+// Sweeper: release seats whose grace has run out, then clean up rooms that are left
+// empty. Without this a room whose players all dropped would tick forever.
+setInterval(() => {
+  const now = Date.now();
+  for (const room of [...rooms.values()]) {
+    if (!room.lobby.started) continue;
+    let changed = false;
+    for (const entry of [...room.seats]) {
+      const owner = entry[0], s = entry[1];
+      if (s.goneAt && now - s.goneAt >= RESUME_GRACE_MS) {
+        room.seats.delete(owner);
+        changed = true;
+        roomBroadcast(room, { t: 'seat', owner, status: 'gone', name: s.name });
+      }
+    }
+    if (room.clients.length === 0 && !hasReservedSeat(room)) { stopMatch(room); destroyRoom(room); changed = true; }
+    if (changed) broadcastRoomList();
+  }
+}, 5000).unref?.();
 
 function destroyRoom(room) {
   if (room.loop) { clearInterval(room.loop); room.loop = null; }
@@ -369,8 +676,9 @@ function lobbyState(room) {
     t: 'lobby', roomId: room.id, code: room.code, name: room.name, public: room.public,
     mapId: room.lobby.mapId, modeId: room.lobby.modeId, started: room.lobby.started,
     gameMode: room.lobby.gameMode, diff: room.lobby.diff, cap: roomCap(room),
+    voiceAllowed: room.lobby.voice,
     hostId: room.clients.length ? room.clients[0].id : null,
-    players: room.clients.map(c => ({ id: c.id, name: c.name, race: c.race })),
+    players: room.clients.map(c => ({ id: c.id, name: c.name, race: c.race, voice: c.voice })),
   };
 }
 function pushLobby(room) { if (!room.lobby.started) roomBroadcast(room, lobbyState(room)); }
@@ -381,6 +689,7 @@ function pushLobby(room) { if (!room.lobby.started) roomBroadcast(room, lobbySta
 function voiceRoster(room) {
   return {
     t: 'voicePeers',
+    allowed: room.lobby.voice,
     peers: room.clients.filter(c => c.voice).map(c => ({ id: c.id, name: c.name })),
   };
 }
@@ -425,8 +734,30 @@ function broadcastPresence() {
   sockets.forEach(c => { if (!c.room || !c.room.lobby.started) wsSend(c.socket, s); });
 }
 
+// ── Text chat ──
+// There was no way to say anything to anyone without a live microphone. Text is the
+// safe default among strangers, and it is what makes voice optional rather than
+// necessary. Control characters are stripped, length is capped, and a burst limit
+// applies per client.
+const CTRL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\ufeff]/g;
+function cleanChat(s) {
+  return String(s == null ? '' : s)
+    .replace(CTRL, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, LIMITS.CHAT_LEN);
+}
+function chatAllowed(c) {
+  const now = Date.now();
+  c.chatTimes = (c.chatTimes || []).filter(t => now - t < 10000);
+  if (c.chatTimes.length >= LIMITS.CHAT_PER_10S) return false;
+  c.chatTimes.push(now);
+  return true;
+}
+
 // ── Message handling ──
 function onMsg(c, m) {
+  if (!m || typeof m !== 'object') return;
   switch (m.t) {
     case 'setName':
       c.name = String(m.name || '').slice(0, 16) || c.name;
@@ -434,7 +765,25 @@ function onMsg(c, m) {
       broadcastPresence();
       break;
     case 'list': sendRoomList(c); send(c, presencePayload()); break;
-    case 'create': createRoom(c, m.name, m.public, m.gameMode); break;
+    case 'create': {
+      const now = Date.now();
+      if (now - (c.lastCreate || 0) < LIMITS.ROOM_CREATE_MS) { send(c, { t: 'joinError', msg: 'Give it a second before creating another game.' }); break; }
+      if (rooms.size >= LIMITS.MAX_ROOMS) { send(c, { t: 'joinError', msg: 'The server is busy — try again in a moment.' }); break; }
+      const owned = [...rooms.values()].filter(r => r.creator === c.id).length;
+      if (owned >= LIMITS.MAX_ROOMS_PER_CLIENT) { send(c, { t: 'joinError', msg: 'You already have a game open.' }); break; }
+      c.lastCreate = now;
+      createRoom(c, m.name, m.public, m.gameMode);
+      break;
+    }
+
+    case 'chat': {
+      if (!c.room) break;
+      const text = cleanChat(m.msg);
+      if (!text) break;
+      if (!chatAllowed(c)) { send(c, { t: 'chat', system: true, msg: 'Slow down a moment.' }); break; }
+      roomBroadcast(c.room, { t: 'chat', from: c.id, name: c.name, msg: text, at: Date.now() });
+      break;
+    }
 
     // ── Direct invites ──
     // Pull a named player straight into a game: no code to read out, no room to
@@ -455,7 +804,10 @@ function onMsg(c, m) {
       const gm = (m.kind === 'survival') ? 'survival' : 'vs';
       const modeId = RC.MODES[m.modeId] ? m.modeId : '1v1';
       let room = c.room;
-      if (!room) room = createRoom(c, c.name + "'s Game", false, gm);
+      if (!room) {
+        if (rooms.size >= LIMITS.MAX_ROOMS) { send(c, { t: 'inviteError', msg: 'The server is busy — try again in a moment.' }); break; }
+        room = createRoom(c, c.name + "'s Game", false, gm);
+      }
       // Only reshape a room we actually host — otherwise we'd rewrite someone else's lobby.
       if (hasKind && isHost(c) && !room.lobby.started) {
         room.lobby.gameMode = gm;
@@ -491,18 +843,31 @@ function onMsg(c, m) {
     // peer-to-peer, so a call costs this process a handful of small messages.
     case 'voiceJoin':
       if (!c.room) break;
+      if (!c.room.lobby.voice) { send(c, { t: 'voiceDenied', msg: 'The host has turned voice chat off for this game.' }); break; }
       c.voice = true;
       pushVoiceRoster(c.room);
+      pushLobby(c.room);
       break;
     case 'voiceLeave':
       if (!c.voice) break;
       c.voice = false;
-      if (c.room) pushVoiceRoster(c.room);
+      if (c.room) { pushVoiceRoster(c.room); pushLobby(c.room); }
       break;
+    // Host switch for the whole room. Turning it off hangs everyone up.
+    case 'roomVoice': {
+      if (!isHost(c) || !c.room) break;
+      c.room.lobby.voice = !!m.on;
+      if (!c.room.lobby.voice) c.room.clients.forEach(x => { x.voice = false; });
+      pushVoiceRoster(c.room);
+      pushLobby(c.room);
+      roomBroadcast(c.room, { t: 'chat', system: true,
+        msg: c.room.lobby.voice ? 'Voice chat enabled by the host.' : 'Voice chat turned off by the host.' });
+      break;
+    }
     case 'rtc': {
       // Relay an offer / answer / ICE candidate. Both ends must be in the same
       // room with voice on, or this becomes a way to spray messages at strangers.
-      if (!c.room || !c.voice) break;
+      if (!c.room || !c.voice || !c.room.lobby.voice) break;
       const target = clientById(m.to);
       if (!target || target === c || target.room !== c.room || !target.voice) break;
       if (m.kind !== 'offer' && m.kind !== 'answer' && m.kind !== 'ice') break;
@@ -512,7 +877,7 @@ function onMsg(c, m) {
       break;
     }
     case 'join': {
-      const code = String(m.code || '').toUpperCase();
+      const code = String(m.code || '').toUpperCase().slice(0, 8);
       const room = m.roomId ? rooms.get(m.roomId) : roomByCode(code);
       if (!room) { send(c, { t: 'joinError', msg: 'Game not found — check the code.' }); break; }
       if (room.lobby.started) { send(c, { t: 'joinError', msg: 'That game has already started.' }); break; }
@@ -520,6 +885,50 @@ function onMsg(c, m) {
       joinRoom(c, room);
       break;
     }
+
+    // ── Reconnect ──
+    // The client kept the resume token it was handed at match start. If the seat is
+    // still being held, it gets it straight back: same owner, same army, mid-match.
+    case 'resume': {
+      const room = rooms.get(m.roomId);
+      if (!room || !room.lobby.started || !room.game) { send(c, { t: 'resumeFailed', msg: 'That match has ended.' }); break; }
+      let foundOwner = null, foundSeat = null;
+      for (const entry of room.seats) {
+        if (entry[1].token && m.token && entry[1].token === m.token) { foundOwner = entry[0]; foundSeat = entry[1]; break; }
+      }
+      if (!foundSeat) { send(c, { t: 'resumeFailed', msg: 'That seat is no longer available.' }); break; }
+      if (foundSeat.clientId != null) { send(c, { t: 'resumeFailed', msg: 'Someone is already playing that seat.' }); break; }
+      if (foundSeat.goneAt && Date.now() - foundSeat.goneAt >= RESUME_GRACE_MS) {
+        room.seats.delete(foundOwner);
+        send(c, { t: 'resumeFailed', msg: 'You were away too long — the seat was released.' });
+        break;
+      }
+      if (c.room && c.room !== room) leaveRoom(c);
+      c.room = room;
+      c.voice = false;
+      if (room.clients.indexOf(c) < 0) room.clients.push(c);
+      room.ownerOf.set(c.socket, foundOwner);
+      foundSeat.clientId = c.id;
+      foundSeat.goneAt = null;
+      const p = room.game.players.find(pp => pp.owner === foundOwner);
+      if (p) p.ai = false;
+      const rosters = room.game.players.map(pp => ({
+        owner: pp.owner, team: room.teamOf[pp.owner] != null ? room.teamOf[pp.owner] : pp.team,
+        race: pp.race, ai: !!pp.ai,
+      }));
+      send(c, {
+        t: 'resumed',
+        roomId: room.id, token: foundSeat.token,
+        survival: room.lobby.gameMode === 'survival',
+        diff: room.lobby.diff, mapId: room.lobby.mapId, modeId: room.lobby.modeId,
+        owner: foundOwner, team: room.teamOf[foundOwner], rosters,
+      });
+      roomBroadcast(room, { t: 'seat', owner: foundOwner, status: 'back', name: foundSeat.name });
+      roomBroadcast(room, { t: 'chat', system: true, msg: foundSeat.name + ' reconnected.' });
+      broadcastPresence();
+      break;
+    }
+
     case 'leave': if (c.room) leaveRoom(c); sendRoomList(c); break;
 
     // in-room actions
@@ -542,24 +951,44 @@ function onMsg(c, m) {
       break;
     }
     case 'start': if (isHost(c) && c.room && !c.room.lobby.started) { startMatch(c.room); } break;
-    case 'cmd': { const room = c.room; if (!room || !room.game || room.game.over) break; const owner = room.ownerOf.get(c.socket); if (owner != null) room.cmdQueue.push({ owner, cmd: m.c }); break; }
+    case 'cmd': {
+      const room = c.room;
+      if (!room || !room.game || room.game.over) break;
+      const owner = room.ownerOf.get(c.socket);
+      if (owner == null) break;
+      if (room.cmdQueue.length >= LIMITS.MAX_QUEUED_CMDS) break;   // flood guard: drops rather than grows
+      room.cmdQueue.push({ owner, cmd: m.c });
+      break;
+    }
     case 'restart': if (isHost(c) && c.room && c.room.lobby.started) { stopMatch(c.room); pushLobby(c.room); } break;
   }
 }
 
 // ── Match run (per room) ──
+function seatToken() { return crypto.randomBytes(12).toString('base64url'); }
+
+// One serialized snapshot, framed once and written to every client in the room.
+function broadcastSnapshot(room, g) {
+  const buf = wsFrame(JSON.stringify({ t: 'snap', s: RC.Net.serialize(g) }), 0x1);
+  room.clients.forEach(c => wsSendBuf(c.socket, buf));
+}
+
 function startMatch(room) {
   if (room.lobby.gameMode === 'survival') return startSurvivalMatch(room);
   const mode = RC.MODES[room.lobby.modeId];
   const seats = mode.players.map(p => ({ owner: p.owner, team: p.team }));
   const humans = room.clients.slice(0, seats.length);      // join order fills seats
   const racePick = {};
-  room.ownerOf = new Map(); room.teamOf = {};
+  room.ownerOf = new Map(); room.teamOf = {}; room.seats = new Map();
   seats.forEach((seat, i) => {
     const human = humans[i];
     seat.ai = !human;
     room.teamOf[seat.owner] = seat.team;
-    if (human) { room.ownerOf.set(human.socket, seat.owner); racePick[seat.owner] = human.race; }
+    if (human) {
+      room.ownerOf.set(human.socket, seat.owner);
+      racePick[seat.owner] = human.race;
+      room.seats.set(seat.owner, { token: seatToken(), name: human.name, race: human.race, clientId: human.id, goneAt: null });
+    }
   });
   const hostRace = room.clients[0] ? room.clients[0].race : 'forge';
   seats.forEach(seat => {
@@ -580,8 +1009,11 @@ function startMatch(room) {
 
   const rosters = seats.map(s => ({ owner: s.owner, team: s.team, race: racePick[s.owner], ai: s.ai }));
   room.clients.forEach(cl => {
-    send(cl, { t: 'start', mapId: room.lobby.mapId, modeId: room.lobby.modeId, owner: room.ownerOf.get(cl.socket),
-               team: room.teamOf[room.ownerOf.get(cl.socket)], rosters });
+    const owner = room.ownerOf.get(cl.socket);
+    const seat = owner != null ? room.seats.get(owner) : null;
+    send(cl, { t: 'start', roomId: room.id, resume: seat ? seat.token : null,
+               mapId: room.lobby.mapId, modeId: room.lobby.modeId, owner,
+               team: room.teamOf[owner], rosters });
   });
   broadcastRoomList();                             // it's no longer joinable — drop from the public list
   broadcastPresence();                             // everyone in it now reads as "In a match"
@@ -595,10 +1027,11 @@ function startMatch(room) {
     for (const item of q) RC.Net.applyCommand(g, item.owner, item.cmd);
     g.update(DT);
     room.tickN++;
-    if (room.tickN % 2 === 0) roomBroadcast(room, { t: 'snap', s: RC.Net.serialize(g) });
+    if (room.tickN % 2 === 0) broadcastSnapshot(room, g);
     const alive = new Set(g.buildings.filter(b => b.def.isCore && !b.dead).map(b => room.teamOf[b.owner]));
     if (alive.size <= 1) {
       roomBroadcast(room, { t: 'over', team: alive.size === 1 ? [...alive][0] : null });
+      room.seats = new Map();                       // the match is over; nothing left to resume into
       clearInterval(room.loop); room.loop = null;
     }
   }, 1000 / 30);
@@ -614,8 +1047,11 @@ function startSurvivalMatch(room) {
   // A solo host still gets one allied bot so the lane isn't hopeless; full rooms don't need it.
   if (seats.length === 1) seats.push({ owner: SURVIVAL_SEATS[1], race: seats[0].race, ai: true });
 
-  room.ownerOf = new Map(); room.teamOf = {};
-  humans.forEach((h, i) => room.ownerOf.set(h.socket, seats[i].owner));
+  room.ownerOf = new Map(); room.teamOf = {}; room.seats = new Map();
+  humans.forEach((h, i) => {
+    room.ownerOf.set(h.socket, seats[i].owner);
+    room.seats.set(seats[i].owner, { token: seatToken(), name: h.name, race: seats[i].race, clientId: h.id, goneAt: null });
+  });
   seats.forEach(s => { room.teamOf[s.owner] = 1; });
   room.teamOf[2] = 2;
 
@@ -627,9 +1063,12 @@ function startSurvivalMatch(room) {
 
   const rosters = seats.map(s => ({ owner: s.owner, team: 1, race: s.race, ai: s.ai }));
   room.clients.forEach(cl => {
+    const owner = room.ownerOf.get(cl.socket);
+    const seat = owner != null ? room.seats.get(owner) : null;
     send(cl, {
-      t: 'start', survival: true, diff: room.lobby.diff,
-      owner: room.ownerOf.get(cl.socket), team: 1, rosters,
+      t: 'start', survival: true, diff: room.lobby.diff, roomId: room.id,
+      resume: seat ? seat.token : null,
+      owner, team: 1, rosters,
     });
   });
   broadcastRoomList();
@@ -644,20 +1083,39 @@ function startSurvivalMatch(room) {
     for (const item of q) RC.Net.applyCommand(g, item.owner, item.cmd);
     g.update(DT);
     room.tickN++;
-    if (room.tickN % 2 === 0) roomBroadcast(room, { t: 'snap', s: RC.Net.serialize(g) });
+    if (room.tickN % 2 === 0) broadcastSnapshot(room, g);
     if (!g.crystal || g.crystal.dead) {
+      // A co-op run is the one kind this process watched from the inside, so it hands
+      // out a token backdated to when the run actually began plus the real wave log.
+      // Nothing about the score depends on the client's word for it.
       roomBroadcast(room, {
         t: 'over', survival: true, team: null,
         wave: g.survivalWave || 0, kills: g.survivalKills || 0, diff: g.survivalDiff,
+        waveTimes: (g.waveTimes || []).slice(0, 500),
+        token: issueRunTokenBackdated(g),
       });
+      room.seats = new Map();
       clearInterval(room.loop); room.loop = null;
     }
   }, 1000 / 30);
 }
 
+// For a run this server actually simulated, stamp the token's record as if it were
+// opened when the run began, so the pacing check compares against real elapsed time.
+// The signature covers the timestamp inside the token string, which is what
+// checkRunToken verifies; the record's issuedAt is what the pacing test reads.
+function issueRunTokenBackdated(g) {
+  const diff = DIFFS.indexOf(g.survivalDiff) >= 0 ? g.survivalDiff : 'medium';
+  const tok = issueRunToken(diff);
+  const rec = runTokens.get(tok.split('.')[0]);
+  if (rec) rec.issuedAt = Date.now() - Math.round((g.time || 0) * 1000) - 1000;
+  return tok;
+}
+
 function stopMatch(room) {
   if (room.loop) { clearInterval(room.loop); room.loop = null; }
   room.game = null; room.lobby.started = false; room.ownerOf = new Map(); room.cmdQueue = [];
+  room.seats = new Map();
   roomBroadcast(room, { t: 'toLobby' });
   broadcastRoomList();
   broadcastPresence();
@@ -675,5 +1133,7 @@ server.listen(PORT, () => {
   console.log('\nRIFT CLASH server running (public + private rooms).');
   console.log('On THIS computer open:   http://localhost:' + PORT);
   lanIPs().forEach(ip => console.log('On the same network:     http://' + ip + ':' + PORT));
+  console.log('Leaderboard file:        ' + SCORES_FILE + (DATA_DIR === DIR ? '   [not persistent — set DATA_DIR]' : ''));
+  if (!process.env.RUN_SECRET) console.log('RUN_SECRET not set — using a per-boot key (runs opened before a restart cannot be posted after it).');
   console.log('Deployed behind HTTPS, players just open the site URL.\n');
 });

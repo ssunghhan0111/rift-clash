@@ -12,18 +12,29 @@ Works in any modern browser and is touch-friendly for iPad and tablets.
 
 ## Features
 
-- **Two factions**, each with a distinct look and playstyle:
-  - **Forge** — machines. 10 units (worker, infantry, ranged, air, transport, more) and a full tech
-    tree of buildings. Angular metal aesthetic.
+- **Three factions**, each with a distinct look and playstyle:
+  - **Forge** — machines. Worker, infantry, siege, air, transport and a full tech tree, with
+    Patch Bot / Pulse Coil support. Angular metal aesthetic.
   - **Gloop** — an acid swarm. Combat units self-heal over time and their attacks stack **acid**
     (armor shred + damage-over-time), so it needs no dedicated healers. Organic, blobby look.
+  - **Aether** — every unit carries a recharging plasma shield that soaks damage before health,
+    and combat units **warp in at any forward Warp Conduit** instead of walking from base.
+- **Heroes** — one per faction, gaining XP and levels through a match, with an ultimate that
+  unlocks at level 6. Live in offline and online play alike.
 - **7 shared upgrades** researched mid-game (reinforced rounds, alloy plating, overdrive, and more).
+- **Tactical terrain** — high ground, forest cover, marsh, hollows and rift vents change a fight.
 - **Fog of war** — per-player vision; enemy units and buildings are hidden in the dark.
-- **Modes & maps** — 1v1 and 2v2 (team) across 3 maps with randomized spawns.
+- **Modes & maps** — 1v1 and 2v2 across six planets, co-op Survival against endless waves, and a
+  **Daily Challenge** that is the same seed and twist for everybody.
 - **Online multiplayer** — an authoritative Node server runs the match for up to 4 players; empty
-  seats are filled by AI.
-- Energy/abilities, minimap, control groups, camera pan, construction cancel + refund, and hover
-  tooltips on every command.
+  seats are filled by AI. **A dropped player's seat is held for 90 seconds** and their client
+  rejoins on its own — a refresh mid-match rejoins too.
+- **Text chat** in the lobby and in the match, plus peer-to-peer **voice chat** with per-player
+  mute and a host switch to turn voice off for a whole game.
+- **World leaderboard** for Survival, per difficulty and for the daily. Runs are opened with the
+  server and checked against the wave director's own pacing before they are accepted.
+- Energy/abilities, minimap, control groups, camera pan and zoom, construction cancel + refund,
+  and hover tooltips on every command.
 
 ---
 
@@ -44,6 +55,17 @@ Then open the printed `http://<your-ip>:<port>` on each device on the same Wi-Fi
 **Online (LAN)**. The first player to join is the host and starts the match.
 
 Only Node's standard library is used — there is nothing to `npm install`.
+
+#### Server environment variables
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PORT` | `8080` | Listen port |
+| `DATA_DIR` | next to `server.js` | Where `scores.json` lives. On a host with an ephemeral filesystem this **must** point at a persistent volume or the leaderboard is wiped by every redeploy. |
+| `RUN_SECRET` | random per boot | HMAC key for Survival run tokens. Set it in production, or runs opened before a restart cannot be posted after it. |
+| `ALLOWED_ORIGINS` | same host as the request | Comma-separated origins allowed to open a WebSocket. The default is right for a single-domain deployment. |
+
+See `PUBLISH_GUIDE.md` for click-by-click hosting instructions.
 
 ---
 
@@ -74,6 +96,11 @@ already defines the start command:
 | Q / W | Train from selected building |
 | Shift + click | Add to selection · place buildings continuously |
 | Ctrl+1–4 / 1–4 | Set / recall control groups |
+| Enter | Open chat (online) · Esc closes it |
+| + / − / 0 | Zoom in · out · reset |
+| H | Select hero · A | Attack-move |
+
+Keys typed into a text box are never treated as game commands.
 
 **Touch (iPad / tablet)**
 
@@ -97,10 +124,11 @@ already defines the start command:
 | `renderer.js` | All canvas drawing — sprites, fog, effects, minimap |
 | `input.js` | Mouse / touch / keyboard → game commands |
 | `ui.js` | HUD, selection panel, command buttons, tooltips |
-| `main.js` | Entry point, start screen, offline start, online lobby, frame loop |
+| `main.js` | Entry point, start screen, offline start, online lobby, chat, reconnect, frame loop |
 | `net_core.js` | DOM-free command/serialize/snapshot logic (shared by server + client) |
 | `net.js` | Browser WebSocket client and command routing |
-| `server.js` | Zero-dependency Node static server + WebSocket + authoritative 30 Hz simulation |
+| `server.js` | Zero-dependency Node static server + WebSocket + authoritative 30 Hz simulation, abuse limits, leaderboard API |
+| `privacy.html`, `terms.html` | Privacy policy and terms of service, linked from the start screen |
 
 Everything is namespaced under the global `window.RC`.
 
