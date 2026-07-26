@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- RIFT CLASH app mark. Deliberately simple: at 32px in a browser tab only the
+       silhouette survives, so it is one dark tile, one orange rift, one cyan shard. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2938"/>
+      <stop offset="1" stop-color="#0a0e14"/>
+    </linearGradient>
+    <linearGradient id="rift" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc46b"/>
+      <stop offset="0.5" stop-color="#f08a2a"/>
+      <stop offset="1" stop-color="#c85a10"/>
+    </linearGradient>
+    <linearGradient id="shard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9df4ff"/>
+      <stop offset="0.55" stop-color="#4fd6e8"/>
+      <stop offset="1" stop-color="#1f7f8c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f08a2a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#f08a2a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="#2b3a4d" stroke-width="10"/>
+
+  <!-- the rift: a jagged tear straight down the tile -->
+  <ellipse cx="256" cy="256" rx="190" ry="215" fill="url(#glow)"/>
+  <path d="M262 40 L214 196 L268 214 L206 350 L252 356 L196 472
+           L300 330 L246 320 L318 178 L258 164 Z"
+        fill="url(#rift)"/>
+
+  <!-- the crystal shard the whole game is fought over -->
+  <path d="M256 178 L318 256 L256 396 L194 256 Z" fill="url(#shard)"/>
+  <path d="M256 178 L318 256 L256 396 Z" fill="#0a0e14" opacity="0.22"/>
+  <path d="M256 178 L288 256 L256 300 L224 256 Z" fill="#eaffff" opacity="0.55"/>
+</svg>

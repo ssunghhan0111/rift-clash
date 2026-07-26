@@ -642,6 +642,13 @@ RC.UI = (function () {
              </div>`
           : `<div id="lb-post"><div class="lb-h" style="color:var(--dim)">Play the online version to post your score to the world leaderboard.</div></div>`);
       if (canPost) wireScoreSubmit({ diff, waves, kills, score });
+      wireShare({
+        title: dn,
+        wave: waves, kills, score,
+        chip: isDaily && g.daily ? g.daily.icon + ' ' + g.daily.name : null,
+        race: (RC.RACES[g.raceOf(g.playerOwner)] || {}).name,
+        rankLine: isNew ? 'New personal best' : (best > score ? 'Personal best: ' + best : null),
+      });
     } else {
       el.overlayText.innerHTML = kind === 'win'
         ? '<b class="win">VICTORY</b><span>Enemy core destroyed.</span>'
@@ -650,5 +657,37 @@ RC.UI = (function () {
     el.overlay.classList.remove('hidden');
   }
 
-  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch, syncVoice };
+  // ── Share the run ─────────────────────────────────
+  // A finished run is the one moment a player actually wants to show someone.
+  // The card is drawn locally, so this costs the server nothing.
+  function wireShare(run) {
+    if (!RC.Share || !el.overlayText) return;
+    const box = document.createElement('div');
+    box.id = 'share-box';
+    const label = RC.Share.canShareImage() ? '📣 Share this run' : '📣 Save & copy this run';
+    box.innerHTML = '<button id="share-go">' + label + '</button><div id="share-msg"></div>';
+    el.overlayText.appendChild(box);
+    const btn = box.querySelector('#share-go');
+    const msg = box.querySelector('#share-msg');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      msg.textContent = 'Preparing…';
+      let how = 'downloaded';
+      try {
+        run.name = (RC.Leaderboard && RC.Leaderboard.getName()) || 'Anonymous';
+        how = await RC.Share.share(run);
+      } catch (e) { how = 'failed'; }
+      msg.textContent = {
+        'shared': 'Sent — thanks for spreading it.',
+        'cancelled': '',
+        'copied-image': 'Image copied — paste it anywhere.',
+        'downloaded-and-copied': 'Image saved and the text copied.',
+        'downloaded': 'Image saved to your downloads.',
+        'failed': 'Could not share — try again.',
+      }[how] || '';
+      btn.disabled = false;
+    });
+  }
+
+  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch, syncVoice, wireShare };
 })();

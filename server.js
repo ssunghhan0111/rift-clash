@@ -147,7 +147,8 @@ function sendJson(res, code, obj) {
 
 // ── Static file server (+ leaderboard API) ──
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
-               '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+               '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
+               '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 const server = http.createServer((req, res) => {
   const url = req.url || '/';
   let p = decodeURIComponent(url.split('?')[0]);

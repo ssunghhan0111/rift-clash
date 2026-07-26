@@ -838,6 +838,31 @@ window.RC = window.RC || {};
   });
   document.getElementById('lobby-start').addEventListener('click', () => { goFullscreen(); N.send({ t: 'start' }); });
 
+  // ── Invite link ────────────────────────────────────────
+  // One link that drops a friend straight into THIS game. Pasting a room code and
+  // talking someone through the browser screen is the friction that stops most
+  // people ever playing together.
+  function inviteLink() {
+    try {
+      const base = location.origin + location.pathname;
+      return base + '?join=' + encodeURIComponent(roomCode || '');
+    } catch (e) { return ''; }
+  }
+  const linkBtn = document.getElementById('lobby-link');
+  if (linkBtn) linkBtn.addEventListener('click', async () => {
+    const url = inviteLink();
+    if (!url || !roomCode) { setStatus('No invite link yet — the game is still being created.'); return; }
+    let done = false;
+    try {
+      if (navigator.share) { await navigator.share({ title: 'RIFT CLASH', text: 'Join my game', url }); done = true; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    if (!done) {
+      try { await navigator.clipboard.writeText(url); done = true; } catch (e) {}
+    }
+    setStatus(done ? 'Invite link copied — send it to anyone and they land straight in this game.'
+                   : 'Copy this link: ' + url);
+  });
+
   N.on('__open', () => {
     setBrowserStatus('Connected. Invite someone below, or create a game.');
     N.send({ t: 'setName', name: myName() });     // claim our name before anyone sees the list
@@ -1014,12 +1039,50 @@ window.RC = window.RC || {};
     started = true;
   }
 
+  // ── ?join=CODE ─────────────────────────────────────────
+  // Someone clicked a friend's invite link. Skip the menu entirely: connect and
+  // join that room. If they have no nickname yet we ask for it first, then carry
+  // on to the same place.
+  let pendingJoinCode = null;
+  (function readJoinLink() {
+    try {
+      const m = /[?&]join=([^&]*)/.exec(location.search || '');
+      if (!m) return;
+      const code = decodeURIComponent(m[1] || '').trim().toUpperCase().slice(0, 8);
+      if (code.length >= 3) pendingJoinCode = code;
+      // Clean the address bar so a refresh does not try to re-join a dead room.
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, '', location.pathname);
+      }
+    } catch (e) {}
+  })();
+  function followJoinLink() {
+    if (!pendingJoinCode) return false;
+    const code = pendingJoinCode;
+    if (!myName()) { openNickname(() => followJoinLink()); return true; }
+    pendingJoinCode = null;
+    openBrowser('vs');
+    setBrowserStatus('Joining your friend\u2019s game (' + code + ')…');
+    // The socket is not open yet; go as soon as it is.
+    const send = () => N.send({ t: 'join', code });
+    if (N.connected) send();
+    else {
+      let tries = 0;
+      const iv = setInterval(() => {
+        if (N.connected) { clearInterval(iv); send(); }
+        else if (++tries > 60) { clearInterval(iv); setBrowserStatus('Could not reach the server — press Back and try again.'); }
+      }, 250);
+    }
+    return true;
+  }
+
   buildStartScreen();
   applyGameMode(selGameMode);
   renderWho();
   // First launch — ask who they are before the menu. Anyone who already has a name
   // (including from posting a leaderboard score) walks straight past this.
-  if (!myName()) openNickname(null);
+  if (!myName() && !pendingJoinCode) openNickname(null);
+  followJoinLink();          // an invite link overrides the menu
 
   // ── 루프 ──────────────────────────────────────────
   let last = performance.now();

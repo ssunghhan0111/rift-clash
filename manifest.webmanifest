@@ -1,0 +1,18 @@
+{
+  "name": "RIFT CLASH",
+  "short_name": "Rift Clash",
+  "description": "Real-time strategy in the browser. Six planets, 1v1 and 2v2, co-op Survival, a daily challenge and voice chat.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b1017",
+  "theme_color": "#0b1017",
+  "categories": ["games", "strategy"],
+  "icons": [
+    { "src": "favicon-64.png", "sizes": "64x64", "type": "image/png" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
