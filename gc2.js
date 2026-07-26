@@ -44,8 +44,8 @@ const UNITS = {
             hp:22, dmg:15, armor:0, shield:8, food:32, crystal:22, chain:true,
             blurb:'Chain lightning leaps from its antennae across up to 3 enemies.'},
   bomber:  {name:'Bomber',  emoji:'💣', color:'#7a3fb5', combat:true, hatchT:38, minLvl:12,
-            hp:30, dmg:32, armor:0, shield:6, food:30, crystal:20,
-            blurb:'Elite siege ant. Huge damage, very costly to raise.'},
+            hp:30, dmg:32, armor:0, shield:6, food:30, crystal:20, suicide:true, splash:true,
+            blurb:'Kamikaze siege ant — detonates on impact for a huge blast, then is gone. One shot, big boom.'},
   wasp:    {name:'Wasp Strafer', emoji:'🐝', color:'#d99a1e', combat:true, hatchT:26, minLvl:9, flying:true,
             hp:18, dmg:15, armor:0, shield:4, food:20, crystal:12,
             blurb:'Fast flying skirmisher — swoops in from above the tunnels.'},
@@ -2208,7 +2208,7 @@ function setupBattleUnits(){
       B.meUnits.push({
         type:k, side:'me', groupSize, hp:maxHp, maxHp, shield:maxShield, maxShield,
         dmg:baseDmg*0.5*groupSize, heal:u.medic?3.5*groupSize:0, medic:!!u.medic,
-        splash:!!u.splash||k==='monarch', chain:!!u.chain,
+        splash:!!u.splash||k==='monarch', chain:!!u.chain, suicide:!!u.suicide,
         armor, ranged, flying, speed, range, row, alive:true, targetIdx:-1,
         atkCd:Math.random()*0.9, atkSpd:(ranged?0.9:1.05)+Math.random()*0.15,
         x:undefined,y:undefined,tx:0,ty:0,atkT:0,flashT:0,deathT:0
@@ -2491,10 +2491,22 @@ function combatStep(dt){
                 .forEach(o=>dealDamage(o,Math.max(1,dealt*0.5),1));
             ringFx.push({x:target.x,y:target.y,life:0.4,total:0.4});
           }
+        } else if(u.suicide){
+          // 💣 kamikaze detonation — huge blast to everything nearby the target
+          opps.filter(o=>o!==target&&o.alive&&Math.hypot(o.x-target.x,o.y-target.y)<55)
+              .forEach(o=>dealDamage(o,Math.max(1,dealt*0.6),1));
+          ringFx.push({x:target.x,y:target.y,life:0.5,total:0.5});
+          ringFx.push({x:u.x,y:u.y,life:0.4,total:0.4});
         } else {
           slashFx.push({x:target.x,y:target.y,ang:Math.atan2(target.y-u.y,target.x-u.x),life:0.24,total:0.24});
           spawnMeleeFx(target.x,target.y);
         }
+      }
+      if(u.suicide&&u.alive){
+        // the Bomber never survives its own explosion
+        u.hp=0; u.alive=false; u.deathT=0.5; u.flashT=0.25;
+        spawnKillFx(u.x,u.y,u.side);
+        bpLog('💥 A Bomber detonates in a blast of shrapnel!',u.side==='me'?'good':'hit');
       }
       u.atkCd=1/u.atkSpd+(Math.random()*0.2-0.1);
     });

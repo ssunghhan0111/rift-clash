@@ -1,4 +1,5 @@
 
+
 /* ==========================================================================
    ANTOPIA — Rise of the Queen (v7)
    long-term progression rebalance + battle formations + prep phase
@@ -44,8 +45,8 @@ const UNITS = {
             hp:22, dmg:15, armor:0, shield:8, food:32, crystal:22, chain:true,
             blurb:'Chain lightning leaps from its antennae across up to 3 enemies.'},
   bomber:  {name:'Bomber',  emoji:'💣', color:'#7a3fb5', combat:true, hatchT:38, minLvl:12,
-            hp:30, dmg:32, armor:0, shield:6, food:30, crystal:20,
-            blurb:'Elite siege ant. Huge damage, very costly to raise.'},
+            hp:30, dmg:32, armor:0, shield:6, food:30, crystal:20, suicide:true, splash:true,
+            blurb:'Kamikaze siege ant — detonates on impact for a huge blast, then is gone. One shot, big boom.'},
   wasp:    {name:'Wasp Strafer', emoji:'🐝', color:'#d99a1e', combat:true, hatchT:26, minLvl:9, flying:true,
             hp:18, dmg:15, armor:0, shield:4, food:20, crystal:12,
             blurb:'Fast flying skirmisher — swoops in from above the tunnels.'},
@@ -54,6 +55,10 @@ const UNITS = {
             blurb:'Heavy aerial bomber. Devastating payload, very costly.'},
 };
 const PRINCESS={name:'Princess', emoji:'👸', hatchT:45, food:60, crystal:15};
+// In the battle scene every fighter is drawn as an actual ant (not a sword/circle/tool glyph) — flying
+// recruits keep their real-bug icon since they're genuinely wasps/butterflies, not ants in disguise.
+const BATTLE_FACE={soldier:'🐜',spitter:'🐜',guard:'🐜',medic:'🐜',archer:'🐜',siege:'🐜',zapper:'🐜',bomber:'🐜'};
+function battleFace(k){ return BATTLE_FACE[k]||UNITS[k].emoji; }
 const UORDER=['worker','nurse','soldier','spitter','guard','medic','archer','bomber','wasp','siege','zapper','monarch'];
 const FIGHTERS=['soldier','spitter','guard','medic','archer','bomber','wasp','siege','zapper','monarch'];
 const QUEEN_LIFE=960;    // 10 minutes of active play per reign (960 = 600s * 1.6 age mult) — reigns are short, secure an heir fast!
@@ -72,7 +77,7 @@ function freshState(keepMeta){
     eggQueue:[],
     units:Object.assign(Object.fromEntries(UORDER.map(k=>[k,0])), {worker:3, nurse:1}),
     up:{attack:0,skill:0,carapace:0,shield:0,harvest:0,speed:0,carry:0,capacity:0,fertility:0,nursery:0,granary:0,venom:0,frenzy:0,dodge:0},
-    rooms:{armory:0, trap:0, tower:0, aphid:0, laser:0},
+    rooms:{armory:0, trap:0, tower:0, aphid:0, laser:0, infirmary:0},
     research:null,                       // {k, total, remain} — army training in progress
     queen:{lvl:1, xp:0, age:0, hp:100},
     princessReady:false, noQueen:0, levelBoss:null,
@@ -145,6 +150,7 @@ const ROOMS={
   tower: {name:'Watchtower', emoji:'🗼', unlockLvl:4, base:60,  cbase:10, desc:'Spot raiders earlier, giving you more time to prepare the defense.'},
   aphid: {name:'Aphid Meadow', emoji:'🐛', unlockLvl:5, base:70, cbase:12, desc:'Farm aphids for 🍮 honeydew — spend it on powerful royal boons. Watch out for ladybugs!'},
   laser: {name:'Laser Attack Tower', emoji:'📡', unlockLvl:8, base:100, cbase:20, desc:'An automated turret by the tunnels — scorches raiders with a laser before they ever reach the throne.'},
+  infirmary: {name:'Infirmary', emoji:'💊', unlockLvl:2, base:35, cbase:0, desc:'A recovery ward — wounded fighters rest here and heal at a steady rate until fit for duty again. Upgrade to speed up recovery.'},
 };
 function laserDefDmg(){ return S.rooms.laser*18; } // flat HP chipped off a raider before the defense fight begins
 function roomCost(k){ const r=ROOMS[k], lvl=S.rooms[k]; return {food:cost(r.base,lvl), crystal:r.cbase?cost(r.cbase,lvl):0}; }
@@ -152,6 +158,8 @@ function trapDefBonus(){ return Math.min(0.6, S.rooms.trap*0.08); } // % raider 
 function towerWarnBonus(){ return S.rooms.tower*2; } // extra seconds of alarm countdown
 
 function woundFrac(k){ return Math.max(0.05, (S.wounded[k]??100)/100); }
+// only fully-recovered ants are fit to deploy — wounded ones stay resting in the Infirmary
+function healthyCount(k){ return Math.max(0, Math.min(S.units[k]||0, Math.round((S.units[k]||0)*((S.wounded[k]??100)/100)))); }
 const MELEE_FRONT=['soldier','guard','bomber'];
 function defaultRow(k){ return MELEE_FRONT.includes(k) ? 'front' : 'back'; }
 // enemy ranks get more organized (armor from coordinated formation) as their tier climbs
@@ -163,8 +171,7 @@ function armyStatsOf(sel, home){
     n+=c;
     const gb=(home&&k==='guard')?1.5:1;
     const eliteB=(S.rooms.armory>0&&(k==='archer'||k==='bomber'))?(1+S.rooms.armory*0.08):1;
-    const wf=woundFrac(k);
-    hp+=u.hp*c*gb*wf; shield+=(u.shield+shieldBonus())*c*gb;
+    hp+=u.hp*c*gb; shield+=(u.shield+shieldBonus())*c*gb; // only fully-healed ants are ever sent, so no wound discount here anymore
     dps+=(u.dmg+dmgBonus())*(1+critChance()*(critDmgMult()-1)+frenzyBonus()+vetBonus(k))*(1-dodgeChance()*0.3)*c*eliteB;
     armorSum+=(u.armor+armorBonus())*c;
   });
@@ -192,6 +199,24 @@ function healArmy(dt){
       const patient=agents.find(x=>x.type===k&&x.room==='nursery');
       if(nurseHere&&patient) healFx.push({x:patient.x,y:patient.y-14,life:0.9,total:0.9});
     }
+  });
+}
+// Infirmary: a dedicated recovery ward with a flat HP/sec heal rate (upgradeable), starting at
+// 1 HP per 10 seconds at level 1 — works alongside Nurses, and is the only healing source if you have no Nurses at all
+function infirmaryHealRate(){ return S.rooms.infirmary*0.1; }
+function healInfirmary(dt){
+  if(S.rooms.infirmary<=0) return;
+  const hpBudget=infirmaryHealRate()*dt*(1+legacyLvl('resilience')*0.15);
+  let totalMissingHp=0;
+  FIGHTERS.forEach(k=>{ totalMissingHp+=S.units[k]*UNITS[k].hp*(100-(S.wounded[k]??100))/100; });
+  if(totalMissingHp<=0.02) return;
+  FIGHTERS.forEach(k=>{
+    const cur=S.wounded[k]??100; if(cur>=100||!S.units[k]) return;
+    const missingHp=S.units[k]*UNITS[k].hp*(100-cur)/100;
+    const share=missingHp/totalMissingHp;
+    const hpGain=hpBudget*share;
+    const pctGain=(hpGain/(S.units[k]*UNITS[k].hp))*100;
+    S.wounded[k]=Math.min(100, cur+pctGain);
   });
 }
 
@@ -345,7 +370,7 @@ function applySave(d){
   S=Object.assign(fresh,d.S);
   S.units=Object.assign(Object.fromEntries(UORDER.map(k=>[k,0])), {worker:3,nurse:1}, d.S.units);
   S.up=Object.assign(freshState().up, d.S.up);
-  S.rooms=Object.assign({armory:0,trap:0,tower:0,aphid:0,laser:0}, d.S.rooms);
+  S.rooms=Object.assign({armory:0,trap:0,tower:0,aphid:0,laser:0,infirmary:0}, d.S.rooms);
   S.difficulty=d.S.difficulty||'normal';
   S.levelBoss=d.S.levelBoss||null;
   S.wounded=Object.assign(Object.fromEntries(FIGHTERS.map(k=>[k,100])), d.S.wounded);
@@ -1424,6 +1449,7 @@ function tick(dt){
   gainFood(foodRate()*dt);
   gainCrys(crystalRate()*dt);
   healArmy(dt);
+  healInfirmary(dt);
   if(S.rooms.aphid>0) S.honeydew=Math.min(honeydewCap(), S.honeydew+honeydewRate()*dt);
   if(S.goldenT>0) S.goldenT=Math.max(0,S.goldenT-dt);
   S.elapsed+=dt;
@@ -1687,25 +1713,29 @@ function nurseryPanel(){
   ${unassigned.length?'<div class="secttl">🥚 Assign new eggs</div>'+uRows:''}
   ${growing.length?'<div class="secttl">🐣 Growing</div>'+gRows:''}
   ${!nE.length?'<div class="sub">No eggs in the nursery yet. The Queen lays eggs in the Throne Room — Nurses carry them here along the tunnel.</div>':''}
-  ${woundedRows()}
+  ${FIGHTERS.some(k=>S.units[k]>0&&(S.wounded[k]??100)<99.5)?'<div class="sub">🩹 Wounded fighters are resting in the <b>Infirmary</b> (Build tab) until healed.</div>':''}
   <div class="secttl">Your ants</div>
   ${UORDER.map(k=>`<div class="card"><div class="emoji">${UNITS[k].emoji}</div>
     <div class="body"><div class="title">${UNITS[k].name} ×${S.units[k]}</div>
     <div class="desc">${UNITS[k].blurb}</div></div></div>`).join('')}`;
 }
 
-// wounded fighters recover under nurse care — shown in the Nursery since that's who does the healing
-function woundedRows(){
+// wounded fighters must rest in the Infirmary until fully healed — Nurses and the Infirmary
+// room both contribute to recovery; every injured ant's real HP is shown here until it's back to full
+function infirmaryRows(){
   const hurt=FIGHTERS.filter(k=>S.units[k]>0 && (S.wounded[k]??100)<99.5);
-  if(!hurt.length) return '';
-  const rate=S.units.nurse>0?('+'+S.units.nurse+'%/s army-wide, '+(S.units.nurse/Math.max(1,S.units[hurt[0]])).toFixed(2)+'%/s per '+UNITS[hurt[0]].name):'no Nurses — recovery stalled!';
-  return `<div class="secttl">🩹 Recovering (Nurses ×${S.units.nurse} treating)</div>
-  <div class="sub">${S.units.nurse>0?'Wounded ants heal as Nurses tend them — more Nurses means faster recovery.':'⚠️ No Nurses on duty — wounded ants will not heal!'}</div>
+  if(!hurt.length) return '<div class="secttl">🩹 Infirmary Ward</div><div class="sub">No injuries — every fighter is fit for duty.</div>';
+  const infRate=infirmaryHealRate();
+  return `<div class="secttl">🩹 Infirmary Ward — Recovering</div>
+  <div class="sub">Nurses ×${S.units.nurse}${S.units.nurse>0?' tending':''} · Infirmary ${S.rooms.infirmary>0?('Lv'+S.rooms.infirmary+' (+'+infRate.toFixed(2)+' hp/s)'):'not built yet — recovery is slower'}
+  ${(S.units.nurse<=0&&S.rooms.infirmary<=0)?'<br><span style="color:#ffb0b0">⚠️ No Nurses and no Infirmary — wounded ants will not heal at all!</span>':''}</div>
   ${hurt.map(k=>{
     const pct=Math.round(S.wounded[k]??100);
+    const maxHp=UNITS[k].hp, curHp=Math.max(1,Math.round(maxHp*pct/100));
+    const resting=S.units[k]-healthyCount(k);
     const color=pct<40?'#ff6b6b':pct<75?'#ffb347':'#8fd68f';
     return `<div class="eggrow"><div class="top"><div class="eface">${UNITS[k].emoji}</div>
-      <div class="einfo">${UNITS[k].name} <span class="esub">${pct}% health</span></div></div>
+      <div class="einfo">${UNITS[k].name} <span class="esub">${curHp}/${maxHp} hp${resting>0?' · '+resting+' resting':''}</span></div></div>
       <div class="growbar"><i style="width:${pct}%;background:${color}"></i></div>
     </div>`;
   }).join('')}`;
@@ -1828,6 +1858,7 @@ function roomRow(k){
     :k==='tower'?'+'+Math.round(towerWarnBonus())+'s early warning before a raid'
     :k==='aphid'?'+'+honeydewRate().toFixed(2)+' 🍮/s honeydew'
     :k==='laser'?'-'+laserDefDmg()+' raider HP burned off before the fight'
+    :k==='infirmary'?'+'+infirmaryHealRate().toFixed(2)+' hp/s healing for wounded fighters'
     :'';
   return `<div class="card">
     <div class="emoji">${locked?'🔒':r.emoji}</div>
@@ -1843,7 +1874,8 @@ function buildPanel(){
   return `<h2>🏗️ Colony Expansion</h2>
   <div class="sub">Dig new chambers off the Barracks and Throne tunnels. Each room can be upgraded further once built — bigger colonies need more than just a Nursery and Granary.</div>
   <div class="secttl">New Rooms</div>
-  ${Object.keys(ROOMS).map(roomRow).join('')}`;
+  ${Object.keys(ROOMS).map(roomRow).join('')}
+  ${infirmaryRows()}`;
 }
 function estimate(t,stats){
   const me=stats.dps*(stats.hp+stats.shield+1), en=t.dps*(t.hp+t.shield+1);
@@ -2044,7 +2076,7 @@ function openDeploy(id){
   const t=targets.find(x=>x.id===id); if(!t) return;
   if(FIGHTERS.reduce((a,k)=>a+S.units[k],0)<1){ toast('No fighters! Assign eggs in the Nursery first.'); return; }
   deployTarget=t;
-  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=S.units[k]);
+  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=healthyCount(k));
   renderDeploy();
   el('deploy').classList.add('show');
 }
@@ -2052,7 +2084,7 @@ function openLevelBossDeploy(){
   if(!S.levelBoss) return;
   if(FIGHTERS.reduce((a,k)=>a+S.units[k],0)<1){ toast('No fighters! Assign eggs in the Nursery first.'); return; }
   deployTarget=S.levelBoss;
-  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=S.units[k]);
+  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=healthyCount(k));
   renderDeploy();
   el('deploy').classList.add('show');
 }
@@ -2063,10 +2095,10 @@ function renderDeploy(){
   const cls=p>0.62?'good':p>0.42?'even':'bad';
   const label=stats.n<1?'—':(p>0.62?'Favored':p>0.42?'Even':'Risky')+' ~'+Math.round(p*100)+'%';
   const rows=FIGHTERS.map(k=>{
-    const u=UNITS[k], avail=S.units[k], c=sel[k];
+    const u=UNITS[k], avail=healthyCount(k), resting=S.units[k]-avail, c=sel[k];
     return `<div class="deprow">
       <div class="face">${u.emoji}</div>
-      <div class="di"><div class="n">${u.name} <span style="color:#9a8a72;font-weight:600">(have ${avail})</span></div>
+      <div class="di"><div class="n">${u.name} <span style="color:#9a8a72;font-weight:600">(have ${avail}${resting>0?', 🩹'+resting+' resting':''})</span></div>
         <div class="s">${u.medic?'💚 heals allies':'🗡️'+(u.dmg+dmgBonus())} · ❤️${u.hp} · 🛡️${u.armor+armorBonus()}${(u.shield+shieldBonus())?' · 🔵'+(u.shield+shieldBonus()):''}</div></div>
       <div class="stepper">
         <button data-dec="${k}">−</button><span class="cnt">${c}/${avail}</span><button data-inc="${k}">+</button>
@@ -2084,7 +2116,7 @@ function renderDeploy(){
       <button class="btn red" id="marchBtn" ${stats.n<1?'disabled':''}>⚔️ March!</button>
       <button class="btn ghost" id="cancelDeploy">Cancel</button>
     </div>`;
-  el('dcard').querySelectorAll('[data-inc]').forEach(b=>b.onclick=()=>{const k=b.dataset.inc; if(deploySel[k]<S.units[k]){deploySel[k]++; renderDeploy();}});
+  el('dcard').querySelectorAll('[data-inc]').forEach(b=>b.onclick=()=>{const k=b.dataset.inc; if(deploySel[k]<healthyCount(k)){deploySel[k]++; renderDeploy();}});
   el('dcard').querySelectorAll('[data-dec]').forEach(b=>b.onclick=()=>{const k=b.dataset.dec; if(deploySel[k]>0){deploySel[k]--; renderDeploy();}});
   el('marchBtn').onclick=()=>{
     el('deploy').classList.remove('show');
@@ -2114,19 +2146,22 @@ const FORMS={
 function formationPreview(){
   const sel=B.sel||{};
   const icons=[];
+  // every fighter previews as an actual ant icon — front/back grouping now follows the real
+  // formation-row assignment instead of matching against old tool-glyph emoji
   FIGHTERS.forEach(k=>{
-    for(let i=0;i<Math.min(sel[k]||0,6);i++) icons.push(UNITS[k].emoji);
+    for(let i=0;i<Math.min(sel[k]||0,6);i++) icons.push({e:battleFace(k), k});
   });
-  if(!icons.length) icons.push('🐜');
+  if(!icons.length) icons.push({e:'🐜', k:null});
   let lines;
   if(B.form==='wedge'){ lines=[icons.slice(0,1),icons.slice(1,3),icons.slice(3,8),icons.slice(8,14)]; }
   else if(B.form==='turtle'){
-    const front=icons.filter(e=>e==='🛡️'||e==='⚔️'), back=icons.filter(e=>e==='🟢');
+    const front=icons.filter(o=>o.k&&(B.rows[o.k]||defaultRow(o.k))==='front');
+    const back=icons.filter(o=>o.k&&(B.rows[o.k]||defaultRow(o.k))==='back');
     lines=[front.slice(0,7), back.slice(0,7)];
   }
   else if(B.form==='ambush'){ lines=[icons.filter((_,i)=>i%2===0).slice(0,7), icons.filter((_,i)=>i%2===1).slice(0,7)]; }
   else { lines=[icons.slice(0,7), icons.slice(7,14)]; }
-  return lines.filter(l=>l.length).map(l=>'<div>'+l.join('')+'</div>').join('');
+  return lines.filter(l=>l.length).map(l=>'<div>'+l.map(o=>o.e).join('')+'</div>').join('');
 }
 function setBars(){
   const pc=(cur,max)=>max>0?Math.max(0,Math.min(100,cur/max*100)):0;
@@ -2194,8 +2229,7 @@ function setupBattleUnits(){
     const u=UNITS[k];
     const gb=(home&&k==='guard')?1.5:1;
     const eliteB=(S.rooms.armory>0&&(k==='archer'||k==='bomber'))?(1+S.rooms.armory*0.08):1;
-    const wf=woundFrac(k);
-    const maxHp=u.hp*gb*groupSize*wf;
+    const maxHp=u.hp*gb*groupSize; // only fully-healed ants are ever sent to battle now
     const maxShield=(u.shield+shieldBonus())*gb*groupSize;
     const baseDmg=(u.dmg+dmgBonus())*(1+frenzyBonus()+vetBonus(k))*eliteB;
     const armor=u.armor+armorBonus();
@@ -2206,9 +2240,9 @@ function setupBattleUnits(){
     const row=(B.rows&&B.rows[k])||defaultRow(k);
     for(let i=0;i<visualCount;i++){
       B.meUnits.push({
-        type:k, side:'me', groupSize, hp:maxHp, maxHp, shield:maxShield, maxShield,
+        type:k, side:'me', face:battleFace(k), color:u.color, groupSize, hp:maxHp, maxHp, shield:maxShield, maxShield,
         dmg:baseDmg*0.5*groupSize, heal:u.medic?3.5*groupSize:0, medic:!!u.medic,
-        splash:!!u.splash||k==='monarch', chain:!!u.chain,
+        splash:!!u.splash||k==='monarch', chain:!!u.chain, suicide:!!u.suicide,
         armor, ranged, flying, speed, range, row, alive:true, targetIdx:-1,
         atkCd:Math.random()*0.9, atkSpd:(ranged?0.9:1.05)+Math.random()*0.15,
         x:undefined,y:undefined,tx:0,ty:0,atkT:0,flashT:0,deathT:0
@@ -2216,7 +2250,7 @@ function setupBattleUnits(){
     }
   });
   if(!B.meUnits.length){
-    B.meUnits.push({type:'soldier',side:'me',groupSize:1,hp:1,maxHp:1,shield:0,maxShield:0,
+    B.meUnits.push({type:'soldier',side:'me',face:battleFace('soldier'),color:UNITS.soldier.color,groupSize:1,hp:1,maxHp:1,shield:0,maxShield:0,
       dmg:0,armor:0,ranged:false,flying:false,speed:70,range:30,row:'front',alive:true,targetIdx:-1,atkCd:1,atkSpd:1,
       x:undefined,y:undefined,tx:0,ty:0,atkT:0,flashT:0,deathT:0});
   }
@@ -2491,10 +2525,22 @@ function combatStep(dt){
                 .forEach(o=>dealDamage(o,Math.max(1,dealt*0.5),1));
             ringFx.push({x:target.x,y:target.y,life:0.4,total:0.4});
           }
+        } else if(u.suicide){
+          // 💣 kamikaze detonation — huge blast to everything nearby the target
+          opps.filter(o=>o!==target&&o.alive&&Math.hypot(o.x-target.x,o.y-target.y)<55)
+              .forEach(o=>dealDamage(o,Math.max(1,dealt*0.6),1));
+          ringFx.push({x:target.x,y:target.y,life:0.5,total:0.5});
+          ringFx.push({x:u.x,y:u.y,life:0.4,total:0.4});
         } else {
           slashFx.push({x:target.x,y:target.y,ang:Math.atan2(target.y-u.y,target.x-u.x),life:0.24,total:0.24});
           spawnMeleeFx(target.x,target.y);
         }
+      }
+      if(u.suicide&&u.alive){
+        // the Bomber never survives its own explosion
+        u.hp=0; u.alive=false; u.deathT=0.5; u.flashT=0.25;
+        spawnKillFx(u.x,u.y,u.side);
+        bpLog('💥 A Bomber detonates in a blast of shrapnel!',u.side==='me'?'good':'hit');
       }
       u.atkCd=1/u.atkSpd+(Math.random()*0.2-0.1);
     });
@@ -2733,6 +2779,15 @@ function drawBattleUnit(u,dt){
   if(u.critFx>0){ bctx.shadowColor='#ffd34e'; bctx.shadowBlur=22; }
   else if(u.flashT>0){ bctx.shadowColor='#ff4040'; bctx.shadowBlur=16; }
   if(u.alive&&!u.structure&&UNITS[u.type]){
+    // every fighter is a real ant now (no more sword/circle glyphs) — a soft tint disc in the
+    // unit's own colour keeps each type easy to tell apart at a glance despite sharing one icon
+    if(u.color){
+      const cn=parseInt(u.color.slice(1),16), cr=(cn>>16)&255, cg=(cn>>8)&255, cb=cn&255;
+      bctx.fillStyle='rgba('+cr+','+cg+','+cb+',0.32)';
+      bctx.beginPath(); bctx.arc(0,1,10,0,6.28); bctx.fill();
+      bctx.strokeStyle='rgba('+cr+','+cg+','+cb+',0.55)'; bctx.lineWidth=1;
+      bctx.beginPath(); bctx.arc(0,1,10,0,6.28); bctx.stroke();
+    }
     // ambient skill flair for each ant type, so the battlefield reads at a glance
     const bt=UNITS[u.type];
     if(bt.chain){
@@ -2807,7 +2862,7 @@ function renderFormationDeploy(){
   const sel=B.sel||{};
   const present=FIGHTERS.filter(k=>(sel[k]||0)>0);
   if(!present.length){ D.innerHTML=''; return; }
-  const chip=k=>`<div class="fchip" draggable="true" data-type="${k}">${UNITS[k].emoji}<small>${sel[k]}</small></div>`;
+  const chip=k=>`<div class="fchip" draggable="true" data-type="${k}">${battleFace(k)}<small>${sel[k]}</small></div>`;
   const rowHtml=(label,key)=>`<div class="drow" data-row="${key}">
     <div class="rowlbl">${label}</div>
     ${present.filter(k=>(B.rows[k]||defaultRow(k))===key).map(chip).join('')}
@@ -3052,14 +3107,15 @@ function triggerDefense(){
     raider.hp=Math.max(1,Math.floor(raider.hp-ld));
     toast('📡 The Laser Tower scorches '+raider.name+' before they arrive! (-'+ld+' HP)');
   }
-  const home=armyStatsOf(S.units,true);
+  const defSel=(()=>{const o={}; FIGHTERS.forEach(k=>o[k]=healthyCount(k)); return o;})();
+  const home=armyStatsOf(defSel,true);
   if(home.n<1){
     const f=Math.floor(S.food*0.2), c=Math.floor(S.crystal*0.2);
     S.food-=f; S.crystal-=c; S.queen.hp=Math.max(1,S.queen.hp-10);
-    toast('💔 '+raider.name+' raided your undefended nest! Lost 🍯'+f+' 💎'+c+'. The Queen was hurt!');
+    const allWounded=FIGHTERS.some(k=>S.units[k]>0);
+    toast(allWounded?'💔 Every fighter was resting in the Infirmary! '+raider.name+' raided your undefended nest! Lost 🍯'+f+' 💎'+c+'.':'💔 '+raider.name+' raided your undefended nest! Lost 🍯'+f+' 💎'+c+'. The Queen was hurt!');
     save(); return;
   }
-  const defSel=(()=>{const o={}; FIGHTERS.forEach(k=>o[k]=S.units[k]); return o;})();
   startBattlePage({
     title:'🛡️ DEFEND THE NEST!',
     subtitle:raider.name+' storm your tunnels!',

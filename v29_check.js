@@ -1,4 +1,5 @@
 
+
 /* ==========================================================================
    ANTOPIA — Rise of the Queen (v7)
    long-term progression rebalance + battle formations + prep phase
@@ -44,8 +45,8 @@ const UNITS = {
             hp:22, dmg:15, armor:0, shield:8, food:32, crystal:22, chain:true,
             blurb:'Chain lightning leaps from its antennae across up to 3 enemies.'},
   bomber:  {name:'Bomber',  emoji:'💣', color:'#7a3fb5', combat:true, hatchT:38, minLvl:12,
-            hp:30, dmg:32, armor:0, shield:6, food:30, crystal:20,
-            blurb:'Elite siege ant. Huge damage, very costly to raise.'},
+            hp:30, dmg:32, armor:0, shield:6, food:30, crystal:20, suicide:true, splash:true,
+            blurb:'Kamikaze siege ant — detonates on impact for a huge blast, then is gone. One shot, big boom.'},
   wasp:    {name:'Wasp Strafer', emoji:'🐝', color:'#d99a1e', combat:true, hatchT:26, minLvl:9, flying:true,
             hp:18, dmg:15, armor:0, shield:4, food:20, crystal:12,
             blurb:'Fast flying skirmisher — swoops in from above the tunnels.'},
@@ -54,6 +55,10 @@ const UNITS = {
             blurb:'Heavy aerial bomber. Devastating payload, very costly.'},
 };
 const PRINCESS={name:'Princess', emoji:'👸', hatchT:45, food:60, crystal:15};
+// In the battle scene every fighter is drawn as an actual ant (not a sword/circle/tool glyph) — flying
+// recruits keep their real-bug icon since they're genuinely wasps/butterflies, not ants in disguise.
+const BATTLE_FACE={soldier:'🐜',spitter:'🐜',guard:'🐜',medic:'🐜',archer:'🐜',siege:'🐜',zapper:'🐜',bomber:'🐜'};
+function battleFace(k){ return BATTLE_FACE[k]||UNITS[k].emoji; }
 const UORDER=['worker','nurse','soldier','spitter','guard','medic','archer','bomber','wasp','siege','zapper','monarch'];
 const FIGHTERS=['soldier','spitter','guard','medic','archer','bomber','wasp','siege','zapper','monarch'];
 const QUEEN_LIFE=960;    // 10 minutes of active play per reign (960 = 600s * 1.6 age mult) — reigns are short, secure an heir fast!
@@ -72,7 +77,7 @@ function freshState(keepMeta){
     eggQueue:[],
     units:Object.assign(Object.fromEntries(UORDER.map(k=>[k,0])), {worker:3, nurse:1}),
     up:{attack:0,skill:0,carapace:0,shield:0,harvest:0,speed:0,carry:0,capacity:0,fertility:0,nursery:0,granary:0,venom:0,frenzy:0,dodge:0},
-    rooms:{armory:0, trap:0, tower:0, aphid:0, laser:0},
+    rooms:{armory:0, trap:0, tower:0, aphid:0, laser:0, infirmary:0},
     research:null,                       // {k, total, remain} — army training in progress
     queen:{lvl:1, xp:0, age:0, hp:100},
     princessReady:false, noQueen:0, levelBoss:null,
@@ -145,6 +150,7 @@ const ROOMS={
   tower: {name:'Watchtower', emoji:'🗼', unlockLvl:4, base:60,  cbase:10, desc:'Spot raiders earlier, giving you more time to prepare the defense.'},
   aphid: {name:'Aphid Meadow', emoji:'🐛', unlockLvl:5, base:70, cbase:12, desc:'Farm aphids for 🍮 honeydew — spend it on powerful royal boons. Watch out for ladybugs!'},
   laser: {name:'Laser Attack Tower', emoji:'📡', unlockLvl:8, base:100, cbase:20, desc:'An automated turret by the tunnels — scorches raiders with a laser before they ever reach the throne.'},
+  infirmary: {name:'Infirmary', emoji:'💊', unlockLvl:2, base:35, cbase:0, desc:'A recovery ward — wounded fighters rest here and heal at a steady rate until fit for duty again. Upgrade to speed up recovery.'},
 };
 function laserDefDmg(){ return S.rooms.laser*18; } // flat HP chipped off a raider before the defense fight begins
 function roomCost(k){ const r=ROOMS[k], lvl=S.rooms[k]; return {food:cost(r.base,lvl), crystal:r.cbase?cost(r.cbase,lvl):0}; }
@@ -152,6 +158,8 @@ function trapDefBonus(){ return Math.min(0.6, S.rooms.trap*0.08); } // % raider 
 function towerWarnBonus(){ return S.rooms.tower*2; } // extra seconds of alarm countdown
 
 function woundFrac(k){ return Math.max(0.05, (S.wounded[k]??100)/100); }
+// only fully-recovered ants are fit to deploy — wounded ones stay resting in the Infirmary
+function healthyCount(k){ return Math.max(0, Math.min(S.units[k]||0, Math.round((S.units[k]||0)*((S.wounded[k]??100)/100)))); }
 const MELEE_FRONT=['soldier','guard','bomber'];
 function defaultRow(k){ return MELEE_FRONT.includes(k) ? 'front' : 'back'; }
 // enemy ranks get more organized (armor from coordinated formation) as their tier climbs
@@ -163,8 +171,7 @@ function armyStatsOf(sel, home){
     n+=c;
     const gb=(home&&k==='guard')?1.5:1;
     const eliteB=(S.rooms.armory>0&&(k==='archer'||k==='bomber'))?(1+S.rooms.armory*0.08):1;
-    const wf=woundFrac(k);
-    hp+=u.hp*c*gb*wf; shield+=(u.shield+shieldBonus())*c*gb;
+    hp+=u.hp*c*gb; shield+=(u.shield+shieldBonus())*c*gb; // only fully-healed ants are ever sent, so no wound discount here anymore
     dps+=(u.dmg+dmgBonus())*(1+critChance()*(critDmgMult()-1)+frenzyBonus()+vetBonus(k))*(1-dodgeChance()*0.3)*c*eliteB;
     armorSum+=(u.armor+armorBonus())*c;
   });
@@ -192,6 +199,24 @@ function healArmy(dt){
       const patient=agents.find(x=>x.type===k&&x.room==='nursery');
       if(nurseHere&&patient) healFx.push({x:patient.x,y:patient.y-14,life:0.9,total:0.9});
     }
+  });
+}
+// Infirmary: a dedicated recovery ward with a flat HP/sec heal rate (upgradeable), starting at
+// 1 HP per 10 seconds at level 1 — works alongside Nurses, and is the only healing source if you have no Nurses at all
+function infirmaryHealRate(){ return S.rooms.infirmary*0.1; }
+function healInfirmary(dt){
+  if(S.rooms.infirmary<=0) return;
+  const hpBudget=infirmaryHealRate()*dt*(1+legacyLvl('resilience')*0.15);
+  let totalMissingHp=0;
+  FIGHTERS.forEach(k=>{ totalMissingHp+=S.units[k]*UNITS[k].hp*(100-(S.wounded[k]??100))/100; });
+  if(totalMissingHp<=0.02) return;
+  FIGHTERS.forEach(k=>{
+    const cur=S.wounded[k]??100; if(cur>=100||!S.units[k]) return;
+    const missingHp=S.units[k]*UNITS[k].hp*(100-cur)/100;
+    const share=missingHp/totalMissingHp;
+    const hpGain=hpBudget*share;
+    const pctGain=(hpGain/(S.units[k]*UNITS[k].hp))*100;
+    S.wounded[k]=Math.min(100, cur+pctGain);
   });
 }
 
@@ -345,7 +370,7 @@ function applySave(d){
   S=Object.assign(fresh,d.S);
   S.units=Object.assign(Object.fromEntries(UORDER.map(k=>[k,0])), {worker:3,nurse:1}, d.S.units);
   S.up=Object.assign(freshState().up, d.S.up);
-  S.rooms=Object.assign({armory:0,trap:0,tower:0,aphid:0,laser:0}, d.S.rooms);
+  S.rooms=Object.assign({armory:0,trap:0,tower:0,aphid:0,laser:0,infirmary:0}, d.S.rooms);
   S.difficulty=d.S.difficulty||'normal';
   S.levelBoss=d.S.levelBoss||null;
   S.wounded=Object.assign(Object.fromEntries(FIGHTERS.map(k=>[k,100])), d.S.wounded);
@@ -534,7 +559,10 @@ function computeLayout(){
   const rrw=Math.min(72,W*0.12), rrh=Math.min(58,bh*0.85);
   const armory={x:Math.max(6,barracks.x-rrw-10), y:barracks.y+barracks.h-rrh, w:rrw, h:rrh};
   const towerRoom={x:Math.min(W-rrw-6,barracks.x+barracks.w+10), y:barracks.y+barracks.h-rrh, w:rrw, h:rrh};
-  LAY={gy,throne,nursery,granary,barracks,armory,towerRoom};
+  // Infirmary: a small ward tucked just above the Nursery — wounded fighters rest here until healed
+  const iw=Math.min(96,sw*0.72), ih=Math.min(54,sh*0.6);
+  const infirmary={x:nursery.x+(nursery.w-iw)/2, y:Math.max(gy+30,nursery.y-ih-10), w:iw, h:ih};
+  LAY={gy,throne,nursery,granary,barracks,armory,towerRoom,infirmary};
   const thTop={x:throne.x+throne.w/2, y:throne.y+14};
   const thBL={x:throne.x+30, y:throne.y+throne.h-14};
   const thBR={x:throne.x+throne.w-30, y:throne.y+throne.h-14};
@@ -549,6 +577,7 @@ function computeLayout(){
     nursery: cubic(thBL, {x:W*0.42,y:H*0.66}, {x:W*0.02,y:H*0.60}, {x:nursery.x+nursery.w*0.62, y:nursery.y+12}, 16),
     granary: cubic(thBR, {x:W*0.58,y:H*0.66}, {x:W*0.98,y:H*0.60}, {x:granary.x+granary.w*0.38, y:granary.y+12}, 16),
     barracks: cubic(thBC, {x:W*0.5-40,y:(throne.y+throne.h+barracks.y)/2}, {x:W*0.5+40,y:barracks.y-8}, {x:barracks.x+barracks.w/2, y:barracks.y+12}, 12),
+    infirmary: cubic(thBL, {x:W*0.30,y:H*0.50}, {x:W*0.05,y:H*0.38}, {x:infirmary.x+infirmary.w*0.5, y:infirmary.y+infirmary.h-8}, 14),
   };
   PATHS.surfaceVariants=['surface','surfaceB','surfaceC'];
 }
@@ -607,7 +636,7 @@ function drawRaiderApproach(t){
 function validDirt(x,y){
   if(!LAY) return false;
   if(y<LAY.gy+34||y>H-16||x<12||x>W-12) return false;
-  for(const key of ['throne','nursery','granary','barracks']){
+  for(const key of ['throne','nursery','granary','barracks','infirmary']){
     const r=LAY[key];
     if(x>r.x-16&&x<r.x+r.w+16&&y>r.y-16&&y<r.y+r.h+16) return false;
   }
@@ -753,8 +782,9 @@ function chooseNext(a){
   } else {
     // fighters: during training they flock to the barracks; wounded fighters seek the Nursery for care
     const wounded=UNITS[a.type].combat && (S.wounded[a.type]??100)<99.5;
+    const healRoom=S.rooms.infirmary>=1?'infirmary':'nursery';
     const opts=S.research?['barracks','barracks','barracks','throne']
-                         :wounded?['nursery','nursery','nursery','throne']
+                         :wounded?[healRoom,healRoom,healRoom,'throne']
                          :['throne','barracks','barracks','surface','granary','nursery'];
     a.dest=opts[Math.floor(Math.random()*opts.length)];
     if(a.dest===a.room){ a.pause=wounded?2.5+Math.random()*2.5:1+Math.random()*2; return; }
@@ -971,10 +1001,10 @@ function drawGround(t){
     for(let k=-1;k<=1;k++){ctx.beginPath();ctx.moveTo(cx+k*7,cy);ctx.lineTo(cx+k*7-3,cy-12);ctx.lineTo(cx+k*7+3,cy-12);ctx.closePath();ctx.fill();ctx.stroke();}
   });
   // curved tunnels
-  for(const key of ['surface','surfaceB','surfaceC','nursery','granary','barracks']){
+  for(const key of ['surface','surfaceB','surfaceC','nursery','granary','barracks','infirmary']){
     strokePath(PATHS[key], 24, '#2b1a0f', 0.45);
   }
-  for(const key of ['surface','surfaceB','surfaceC','nursery','granary','barracks']){
+  for(const key of ['surface','surfaceB','surfaceC','nursery','granary','barracks','infirmary']){
     strokePath(PATHS[key], 14, '#54331c', 0.5);
   }
   // chambers
@@ -998,6 +1028,7 @@ function drawGround(t){
   // expansion rooms flanking the barracks — built via the 🏗️ Build tab
   drawExpansionRoom(LAY.armory,'armory',S.rooms.armory,'🏮');
   drawExpansionRoom(LAY.towerRoom,'tower',S.rooms.tower,'🗼');
+  drawExpansionRoom(LAY.infirmary,'infirmary',S.rooms.infirmary,'💊');
   // laser tower — a turret perched over a side tunnel, pulsing red, level shown underneath
   if(S.rooms.laser>0){
     const lent=(PATHS.surfaceC&&PATHS.surfaceC.length)?PATHS.surfaceC[PATHS.surfaceC.length-1]:{x:W*0.76,y:gy-6};
@@ -1304,6 +1335,11 @@ function drawAnt(a,t){
     ctx.strokeStyle='#fff'; ctx.lineWidth=0.8;
     ctx.beginPath(); ctx.moveTo(-3.2,wob-8); ctx.lineTo(-0.8,wob-8); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(-2,wob-9.2); ctx.lineTo(-2,wob-6.8); ctx.stroke();
+    if(a.room==='infirmary'){
+      const curHp=Math.max(1,Math.round(u.hp*woundPct/100));
+      ctx.font='700 8px Trebuchet MS'; ctx.fillStyle='#ffd7a8'; ctx.textAlign='center';
+      ctx.fillText(curHp+'/'+u.hp+' hp', 0, wob-14);
+    }
   }
   ctx.restore();
 }
@@ -1424,6 +1460,7 @@ function tick(dt){
   gainFood(foodRate()*dt);
   gainCrys(crystalRate()*dt);
   healArmy(dt);
+  healInfirmary(dt);
   if(S.rooms.aphid>0) S.honeydew=Math.min(honeydewCap(), S.honeydew+honeydewRate()*dt);
   if(S.goldenT>0) S.goldenT=Math.max(0,S.goldenT-dt);
   S.elapsed+=dt;
@@ -1687,25 +1724,29 @@ function nurseryPanel(){
   ${unassigned.length?'<div class="secttl">🥚 Assign new eggs</div>'+uRows:''}
   ${growing.length?'<div class="secttl">🐣 Growing</div>'+gRows:''}
   ${!nE.length?'<div class="sub">No eggs in the nursery yet. The Queen lays eggs in the Throne Room — Nurses carry them here along the tunnel.</div>':''}
-  ${woundedRows()}
+  ${FIGHTERS.some(k=>S.units[k]>0&&(S.wounded[k]??100)<99.5)?'<div class="sub">🩹 Wounded fighters are resting in the <b>Infirmary</b> (Build tab) until healed.</div>':''}
   <div class="secttl">Your ants</div>
   ${UORDER.map(k=>`<div class="card"><div class="emoji">${UNITS[k].emoji}</div>
     <div class="body"><div class="title">${UNITS[k].name} ×${S.units[k]}</div>
     <div class="desc">${UNITS[k].blurb}</div></div></div>`).join('')}`;
 }
 
-// wounded fighters recover under nurse care — shown in the Nursery since that's who does the healing
-function woundedRows(){
+// wounded fighters must rest in the Infirmary until fully healed — Nurses and the Infirmary
+// room both contribute to recovery; every injured ant's real HP is shown here until it's back to full
+function infirmaryRows(){
   const hurt=FIGHTERS.filter(k=>S.units[k]>0 && (S.wounded[k]??100)<99.5);
-  if(!hurt.length) return '';
-  const rate=S.units.nurse>0?('+'+S.units.nurse+'%/s army-wide, '+(S.units.nurse/Math.max(1,S.units[hurt[0]])).toFixed(2)+'%/s per '+UNITS[hurt[0]].name):'no Nurses — recovery stalled!';
-  return `<div class="secttl">🩹 Recovering (Nurses ×${S.units.nurse} treating)</div>
-  <div class="sub">${S.units.nurse>0?'Wounded ants heal as Nurses tend them — more Nurses means faster recovery.':'⚠️ No Nurses on duty — wounded ants will not heal!'}</div>
+  if(!hurt.length) return '<div class="secttl">🩹 Infirmary Ward</div><div class="sub">No injuries — every fighter is fit for duty.</div>';
+  const infRate=infirmaryHealRate();
+  return `<div class="secttl">🩹 Infirmary Ward — Recovering</div>
+  <div class="sub">Nurses ×${S.units.nurse}${S.units.nurse>0?' tending':''} · Infirmary ${S.rooms.infirmary>0?('Lv'+S.rooms.infirmary+' (+'+infRate.toFixed(2)+' hp/s)'):'not built yet — recovery is slower'}
+  ${(S.units.nurse<=0&&S.rooms.infirmary<=0)?'<br><span style="color:#ffb0b0">⚠️ No Nurses and no Infirmary — wounded ants will not heal at all!</span>':''}</div>
   ${hurt.map(k=>{
     const pct=Math.round(S.wounded[k]??100);
+    const maxHp=UNITS[k].hp, curHp=Math.max(1,Math.round(maxHp*pct/100));
+    const resting=S.units[k]-healthyCount(k);
     const color=pct<40?'#ff6b6b':pct<75?'#ffb347':'#8fd68f';
     return `<div class="eggrow"><div class="top"><div class="eface">${UNITS[k].emoji}</div>
-      <div class="einfo">${UNITS[k].name} <span class="esub">${pct}% health</span></div></div>
+      <div class="einfo">${UNITS[k].name} <span class="esub">${curHp}/${maxHp} hp${resting>0?' · '+resting+' resting':''}</span></div></div>
       <div class="growbar"><i style="width:${pct}%;background:${color}"></i></div>
     </div>`;
   }).join('')}`;
@@ -1828,6 +1869,7 @@ function roomRow(k){
     :k==='tower'?'+'+Math.round(towerWarnBonus())+'s early warning before a raid'
     :k==='aphid'?'+'+honeydewRate().toFixed(2)+' 🍮/s honeydew'
     :k==='laser'?'-'+laserDefDmg()+' raider HP burned off before the fight'
+    :k==='infirmary'?'+'+infirmaryHealRate().toFixed(2)+' hp/s healing for wounded fighters'
     :'';
   return `<div class="card">
     <div class="emoji">${locked?'🔒':r.emoji}</div>
@@ -1843,7 +1885,8 @@ function buildPanel(){
   return `<h2>🏗️ Colony Expansion</h2>
   <div class="sub">Dig new chambers off the Barracks and Throne tunnels. Each room can be upgraded further once built — bigger colonies need more than just a Nursery and Granary.</div>
   <div class="secttl">New Rooms</div>
-  ${Object.keys(ROOMS).map(roomRow).join('')}`;
+  ${Object.keys(ROOMS).map(roomRow).join('')}
+  ${infirmaryRows()}`;
 }
 function estimate(t,stats){
   const me=stats.dps*(stats.hp+stats.shield+1), en=t.dps*(t.hp+t.shield+1);
@@ -2044,7 +2087,7 @@ function openDeploy(id){
   const t=targets.find(x=>x.id===id); if(!t) return;
   if(FIGHTERS.reduce((a,k)=>a+S.units[k],0)<1){ toast('No fighters! Assign eggs in the Nursery first.'); return; }
   deployTarget=t;
-  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=S.units[k]);
+  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=healthyCount(k));
   renderDeploy();
   el('deploy').classList.add('show');
 }
@@ -2052,7 +2095,7 @@ function openLevelBossDeploy(){
   if(!S.levelBoss) return;
   if(FIGHTERS.reduce((a,k)=>a+S.units[k],0)<1){ toast('No fighters! Assign eggs in the Nursery first.'); return; }
   deployTarget=S.levelBoss;
-  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=S.units[k]);
+  deploySel={}; FIGHTERS.forEach(k=>deploySel[k]=healthyCount(k));
   renderDeploy();
   el('deploy').classList.add('show');
 }
@@ -2063,10 +2106,10 @@ function renderDeploy(){
   const cls=p>0.62?'good':p>0.42?'even':'bad';
   const label=stats.n<1?'—':(p>0.62?'Favored':p>0.42?'Even':'Risky')+' ~'+Math.round(p*100)+'%';
   const rows=FIGHTERS.map(k=>{
-    const u=UNITS[k], avail=S.units[k], c=sel[k];
+    const u=UNITS[k], avail=healthyCount(k), resting=S.units[k]-avail, c=sel[k];
     return `<div class="deprow">
       <div class="face">${u.emoji}</div>
-      <div class="di"><div class="n">${u.name} <span style="color:#9a8a72;font-weight:600">(have ${avail})</span></div>
+      <div class="di"><div class="n">${u.name} <span style="color:#9a8a72;font-weight:600">(have ${avail}${resting>0?', 🩹'+resting+' resting':''})</span></div>
         <div class="s">${u.medic?'💚 heals allies':'🗡️'+(u.dmg+dmgBonus())} · ❤️${u.hp} · 🛡️${u.armor+armorBonus()}${(u.shield+shieldBonus())?' · 🔵'+(u.shield+shieldBonus()):''}</div></div>
       <div class="stepper">
         <button data-dec="${k}">−</button><span class="cnt">${c}/${avail}</span><button data-inc="${k}">+</button>
@@ -2084,7 +2127,7 @@ function renderDeploy(){
       <button class="btn red" id="marchBtn" ${stats.n<1?'disabled':''}>⚔️ March!</button>
       <button class="btn ghost" id="cancelDeploy">Cancel</button>
     </div>`;
-  el('dcard').querySelectorAll('[data-inc]').forEach(b=>b.onclick=()=>{const k=b.dataset.inc; if(deploySel[k]<S.units[k]){deploySel[k]++; renderDeploy();}});
+  el('dcard').querySelectorAll('[data-inc]').forEach(b=>b.onclick=()=>{const k=b.dataset.inc; if(deploySel[k]<healthyCount(k)){deploySel[k]++; renderDeploy();}});
   el('dcard').querySelectorAll('[data-dec]').forEach(b=>b.onclick=()=>{const k=b.dataset.dec; if(deploySel[k]>0){deploySel[k]--; renderDeploy();}});
   el('marchBtn').onclick=()=>{
     el('deploy').classList.remove('show');
@@ -2114,19 +2157,22 @@ const FORMS={
 function formationPreview(){
   const sel=B.sel||{};
   const icons=[];
+  // every fighter previews as an actual ant icon — front/back grouping now follows the real
+  // formation-row assignment instead of matching against old tool-glyph emoji
   FIGHTERS.forEach(k=>{
-    for(let i=0;i<Math.min(sel[k]||0,6);i++) icons.push(UNITS[k].emoji);
+    for(let i=0;i<Math.min(sel[k]||0,6);i++) icons.push({e:battleFace(k), k});
   });
-  if(!icons.length) icons.push('🐜');
+  if(!icons.length) icons.push({e:'🐜', k:null});
   let lines;
   if(B.form==='wedge'){ lines=[icons.slice(0,1),icons.slice(1,3),icons.slice(3,8),icons.slice(8,14)]; }
   else if(B.form==='turtle'){
-    const front=icons.filter(e=>e==='🛡️'||e==='⚔️'), back=icons.filter(e=>e==='🟢');
+    const front=icons.filter(o=>o.k&&(B.rows[o.k]||defaultRow(o.k))==='front');
+    const back=icons.filter(o=>o.k&&(B.rows[o.k]||defaultRow(o.k))==='back');
     lines=[front.slice(0,7), back.slice(0,7)];
   }
   else if(B.form==='ambush'){ lines=[icons.filter((_,i)=>i%2===0).slice(0,7), icons.filter((_,i)=>i%2===1).slice(0,7)]; }
   else { lines=[icons.slice(0,7), icons.slice(7,14)]; }
-  return lines.filter(l=>l.length).map(l=>'<div>'+l.join('')+'</div>').join('');
+  return lines.filter(l=>l.length).map(l=>'<div>'+l.map(o=>o.e).join('')+'</div>').join('');
 }
 function setBars(){
   const pc=(cur,max)=>max>0?Math.max(0,Math.min(100,cur/max*100)):0;
@@ -2194,8 +2240,7 @@ function setupBattleUnits(){
     const u=UNITS[k];
     const gb=(home&&k==='guard')?1.5:1;
     const eliteB=(S.rooms.armory>0&&(k==='archer'||k==='bomber'))?(1+S.rooms.armory*0.08):1;
-    const wf=woundFrac(k);
-    const maxHp=u.hp*gb*groupSize*wf;
+    const maxHp=u.hp*gb*groupSize; // only fully-healed ants are ever sent to battle now
     const maxShield=(u.shield+shieldBonus())*gb*groupSize;
     const baseDmg=(u.dmg+dmgBonus())*(1+frenzyBonus()+vetBonus(k))*eliteB;
     const armor=u.armor+armorBonus();
@@ -2206,9 +2251,9 @@ function setupBattleUnits(){
     const row=(B.rows&&B.rows[k])||defaultRow(k);
     for(let i=0;i<visualCount;i++){
       B.meUnits.push({
-        type:k, side:'me', groupSize, hp:maxHp, maxHp, shield:maxShield, maxShield,
+        type:k, side:'me', face:battleFace(k), color:u.color, groupSize, hp:maxHp, maxHp, shield:maxShield, maxShield,
         dmg:baseDmg*0.5*groupSize, heal:u.medic?3.5*groupSize:0, medic:!!u.medic,
-        splash:!!u.splash||k==='monarch', chain:!!u.chain,
+        splash:!!u.splash||k==='monarch', chain:!!u.chain, suicide:!!u.suicide,
         armor, ranged, flying, speed, range, row, alive:true, targetIdx:-1,
         atkCd:Math.random()*0.9, atkSpd:(ranged?0.9:1.05)+Math.random()*0.15,
         x:undefined,y:undefined,tx:0,ty:0,atkT:0,flashT:0,deathT:0
@@ -2216,7 +2261,7 @@ function setupBattleUnits(){
     }
   });
   if(!B.meUnits.length){
-    B.meUnits.push({type:'soldier',side:'me',groupSize:1,hp:1,maxHp:1,shield:0,maxShield:0,
+    B.meUnits.push({type:'soldier',side:'me',face:battleFace('soldier'),color:UNITS.soldier.color,groupSize:1,hp:1,maxHp:1,shield:0,maxShield:0,
       dmg:0,armor:0,ranged:false,flying:false,speed:70,range:30,row:'front',alive:true,targetIdx:-1,atkCd:1,atkSpd:1,
       x:undefined,y:undefined,tx:0,ty:0,atkT:0,flashT:0,deathT:0});
   }
@@ -2491,10 +2536,22 @@ function combatStep(dt){
                 .forEach(o=>dealDamage(o,Math.max(1,dealt*0.5),1));
             ringFx.push({x:target.x,y:target.y,life:0.4,total:0.4});
           }
+        } else if(u.suicide){
+          // 💣 kamikaze detonation — huge blast to everything nearby the target
+          opps.filter(o=>o!==target&&o.alive&&Math.hypot(o.x-target.x,o.y-target.y)<55)
+              .forEach(o=>dealDamage(o,Math.max(1,dealt*0.6),1));
+          ringFx.push({x:target.x,y:target.y,life:0.5,total:0.5});
+          ringFx.push({x:u.x,y:u.y,life:0.4,total:0.4});
         } else {
           slashFx.push({x:target.x,y:target.y,ang:Math.atan2(target.y-u.y,target.x-u.x),life:0.24,total:0.24});
           spawnMeleeFx(target.x,target.y);
         }
+      }
+      if(u.suicide&&u.alive){
+        // the Bomber never survives its own explosion
+        u.hp=0; u.alive=false; u.deathT=0.5; u.flashT=0.25;
+        spawnKillFx(u.x,u.y,u.side);
+        bpLog('💥 A Bomber detonates in a blast of shrapnel!',u.side==='me'?'good':'hit');
       }
       u.atkCd=1/u.atkSpd+(Math.random()*0.2-0.1);
     });
@@ -2524,8 +2581,10 @@ function combatStep(dt){
     B.done(win,B.me,'fought');
   }
 }
+let battleAnimT=0;
 function battleRender(dt){
   if(!bcv||!B||B.phase!=='fight') return;
+  battleAnimT+=dt;
   combatStep(dt);
   bctx.clearRect(0,0,bcv.width,bcv.height);
   bctx.save();
@@ -2706,8 +2765,83 @@ function battleRender(dt){
   });
   bctx.restore();
 }
+
+// Every battle fighter is a real drawn ant (legs, thorax, head, antennae), not a flat emoji —
+// each type carries its own gear so its role reads at a glance: the Soldier literally swings a sword.
+function drawBattleAntBody(u){
+  const t=battleAnimT;
+  const bt=UNITS[u.type]; if(!bt) return;
+  const dir=u.side==='me'?1:-1;
+  const col=bt.color, col2=shade(bt.color,18);
+  const wobSeed=u._wob||(u._wob=Math.random()*6.28);
+  const wob=Math.sin(t*10+wobSeed)*0.6;
+  bctx.strokeStyle=col; bctx.lineWidth=1.8;
+  for(let i=0;i<3;i++){ const lx=dir*(-4+i*5); const w=Math.sin(t*14+i+wobSeed)*2.2;
+    bctx.beginPath();bctx.moveTo(lx,0);bctx.lineTo(lx-dir*3,6+w);bctx.stroke();
+    bctx.beginPath();bctx.moveTo(lx,0);bctx.lineTo(lx-dir*3,-6-w);bctx.stroke();}
+  bctx.fillStyle=col; bctx.beginPath(); bctx.ellipse(dir*-9,wob,7,5,0,0,6.28); bctx.fill();
+  bctx.fillStyle=col2; bctx.beginPath(); bctx.ellipse(dir*-1,wob,4,3.4,0,0,6.28); bctx.fill();
+  bctx.fillStyle=col; bctx.beginPath(); bctx.arc(dir*6,wob,4,0,6.28); bctx.fill();
+  bctx.fillStyle='#fff'; bctx.beginPath(); bctx.arc(dir*8,wob-1,1.3,0,6.28); bctx.fill();
+  bctx.fillStyle='#000'; bctx.beginPath(); bctx.arc(dir*8.4,wob-1,0.7,0,6.28); bctx.fill();
+  bctx.strokeStyle=col; bctx.lineWidth=1;
+  bctx.beginPath();bctx.moveTo(dir*9,wob-2);bctx.lineTo(dir*13,wob-6);bctx.stroke();
+  bctx.beginPath();bctx.moveTo(dir*9,wob+2);bctx.lineTo(dir*13,wob-3);bctx.stroke();
+  if(u.type==='soldier'){
+    // an actual sword — blade, crossguard and pommel, held forward with an occasional glint
+    bctx.strokeStyle='#e8e8ec'; bctx.lineWidth=2; bctx.lineCap='round';
+    bctx.beginPath(); bctx.moveTo(dir*10,wob-1); bctx.lineTo(dir*21,wob-7); bctx.stroke();
+    bctx.strokeStyle='#9a8358'; bctx.lineWidth=2.4; bctx.lineCap='round';
+    bctx.beginPath(); bctx.moveTo(dir*8.5,wob-3); bctx.lineTo(dir*8.5,wob+1); bctx.stroke();
+    bctx.fillStyle='#7a6a48'; bctx.beginPath(); bctx.arc(dir*8,wob-1,1,0,6.28); bctx.fill();
+    if(Math.sin(t*3+wobSeed)>0.8){
+      bctx.strokeStyle='#fff'; bctx.lineWidth=1; bctx.globalAlpha=0.85;
+      bctx.beginPath(); bctx.moveTo(dir*14,wob-4); bctx.lineTo(dir*17,wob-5.5); bctx.stroke(); bctx.globalAlpha=1;
+    }
+  } else if(u.type==='spitter'){
+    bctx.fillStyle='#aef27a'; bctx.beginPath(); bctx.arc(dir*13,wob,2.4,0,6.28); bctx.fill();
+    const dp=(t*1.6+wobSeed)%1;
+    bctx.fillStyle='rgba(174,242,122,'+(1-dp)*0.8+')';
+    bctx.beginPath(); bctx.arc(dir*13,wob+dp*7,1.3*(1-dp*0.4),0,6.28); bctx.fill();
+  } else if(u.type==='guard'){
+    bctx.fillStyle='#bcd8ff'; bctx.strokeStyle='#3f78c0'; bctx.lineWidth=1.4;
+    bctx.beginPath(); bctx.ellipse(dir*11,wob,3.2,5.6,0,0,6.28); bctx.fill(); bctx.stroke();
+    bctx.strokeStyle='#5f8fce'; bctx.lineWidth=0.8;
+    bctx.beginPath(); bctx.moveTo(dir*11,wob-5.6); bctx.lineTo(dir*11,wob+5.6); bctx.stroke();
+  } else if(u.type==='medic'){
+    bctx.fillStyle='#fff'; bctx.beginPath(); bctx.arc(dir*-2,wob-7,3,0,6.28); bctx.fill();
+    bctx.strokeStyle='#e05252'; bctx.lineWidth=1.4;
+    bctx.beginPath(); bctx.moveTo(dir*-3.6,wob-7); bctx.lineTo(dir*-0.4,wob-7); bctx.stroke();
+    bctx.beginPath(); bctx.moveTo(dir*-2,wob-8.6); bctx.lineTo(dir*-2,wob-5.4); bctx.stroke();
+  } else if(u.type==='siege'){
+    bctx.fillStyle='#9a8a6a'; bctx.strokeStyle='#6a5a3a'; bctx.lineWidth=1;
+    bctx.save(); bctx.translate(dir*-13,wob-6+Math.abs(Math.sin(t*6+wobSeed))*-1.5);
+    bctx.beginPath(); bctx.arc(0,0,5,0,6.28); bctx.fill(); bctx.stroke();
+    bctx.strokeStyle='#4a3f2a'; bctx.lineWidth=0.8;
+    bctx.beginPath(); bctx.arc(-1.5,-1.5,1.6,0,6.28); bctx.stroke();
+    bctx.restore();
+  } else if(u.type==='zapper'){
+    bctx.strokeStyle='#ffe27a'; bctx.lineWidth=1.4;
+    bctx.beginPath(); bctx.moveTo(dir*-2,wob-9); bctx.lineTo(dir*1,wob-6); bctx.lineTo(dir*-1,wob-5); bctx.lineTo(dir*2,wob-2); bctx.stroke();
+  } else if(u.type==='archer'){
+    bctx.strokeStyle='#c9932f'; bctx.lineWidth=1.3;
+    bctx.beginPath(); bctx.arc(dir*10,wob,5,dir>0?-1.1:Math.PI-1.1,dir>0?1.1:Math.PI+1.1); bctx.stroke();
+    bctx.strokeStyle='rgba(255,255,255,0.8)'; bctx.lineWidth=0.7;
+    bctx.beginPath(); bctx.moveTo(dir*10+Math.cos(-1.1)*5*dir,wob+Math.sin(-1.1)*5);
+    bctx.lineTo(dir*10+Math.cos(1.1)*5*dir,wob+Math.sin(1.1)*5); bctx.stroke();
+  } else if(u.type==='bomber'){
+    const fuse=(Math.sin(t*10+wobSeed)+1)/2;
+    bctx.fillStyle='#2b1a2b'; bctx.beginPath(); bctx.arc(dir*-3,wob+6,4.6,0,6.28); bctx.fill();
+    bctx.strokeStyle='#7a3fb5'; bctx.lineWidth=0.8;
+    bctx.beginPath(); bctx.moveTo(dir*-3,wob+2); bctx.lineTo(dir*-1,wob-1); bctx.stroke();
+    bctx.fillStyle='rgba(255,210,120,'+(0.5+fuse*0.5)+')';
+    bctx.beginPath(); bctx.arc(dir*-1,wob-1,1.4+fuse,0,6.28); bctx.fill();
+  }
+}
+
 function drawBattleUnit(u,dt){
   u._bobT=(u._bobT||Math.random()*6.28)+dt*(u.flying?4:0);
+  u._wob=u._wob||Math.random()*6.28;
   const bob=u.flying?Math.sin(u._bobT)*3:0;
   if(u.structure){ u.x+=(u.tx-u.x)*Math.min(1,dt*6); u.y+=(u.ty-u.y)*Math.min(1,dt*6); }
   if(u.movingT>0){ u.movingT-=dt; u._walkT=(u._walkT||0)+dt*15; }
@@ -2733,41 +2867,37 @@ function drawBattleUnit(u,dt){
   if(u.critFx>0){ bctx.shadowColor='#ffd34e'; bctx.shadowBlur=22; }
   else if(u.flashT>0){ bctx.shadowColor='#ff4040'; bctx.shadowBlur=16; }
   if(u.alive&&!u.structure&&UNITS[u.type]){
-    // ambient skill flair for each ant type, so the battlefield reads at a glance
+    // ambient skill flair layered behind the ant body, so the battlefield reads at a glance
     const bt=UNITS[u.type];
     if(bt.chain){
       bctx.strokeStyle='#ffe985'; bctx.lineWidth=1;
-      for(let i=0;i<3;i++){ const ang=u._bobT*4+i*2.1;
-        bctx.globalAlpha=0.5+Math.sin(u._bobT*7+i)*0.35;
+      for(let i=0;i<3;i++){ const ang=(battleAnimT+u._wob)*4+i*2.1;
+        bctx.globalAlpha=0.5+Math.sin((battleAnimT+u._wob)*7+i)*0.35;
         bctx.beginPath(); bctx.moveTo(Math.cos(ang)*13,Math.sin(ang)*9); bctx.lineTo(Math.cos(ang)*17,Math.sin(ang)*12); bctx.stroke(); }
       bctx.globalAlpha=1;
     } else if(bt.medic){
-      const hp=0.25+((Math.sin(u._bobT*2)+1)/2)*0.35;
+      const hp=0.25+((Math.sin((battleAnimT+u._wob)*2)+1)/2)*0.35;
       bctx.strokeStyle='rgba(255,140,170,'+hp+')'; bctx.lineWidth=1.3;
-      bctx.beginPath(); bctx.arc(0,0,15+Math.sin(u._bobT*2)*1.5,0,6.28); bctx.stroke();
+      bctx.beginPath(); bctx.arc(0,0,15+Math.sin((battleAnimT+u._wob)*2)*1.5,0,6.28); bctx.stroke();
     } else if(u.type==='guard'){
       bctx.strokeStyle='rgba(150,220,255,0.55)'; bctx.fillStyle='rgba(120,200,255,0.12)'; bctx.lineWidth=1;
       bctx.beginPath(); bctx.arc(0,0,16,0,6.28); bctx.fill(); bctx.stroke();
-    } else if(u.type==='bomber'){
-      const fuse=(Math.sin(u._bobT*10)+1)/2;
-      bctx.fillStyle='rgba(255,180,90,'+(0.35+fuse*0.4)+')';
-      bctx.beginPath(); bctx.arc(0,-16,2+fuse*1.6,0,6.28); bctx.fill();
     } else if(u.type==='siege'){
       bctx.fillStyle='rgba(154,138,106,0.35)';
-      bctx.beginPath(); bctx.arc(-12,10,3+Math.sin(u._bobT*6)*1,0,6.28); bctx.fill();
-    } else if(u.type==='spitter'){
-      const dp=(u._bobT*1.4)%1;
-      bctx.fillStyle='rgba(174,242,122,'+(1-dp)*0.75+')';
-      bctx.beginPath(); bctx.arc(9,dp*10,1.6*(1-dp*0.3),0,6.28); bctx.fill();
+      bctx.beginPath(); bctx.arc(-12,10,3+Math.sin((battleAnimT+u._wob)*6)*1,0,6.28); bctx.fill();
     } else if(u.type==='monarch'||u.type==='wasp'){
       bctx.strokeStyle=u.type==='monarch'?'rgba(240,166,35,0.5)':'rgba(255,255,255,0.4)'; bctx.lineWidth=1;
-      const wf=Math.sin(u._bobT*(u.type==='wasp'?24:12));
+      const wf=Math.sin((battleAnimT+u._wob)*(u.type==='wasp'?24:12));
       bctx.beginPath(); bctx.ellipse(-6*Math.sign(wf||1),-2,7,3,wf*0.4,0,6.28); bctx.stroke();
       bctx.beginPath(); bctx.ellipse(6*Math.sign(wf||1),-2,7,3,-wf*0.4,0,6.28); bctx.stroke();
     }
   }
-  bctx.font=(u.isBoss?'40px':u.structure?'30px':'26px')+' sans-serif'; bctx.textAlign='center';
-  bctx.fillText(u.face||(UNITS[u.type]?UNITS[u.type].emoji:'🐜'), 0, 0);
+  if(!u.structure&&UNITS[u.type]){
+    drawBattleAntBody(u);
+  } else {
+    bctx.font=(u.isBoss?'40px':u.structure?'30px':'26px')+' sans-serif'; bctx.textAlign='center';
+    bctx.fillText(u.face||(UNITS[u.type]?UNITS[u.type].emoji:'🐜'), 0, 0);
+  }
   if(u.stunT>0){ bctx.font='16px sans-serif'; bctx.fillText('🕸️', 0, -14); }
   bctx.shadowBlur=0;
   bctx.restore();
@@ -2807,7 +2937,7 @@ function renderFormationDeploy(){
   const sel=B.sel||{};
   const present=FIGHTERS.filter(k=>(sel[k]||0)>0);
   if(!present.length){ D.innerHTML=''; return; }
-  const chip=k=>`<div class="fchip" draggable="true" data-type="${k}">${UNITS[k].emoji}<small>${sel[k]}</small></div>`;
+  const chip=k=>`<div class="fchip" draggable="true" data-type="${k}">${battleFace(k)}<small>${sel[k]}</small></div>`;
   const rowHtml=(label,key)=>`<div class="drow" data-row="${key}">
     <div class="rowlbl">${label}</div>
     ${present.filter(k=>(B.rows[k]||defaultRow(k))===key).map(chip).join('')}
@@ -3052,14 +3182,15 @@ function triggerDefense(){
     raider.hp=Math.max(1,Math.floor(raider.hp-ld));
     toast('📡 The Laser Tower scorches '+raider.name+' before they arrive! (-'+ld+' HP)');
   }
-  const home=armyStatsOf(S.units,true);
+  const defSel=(()=>{const o={}; FIGHTERS.forEach(k=>o[k]=healthyCount(k)); return o;})();
+  const home=armyStatsOf(defSel,true);
   if(home.n<1){
     const f=Math.floor(S.food*0.2), c=Math.floor(S.crystal*0.2);
     S.food-=f; S.crystal-=c; S.queen.hp=Math.max(1,S.queen.hp-10);
-    toast('💔 '+raider.name+' raided your undefended nest! Lost 🍯'+f+' 💎'+c+'. The Queen was hurt!');
+    const allWounded=FIGHTERS.some(k=>S.units[k]>0);
+    toast(allWounded?'💔 Every fighter was resting in the Infirmary! '+raider.name+' raided your undefended nest! Lost 🍯'+f+' 💎'+c+'.':'💔 '+raider.name+' raided your undefended nest! Lost 🍯'+f+' 💎'+c+'. The Queen was hurt!');
     save(); return;
   }
-  const defSel=(()=>{const o={}; FIGHTERS.forEach(k=>o[k]=S.units[k]); return o;})();
   startBattlePage({
     title:'🛡️ DEFEND THE NEST!',
     subtitle:raider.name+' storm your tunnels!',
