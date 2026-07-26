@@ -3,20 +3,24 @@
 // no population limit, instant buildings and units, max upgrades, fast-forward, and
 // one-click squad spawning.
 //
-// Three ways in:
-//   1. press the  `  key (backtick/tilde, above Tab)
-//   2. tap the "Made in ... Game Studio" credit on the start screen 5 times (works on
-//      tablets and phones, no keyboard needed)
-//   3. put  ?dev=yourcode  in the address bar
-// (Ctrl+Shift+D is NOT used — Chrome reserves it for "Bookmark all tabs" and a web page
-// is not allowed to intercept it.)
-// Either way it asks for a PASSCODE first. The code itself is deliberately NOT written
-// anywhere in this file — only a hash of it — so it can't be read straight out of the
-// source. To set your own: run  RC.Dev.hashOf('yournewcode')  in the browser console and
-// paste the number into CODE_HASH below. (A browser game can never truly hide a secret;
-// this just keeps curious players out.) You can also skip the prompt with
-//  ?dev=yourcode  in the address bar.
-// Once unlocked it is remembered in this browser until you press "Exit dev mode".
+// DEV MODE IS OFF BY DEFAULT, ALWAYS. There is exactly one way in:
+//
+//   tap the "Made in ... Game Studio" credit on the start screen 5 times,
+//   then enter the PASSCODE.
+//
+// That is deliberately the only door. The unlock is NOT remembered: every page
+// load starts locked, so a machine that was used for testing yesterday is an
+// ordinary player's machine today. The URL-parameter shortcut was removed too —
+// it put the plaintext code in the address bar and the browser history.
+// The ` key only shows/hides the panel once it has already been unlocked in
+// this session; while locked it does nothing at all, so a curious player never
+// learns dev mode exists.
+//
+// The code itself is deliberately NOT written anywhere in this file — only a
+// hash of it — so it can't be read straight out of the source. To set your own:
+// run  RC.Dev.hashOf('yournewcode')  in the browser console and paste the number
+// into CODE_HASH below. (A browser game can never truly hide a secret; this just
+// keeps curious players out.)
 //
 // OFFLINE ONLY. Online matches run on the server's authoritative simulation, so these
 // switches would do nothing there anyway — the panel refuses to run rather than
@@ -380,7 +384,8 @@ RC.Dev = (function () {
   // ── enable / disable ──
   function enable(quiet) {
     unlocked = true;
-    try { window.localStorage.setItem(UNLOCK_KEY, '1'); } catch (e) {}
+    // Deliberately NOT persisted. Dev mode lasts for this page load only.
+    try { window.localStorage.removeItem(UNLOCK_KEY); } catch (e) {}
     ensurePanel();
     setOpen(true);
     applyReveal();
@@ -401,35 +406,25 @@ RC.Dev = (function () {
   }
 
   function init() {
-    let saved = false;
-    try { saved = window.localStorage.getItem(UNLOCK_KEY) === '1'; } catch (e) {}
-    if (saved) { enable(true); }
-    else {
-      // ?dev=<code> unlocks straight away; a bare ?dev=1 just opens the prompt.
-      let param = null;
-      try {
-        const m = /[?&]dev=([^&]*)/.exec(location.search);
-        if (m) param = decodeURIComponent(m[1]);
-      } catch (e) {}
-      if (param != null) {
-        if (codeOk(param)) enable(true);
-        else promptCode();
-      }
-    }
+    // Start locked, every single time. Older builds remembered the unlock in
+    // localStorage and switched dev mode on at load; wipe that so anyone carrying
+    // the old flag comes back as a normal player.
+    unlocked = false;
+    try { window.localStorage.removeItem(UNLOCK_KEY); } catch (e) {}
 
-    // Backtick/tilde — the classic dev-console key, and one of the few the browser
-    // does not claim for itself. Ignored while typing so it can't fire from a text box.
+    // Backtick/tilde only shows/hides an ALREADY unlocked panel. While locked it
+    // is inert — no prompt, no hint that dev mode is there at all.
     window.addEventListener('keydown', e => {
       if (e.key !== '`' && e.key !== '~' && e.code !== 'Backquote') return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (!unlocked) return;             // locked: the key does nothing
       e.preventDefault();
-      if (unlocked) setOpen(!open);
-      else promptCode();                 // locked → ask for the passcode first
+      setOpen(!open);
     });
 
-    // Secret tap: hit the studio credit on the start screen 5 times in a row. Gives a
-    // keyboard-free way in on a tablet or phone, where there is no ` key to press.
+    // The one way in: five deliberate taps on the studio credit, then the passcode.
+    // Works with a mouse or a finger, so a tablet needs no keyboard.
     const credit = document.getElementById('ss-credit');
     if (credit) {
       let taps = 0, last = 0;
