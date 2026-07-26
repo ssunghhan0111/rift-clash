@@ -107,8 +107,10 @@ RC.AI = (function () {
     // 난이도 프로필 — 없으면(온라인 드롭 등) 기존 CFG 상수와 동일한 Normal 값으로 폴백
     const P = (g.aiProfile && g.aiProfile(own)) || (RC.AI_DIFF && RC.AI_DIFF.normal) || {
       workerCap: K.AI_WORKER_CAP, firstWave: K.AI_FIRST_WAVE, waveSize: K.AI_WAVE_SIZE,
-      waveGap: K.AI_WAVE_GAP, secondFactory: K.AI_SECOND_FACTORY, tower: true, tech: true,
+      waveGrowth: K.AI_WAVE_GROWTH, waveGap: K.AI_WAVE_GAP, armyCap: 999,
+      secondFactory: K.AI_SECOND_FACTORY, tower: true, tech: true,
     };
+    const armyCap = P.armyCap == null ? 999 : P.armyCap;   // 전투 유닛 상한 (Easy 데스볼 방지)
     if (!s.diffInit) { s.waveTimer = P.firstWave; s.diffInit = true; }   // 첫 공격 타이밍은 난이도가 정한다
     s.think -= dt;
     s.waveTimer -= dt;
@@ -175,16 +177,19 @@ RC.AI = (function () {
     }
 
     // 5) 지상 유닛 생산 (공중/상급 유닛용 인구 예약)
+    // 난이도 상한 — Easy는 병력을 소규모로 묶어 데스볼을 만들지 못하게 한다.
+    const combatNow = g.units.filter(u => u.owner === own && !u.def.worker).length;
+    const underCap = combatNow < armyCap;
     const hasAir = R.air && myBuildings(g, own, R.air).some(b => b.done);
     const hasTech = R.tech && (R.techUnits || []).length && myBuildings(g, own, R.tech).some(b => b.done);
     const reserve = (hasAir ? 5 : 0) + (hasTech ? 4 : 0);
-    barracks.forEach(f => {
+    if (underCap) barracks.forEach(f => {
       if (sup.used >= sup.max - reserve) return;   // 공중/캐스터가 들어갈 인구 남겨둠
       trainFromList(g, own, f, R.barracksUnits, shard);
     });
 
     // 5.5) 공중 유닛
-    if (R.air) myBuildings(g, own, R.air).filter(b => b.done).forEach(pad => {
+    if (R.air && underCap) myBuildings(g, own, R.air).filter(b => b.done).forEach(pad => {
       trainFromList(g, own, pad, R.airUnits, shard);
     });
 
@@ -197,15 +202,14 @@ RC.AI = (function () {
           if (g.upLevel(own, kind) < RC.UPGRADES[kind].costs.length) { if (g.research(lab, kind)) break; }
         }
       }
-      const army = g.units.filter(u => u.owner === own && !u.def.worker).length;
-      if (army >= 4) trainFromList(g, own, lab, R.techUnits, shard);
+      if (underCap && combatNow >= 4) trainFromList(g, own, lab, R.techUnits, shard);
     });
 
     // 6) 공격 웨이브 — 가장 가까운 적 팀 코어로
     if (defending) return;                      // survival allies hold the crystal; they never march out
     const army = g.units.filter(u => u.owner === own && !u.def.worker);
     if (s.waveTimer <= 0) {
-      const need = P.waveSize + s.waveNum * K.AI_WAVE_GROWTH;
+      const need = Math.min(armyCap, P.waveSize + s.waveNum * (P.waveGrowth != null ? P.waveGrowth : K.AI_WAVE_GROWTH));
       if (army.length >= need) {
         const target = nearestEnemyCore(g, own, core) || { x: core.x, y: core.y };
         army.forEach((u, i) => {

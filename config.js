@@ -129,13 +129,16 @@ RC.CFG = {
 //   workerCap     : how many workers the bot saturates to
 //   firstWave     : seconds before the bot's first attack push
 //   waveSize      : army size the bot masses before it attacks (smaller = pushier)
+//   waveGrowth    : how much bigger each successive wave demands to be
 //   waveGap       : seconds between attack waves
+//   armyCap       : hard ceiling on combat units the bot will build (stops Easy from
+//                   hoarding a death-ball while it waits for its first wave)
 //   secondFactory : seconds before the bot expands to a 2nd production building / air
 //   tower / tech  : whether the bot builds defensive towers / researches upgrades
 RC.AI_DIFF = {
-  easy:   { id: 'easy',   name: 'Easy',   income: 0.80, workerCap: 6,  firstWave: 300, waveSize: 8, waveGap: 170, secondFactory: 400, tower: false, tech: false },
-  normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 8,  firstWave: 210, waveSize: 5, waveGap: 120, secondFactory: 300, tower: true,  tech: true  },
-  hard:   { id: 'hard',   name: 'Hard',   income: 1.25, workerCap: 12, firstWave: 120, waveSize: 4, waveGap: 75,  secondFactory: 190, tower: true,  tech: true  },
+  easy:   { id: 'easy',   name: 'Easy',   income: 0.70, workerCap: 5,  firstWave: 240, waveSize: 3, waveGrowth: 1, waveGap: 160, armyCap: 6,   secondFactory: 400, tower: false, tech: false },
+  normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 8,  firstWave: 210, waveSize: 5, waveGrowth: 2, waveGap: 120, armyCap: 999, secondFactory: 300, tower: true,  tech: true  },
+  hard:   { id: 'hard',   name: 'Hard',   income: 1.25, workerCap: 12, firstWave: 120, waveSize: 4, waveGrowth: 2, waveGap: 75,  armyCap: 999, secondFactory: 190, tower: true,  tech: true  },
 };
 RC.AI_DIFF_ORDER = ['easy', 'normal', 'hard'];
 

@@ -35,7 +35,9 @@ console.log('Easy / Normal / Hard are ordered sensibly');
   const E = RC.AI_DIFF.easy, N = RC.AI_DIFF.normal, H = RC.AI_DIFF.hard;
   ok(E.workerCap < N.workerCap && N.workerCap < H.workerCap, 'workerCap Easy<Normal<Hard (' + E.workerCap + '<' + N.workerCap + '<' + H.workerCap + ')');
   ok(E.firstWave > N.firstWave && N.firstWave > H.firstWave, 'Hard attacks soonest, Easy latest');
-  ok(E.waveSize >= N.waveSize && N.waveSize >= H.waveSize, 'Hard pushes with a smaller army');
+  // Easy keeps a hard cap on its army so it can never mass a death-ball; Normal/Hard are uncapped.
+  ok(E.armyCap < N.armyCap && E.armyCap < H.armyCap, 'Easy caps its army (' + E.armyCap + ') while Normal/Hard do not');
+  ok(E.armyCap <= 6, 'the Easy army cap is small enough to be defensible (' + E.armyCap + ')');
   ok(E.income < 1 && H.income > 1, 'Easy economy penalised, Hard economy boosted');
 }
 
@@ -53,11 +55,13 @@ console.log('Difficulty targets opponents only, and scales their income');
   ok(g.aiProfile(3).id === 'normal', 'allied bot 3 stays Normal on Hard (Easy would not nerf your teammate either)');
   ok(g.aiProfile(1).id === 'normal', 'the human is never scaled');
 
-  g.addShard(2, 100); ok(g.res[2].shard === 125, 'Hard enemy banks 100 → 125 (×1.25)');
+  const hardBank = 100 * RC.AI_DIFF.hard.income;      // enemy on Hard
+  g.addShard(2, 100); ok(g.res[2].shard === hardBank, 'Hard enemy banks 100 → ' + hardBank + ' (×' + RC.AI_DIFF.hard.income + ')');
   g.addShard(3, 100); ok(g.res[3].shard === 100, 'allied bot banks 100 → 100 (Normal)');
   g.addShard(1, 100); ok(g.res[1].shard === 100, 'the human banks 100 → 100 (untouched)');
   g.aiDiff = 'easy';
-  g.addShard(2, 100); ok(g.res[2].shard === 205, 'Easy enemy banks 100 → +80 (×0.80), total 205');
+  const easyBank = hardBank + 100 * RC.AI_DIFF.easy.income;   // enemy on Easy banks less
+  g.addShard(2, 100); ok(g.res[2].shard === easyBank, 'Easy enemy banks 100 → +' + (100 * RC.AI_DIFF.easy.income) + ' (×' + RC.AI_DIFF.easy.income + '), total ' + easyBank);
 }
 
 // ── 4. End-to-end: a Hard bot out-economises an Easy bot in a real match ────
@@ -71,15 +75,23 @@ console.log('A Hard bot out-grows an Easy bot in a headless 1v1');
     if (RC.AI.reset) RC.AI.reset();
     const dt = 1 / 30;
     for (let i = 0; i < seconds * 30; i++) g.update(dt);
-    return g.units.filter(u => u.owner === 2 && u.def.worker).length;   // bot's worker count
+    return {
+      workers: g.units.filter(u => u.owner === 2 && u.def.worker).length,
+      army: g.units.filter(u => u.owner === 2 && !u.def.worker && !u.def.hero).length,
+    };
   }
   // Math.random drives AI placement, so average a few runs to shake out variance.
-  let easySum = 0, hardSum = 0, trials = 3;
-  for (let t = 0; t < trials; t++) { easySum += runEco('easy', 150); hardSum += runEco('hard', 150); }
+  let easySum = 0, hardSum = 0, easyArmyMax = 0, trials = 3;
+  for (let t = 0; t < trials; t++) {
+    const e = runEco('easy', 150), h = runEco('hard', 150);
+    easySum += e.workers; hardSum += h.workers; easyArmyMax = Math.max(easyArmyMax, e.army);
+  }
   const easyAvg = easySum / trials, hardAvg = hardSum / trials;
-  console.log('  bot workers after 150s — Easy avg ' + easyAvg.toFixed(1) + ' vs Hard avg ' + hardAvg.toFixed(1));
+  console.log('  bot workers after 150s — Easy avg ' + easyAvg.toFixed(1) + ' vs Hard avg ' + hardAvg.toFixed(1) + ' · Easy peak army ' + easyArmyMax);
   ok(hardAvg > easyAvg, 'the Hard bot fields more workers than the Easy bot (' + hardAvg.toFixed(1) + ' > ' + easyAvg.toFixed(1) + ')');
   ok(easyAvg <= RC.AI_DIFF.easy.workerCap + 0.01, 'the Easy bot respects its lower worker cap (' + easyAvg.toFixed(1) + ' ≤ ' + RC.AI_DIFF.easy.workerCap + ')');
+  // The core balance fix: Easy must never hoard a death-ball — its trained army stays at/under the cap.
+  ok(easyArmyMax <= RC.AI_DIFF.easy.armyCap, 'the Easy bot never masses past its army cap (peak ' + easyArmyMax + ' ≤ ' + RC.AI_DIFF.easy.armyCap + ')');
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
