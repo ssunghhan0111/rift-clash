@@ -42,6 +42,24 @@ RC.Fullscreen = (function () {
     } catch (e) { return false; }
   }
 
+  // Touch/handheld heuristic — decides whether going fullscreen should ALSO lock the
+  // screen to landscape (a phone held in portrait should rotate into the game).
+  function isHandheld() {
+    try {
+      return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+             ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    } catch (e) { return false; }
+  }
+  // Best-effort landscape lock. Only attempted on handhelds, and only works while
+  // fullscreen; silently ignored where unsupported (desktop, iPhone Safari, etc.).
+  function lockLandscape() {
+    if (!isHandheld()) return;
+    try {
+      const so = window.screen && window.screen.orientation;
+      if (so && so.lock) { const p = so.lock('landscape'); if (p && p.catch) p.catch(() => {}); }
+    } catch (e) {}
+  }
+
   function wanted() {
     try { return window.localStorage.getItem(KEY) !== '0'; } catch (e) { return true; }
   }
@@ -63,7 +81,10 @@ RC.Fullscreen = (function () {
     selfInitiated = true;
     try {
       const p = req.call(e, { navigationUI: 'hide' });
-      if (p && p.catch) p.catch(() => { selfInitiated = false; fire(); });
+      // On success also rotate/lock to landscape on phones & tablets; on failure
+      // fall back exactly as before (clear the flag and notify listeners).
+      if (p && p.then) p.then(() => lockLandscape(), () => { selfInitiated = false; fire(); });
+      else lockLandscape();
     } catch (err) { selfInitiated = false; }
     return true;
   }

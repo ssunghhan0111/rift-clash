@@ -17,6 +17,9 @@ window.RC = window.RC || {};
   RC.Input.init(game, cv, mini);
   RC.UI.init(game);
   window.addEventListener('resize', resize);
+  // Rotating a phone/tablet into landscape (incl. the fullscreen orientation lock)
+  // sometimes fires before the viewport settles — re-fit on the next frame too.
+  window.addEventListener('orientationchange', () => { resize(); setTimeout(resize, 250); });
   resize();
 
   // ── 닉네임 ────────────────────────────────────────
