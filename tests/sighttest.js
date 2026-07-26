@@ -307,6 +307,47 @@ console.log('\n=== survival ===');
   ok(d.survivalWave >= 3, 'a defended survival run did not get past wave 2 (got ' + d.survivalWave + ')');
 }
 
+// ── 15. the survival ally actually defends the crystal ────────────────────
+// The horde has no base. The normal AI attack wave looks for the nearest enemy
+// core, finds none, sends the army to its OWN core and leaves it there — so an
+// ally used to stand in its base while the Rift Crystal was eaten. Roughly one
+// run in twenty died on wave 1 to two Globlings with a live ally on the field.
+console.log('\n=== the survival ally defends ===');
+{
+  const g = new RC.Game();
+  g.setupSurvival({ difficulty: 'medium', race: 'forge', ally: true });
+  for (let i = 0; i < 30 * 40; i++) g.update(1 / 30);          // let the ally open its build
+
+  // park an ally fighter far from the crystal and drop a Globling on the crystal
+  const c = g.crystal;
+  const far = new RC.Unit('volt', c.x - 700, c.y - 300, 3);
+  if (g.initUnit) g.initUnit(far);
+  g.units.push(far);
+  far.stop();
+  const gob = new RC.Unit('globling', c.x - 70, c.y, 2);
+  if (g.initUnit) g.initUnit(gob);
+  g.units.push(gob);
+  gob.attackTarget(c);
+
+  const d0 = Math.hypot(far.x - c.x, far.y - c.y);
+  RC.AI.update(2.0, g);                                        // one AI think
+  ok(far.state !== 'idle', 'the ally fighter ignored a Globling chewing the crystal');
+  for (let i = 0; i < 30 * 25 && !gob.dead; i++) g.update(1 / 30);
+  const d1 = Math.hypot(far.x - c.x, far.y - c.y);
+  ok(d1 < d0 - 200, 'the ally never closed on the crystal (' + Math.round(d0) + 'px → ' + Math.round(d1) + 'px)');
+  console.log('  ally answered the alarm: ' + Math.round(d0) + 'px → ' + Math.round(d1) + 'px from the crystal, ' +
+              (gob.dead ? 'Globling killed' : 'Globling still up') + ' ✓');
+  ok(gob.dead, 'the ally reached the crystal but never killed the Globling on it');
+
+  // ...and with nothing to fight it garrisons the crystal rather than wandering home
+  for (let i = 0; i < 30 * 30; i++) g.update(1 / 30);
+  const guard = g.units.filter(u => u.owner === 3 && !u.dead && !u.def.worker && u.canFight());
+  const near = guard.filter(u => Math.hypot(u.x - c.x, u.y - c.y) < 420).length;
+  ok(guard.length === 0 || near >= Math.ceil(guard.length / 2),
+     'between waves only ' + near + '/' + guard.length + ' allied fighters hold the crystal');
+  console.log('  between waves ' + near + '/' + guard.length + ' allied fighters hold the crystal ✓');
+}
+
 // ── 14. netcode is unaffected (auto/post are server-side only) ────────────
 console.log('\n=== netcode round-trip ===');
 {

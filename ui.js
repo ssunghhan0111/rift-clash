@@ -172,11 +172,47 @@ RC.UI = (function () {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // ── 전체화면 토글 ─────────────────────────────────
+  // Two buttons, one state: ⛶ in the top bar during a match, and the one on the
+  // start screen. Both reflect whatever the browser is actually doing, so Esc or
+  // F11 keeps them honest.
+  function initFullscreen() {
+    if (!RC.Fullscreen) return;
+    const btns = ['fs-btn', 'fs-btn2'].map(id => document.getElementById(id)).filter(Boolean);
+    if (!btns.length) return;
+    btns.forEach(b => b.addEventListener('click', () => { RC.Fullscreen.toggle(); syncFullscreen(); }));
+    RC.Fullscreen.on(syncFullscreen);
+    window.addEventListener('resize', syncFullscreen);
+    syncFullscreen();
+  }
+  function syncFullscreen() {
+    if (!RC.Fullscreen) return;
+    const st = RC.Fullscreen.status();
+    const big = document.getElementById('fs-btn');
+    const small = document.getElementById('fs-btn2');
+    // Nothing to toggle on a browser with no Fullscreen API (iPhone Safari), or in
+    // a home-screen app that is already fullscreen — hide rather than lie.
+    const useless = !st.supported || st.standalone;
+    if (big) {
+      big.classList.toggle('hidden', useless);
+      big.classList.toggle('on', st.on);
+      big.textContent = '⛶';
+      big.title = st.on ? 'Leave fullscreen' : 'Fullscreen';
+    }
+    if (small) {
+      small.classList.toggle('hidden', useless);
+      small.classList.toggle('on', st.on);
+      small.textContent = st.on ? '⛶ Leave fullscreen' : '⛶ Fullscreen';
+      small.title = small.textContent;
+    }
+  }
+
   // 터치용 툴바 — 키보드 단축키(P/F/Space/Esc/컨트롤그룹)를 버튼으로 대체.
   // 유닛 정지(S)는 버튼에서 뺐다 — 키보드에는 그대로 남아 있다.
   function initTouchbar() {
     document.getElementById('tb-pause').addEventListener('click', togglePause);
     initVoiceButton();
+    initFullscreen();
 
     document.getElementById('tb-idle').addEventListener('click', () => {
       const idle = g.units.find(u => u.owner === g.playerOwner && u.def.worker && u.state === 'idle');
@@ -663,5 +699,5 @@ RC.UI = (function () {
     });
   }
 
-  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch, syncVoice, wireShare };
+  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch, syncVoice, wireShare, syncFullscreen };
 })();

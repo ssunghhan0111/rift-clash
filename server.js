@@ -573,7 +573,7 @@ function startMatch(room) {
   const customMode = { id: mode.id, name: mode.name, count: seats.length, players: seats };
 
   room.game = new RC.Game();
-  room.game.heroesEnabled = false;                 // online has no heroes (kept off the authoritative sim)
+  room.game.heroesEnabled = true;                  // heroes are live online too — the snapshot carries their level, xp and cooldowns (see net_core `hr`)
   room.game.setup(RC.getMap(room.lobby.mapId), customMode, racePick);
   room.lobby.started = true;
   room.cmdQueue = []; room.tickN = 0;
@@ -620,7 +620,7 @@ function startSurvivalMatch(room) {
   room.teamOf[2] = 2;
 
   room.game = new RC.Game();
-  room.game.heroesEnabled = false;                 // online has no heroes (kept off the authoritative sim)
+  room.game.heroesEnabled = true;                  // heroes are live online too — the snapshot carries their level, xp and cooldowns (see net_core `hr`)
   room.game.setupSurvival({ difficulty: room.lobby.diff, players: seats });
   room.lobby.started = true;
   room.cmdQueue = []; room.tickN = 0;

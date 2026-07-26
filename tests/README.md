@@ -19,7 +19,11 @@ npm run test:browser  # real Chromium, real WebSockets, real WebRTC
 | `lobbytest.js` | Presence and invites over a real server and real WebSockets |
 | `uitest.js` | Nickname, pause toggle, end-match dialog, invites in two browsers |
 | `devtest.js` | Dev mode is off by default and gated behind the credit taps |
+| `touchtest.js` | Two-finger-only camera on tablets, mouse untouched on PC |
+| `fstest.js` | Fullscreen by default, the toggle, and a remembered opt-out |
 | `voicetest.js` | Two browsers holding a real WebRTC call with audio flowing |
+| `sharetest.js` | The share card renders and the `?join=` deep link works |
+| `herotest.js` | Heroes in every mode incl. online: skills, cooldowns, casting |
 | `shots.js` | Renders each planet to `shots/` for eyeballing (not a test) |
 
 ## Notes
@@ -51,3 +55,9 @@ Worth knowing what they are for. All of these were live in shipped code:
   unit type by six waves instead of bringing air in early (`wavecheck.js`).
 - **Hero level, xp and cooldowns were never serialized**, so online clients saw
   every hero as level 1 (`simtest.js` netcode checks).
+- **Heroes were switched off in online matches entirely** — every other mode had
+  them (`herotest.js`).
+- **The Survival ally never defended the Rift Crystal.** The horde has no base,
+  so the AI's attack wave looked for the nearest enemy core, found none, sent the
+  army to its own core and left it there. About one run in twenty died on wave 1
+  to two Globlings with a full allied army standing in its base (`sighttest.js`).

@@ -558,6 +558,8 @@
   }
   #paused-tag.hidden { display: none; }
   .tbtn.on { background: var(--cyan); color: #082027; }
+  #fs-btn.on { background: var(--cyan); color: #082027; border-color: transparent; }
+  #fs-btn.hidden { display: none; }
 
   /* ── Nickname prompt (first launch) ── */
   #nickname {
@@ -590,6 +592,11 @@
   #who-edit { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 5px;
     padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: var(--sans); }
   #who-edit:hover { color: var(--text); }
+  #fs-btn2 { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 5px;
+    padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: var(--sans); }
+  #fs-btn2:hover { color: var(--text); }
+  #fs-btn2.on { border-color: var(--cyan); color: var(--cyan); }
+  #fs-btn2.hidden { display: none; }
 
   /* ── Who's online + invites ── */
   #online-list { display: flex; flex-direction: column; gap: 7px; width: min(560px, 92vw); }
@@ -684,7 +691,8 @@
     <div class="res" id="wave-box" style="display:none">Wave <span class="val" id="res-wave" style="color:var(--cyan)">0</span></div>
     <div class="res" id="daily-box" style="display:none; color:#ffc857" title="Daily Challenge — the same run for every player today"><span class="val" id="res-daily" style="color:#ffe9a8">—</span></div>
     <div id="hint">Middle-drag or two fingers to move the map · arrows and screen edges pan (mouse only) · drag to box-select · right-click to command · A = attack-move</div>
-    <button id="mute-btn" title="Sound on/off" style="margin-left:10px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">🔊</button>
+    <button id="fs-btn" title="Fullscreen" style="margin-left:10px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">⛶</button>
+    <button id="mute-btn" title="Sound on/off" style="margin-left:6px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">🔊</button>
   </div>
 
   <div id="stage">
@@ -757,7 +765,8 @@
   <div id="ss-title">RIFT<b>CLASH</b></div>
   <div id="ss-sub">Choose how you want to play</div>
   <div id="ss-credit">Made in Jayden Game Studio</div>
-  <div id="who-row">Playing as <span id="who-name">—</span><button id="who-edit">change</button></div>
+  <div id="who-row">Playing as <span id="who-name">—</span><button id="who-edit">change</button>
+    <button id="fs-btn2" title="Fullscreen">⛶ Fullscreen</button></div>
 
   <div class="ss-h">Game Mode</div>
   <div id="ss-gamemodes"></div>
@@ -969,6 +978,7 @@
 <script src="daily.js"></script>
 <script src="voice.js"></script>
 <script src="share.js"></script>
+<script src="fullscreen.js"></script>
 <script src="survival.js"></script>
 <script src="leaderboard.js"></script>
 <script src="dev.js"></script>

@@ -64,6 +64,37 @@ RC.AI = (function () {
     return best;
   }
 
+  // ── Survival: garrison the Rift Crystal ───────────────────────────────────
+  // The horde has no base, so nearestEnemyCore() finds nothing and the normal
+  // attack wave (section 6) sends the army to its OWN core — where it stands and
+  // watches the crystal get eaten. In Survival the ally holds the crystal instead
+  // and answers anything that comes near it.
+  const DEF_RING = 210;      // where the reserve waits between waves
+  const DEF_ALERT = 1000;    // how far out a horde unit is worth intercepting
+  function defendCrystal(g, own) {
+    const c = g.crystal;
+    const army = g.units.filter(u => u.owner === own && !u.dead && !u.def.worker && u.canFight());
+    if (!army.length) return;
+
+    let threat = null, td = Infinity;
+    for (const u of g.units) {
+      if (u.dead || !g.areEnemies(u.owner, own)) continue;
+      const d = RC.dist(u.x, u.y, c.x, c.y);
+      if (d < td) { td = d; threat = u; }
+    }
+
+    army.forEach((u, i) => {
+      if (u.state === 'build' || u.boarded) return;
+      if (u.foe && !u.foe.dead) return;                       // already fighting — leave it alone
+      const a = (i / army.length) * Math.PI * 2;
+      if (threat && td <= DEF_ALERT) {
+        u.attackMoveTo(threat.x + Math.cos(a) * 60, threat.y + Math.sin(a) * 60);
+      } else if (u.state === 'idle' && RC.dist(u.x, u.y, c.x, c.y) > DEF_RING + 80) {
+        u.moveTo(c.x + Math.cos(a) * DEF_RING, c.y + Math.sin(a) * DEF_RING);
+      }
+    });
+  }
+
   function update(dt, g) {
     if (g.over) return;
     for (const p of g.players) {
@@ -86,6 +117,12 @@ RC.AI = (function () {
     const barracks = myBuildings(g, own, R.barracks).filter(b => b.done);
     const shard = g.res[own].shard;
     const idleWorker = () => workers.find(u => u.state !== 'build') || workers[0];
+
+    // Defence runs BEFORE the economy branches — several of those `return` early
+    // after placing a building, and the crystal cannot be left undefended for a
+    // turn just because a Power Cell went down this second.
+    const defending = g.survival && g.crystal && !g.crystal.dead;
+    if (defending) defendCrystal(g, own);
 
     // 1) 유휴 일꾼 채집
     workers.forEach(w => {
@@ -156,6 +193,7 @@ RC.AI = (function () {
     });
 
     // 6) 공격 웨이브 — 가장 가까운 적 팀 코어로
+    if (defending) return;                      // survival allies hold the crystal; they never march out
     const army = g.units.filter(u => u.owner === own && !u.def.worker);
     if (s.waveTimer <= 0) {
       const need = K.AI_WAVE_SIZE + s.waveNum * K.AI_WAVE_GROWTH;

@@ -274,19 +274,9 @@ window.RC = window.RC || {};
   // gesture (click/tap), so this is called right at the top of each
   // "start the match" handler. Best-effort: silently no-ops if the browser
   // blocks it (e.g. no gesture in the chain, or unsupported like iPhone Safari).
-  function goFullscreen() {
-    const el = document.documentElement;
-    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
-    if (!req) return;
-    try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch (e) {}
-  }
-  function exitFullscreenIfActive() {
-    const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-    if (!fsEl) return;
-    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
-    if (!exit) return;
-    try { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
-  }
+  // Fullscreen lives in fullscreen.js now. Starting a match still asks for it,
+  // but only if the player has not opted out — see RC.Fullscreen.
+  function goFullscreen() { if (RC.Fullscreen) RC.Fullscreen.enterIfWanted(); }
 
   function startGame() {
     RC.online = false;
@@ -454,7 +444,6 @@ window.RC = window.RC || {};
     const bd = document.getElementById('board');
     if (bd) bd.classList.add('hidden');
     overlay.classList.add('hidden');
-    exitFullscreenIfActive();
     buildStartScreen();
     applyGameMode(selGameMode);
     renderWho();
@@ -1011,7 +1000,7 @@ window.RC = window.RC || {};
     RC.online = true;
     goFullscreen();
     audioGo();
-    game.heroesEnabled = false;      // online matches run on the server, which has no heroes
+    game.heroesEnabled = true;       // heroes are live online; the server owns them and the snapshot carries their state
 
     if (m.survival) {
       // Co-op Survival — build the survival map locally so terrain/fog/nav exist, then
@@ -1079,6 +1068,9 @@ window.RC = window.RC || {};
   buildStartScreen();
   applyGameMode(selGameMode);
   renderWho();
+  // Fullscreen by default — a browser will not grant it on load, so the first
+  // tap or key press is what actually arms it.
+  if (RC.Fullscreen) RC.Fullscreen.armFirstGesture();
   // First launch — ask who they are before the menu. Anyone who already has a name
   // (including from posting a leaderboard score) walks straight past this.
   if (!myName() && !pendingJoinCode) openNickname(null);
