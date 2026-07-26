@@ -52,12 +52,26 @@
   }
   * { box-sizing: border-box; }
   html, body {
-    margin: 0; height: 100%; overflow: hidden;
+    margin: 0; overflow: hidden;
+    /* Fill the VISIBLE viewport. On phones `height:100%` can resolve to a viewport
+       taller/shorter than what's actually shown (browser UI, home indicator), which
+       left a dark band below the app and clipped the bottom command panel. `100dvh`
+       tracks the live visible height; the earlier values are fallbacks for old browsers. */
+    height: 100%;
+    height: -webkit-fill-available;
+    height: 100dvh;
     background: var(--bg); color: var(--text);
     font-family: var(--sans);
     user-select: none;
   }
-  #app { display: flex; flex-direction: column; height: 100%; }
+  #app {
+    display: flex; flex-direction: column;
+    height: 100%;
+    height: -webkit-fill-available;
+    height: 100dvh;
+    /* keep the bottom row clear of the phone's home-indicator / gesture bar */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 
   /* ── 상단 자원 바 ─────────────────────────── */
   #topbar {
@@ -243,7 +257,7 @@
     #logo { display: none; }
     .res { font-size: 10px; gap: 5px; } .res .val { font-size: 13px; }
     #mute-btn { margin-left: auto !important; }
-    #hud { grid-template-columns: 148px 1fr; height: 138px; }
+    #hud { grid-template-columns: 148px 1fr; height: 178px; }
     #sel-panel { padding: 9px 8px; }
     #portrait-wrap { width: 54px; height: 54px; }
     #sel-name { font-size: 13px; }
