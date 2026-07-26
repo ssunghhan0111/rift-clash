@@ -89,6 +89,7 @@ window.RC = window.RC || {};
   let selGameMode = 'vs';       // 'tutorial' | 'vs' | 'survival'
   let selSquad = 'solo';        // survival: 'solo' | 'ally'
   let selDiff = 'medium';       // survival: 'easy' | 'medium' | 'insane'
+  let selVsDiff = 'normal';     // versus bots: 'easy' | 'normal' | 'hard'
   let practiceHints = null;
 
   // 종족 얼굴 캔버스 목록 (시작 화면 + 온라인 로비). 메뉴가 떠 있는 동안만 다시 그린다.
@@ -182,6 +183,30 @@ window.RC = window.RC || {};
     buildGameModes();
     buildSquad();
     buildDiff();
+    buildVsDiff();
+  }
+
+  // Versus (1v1 / 2v2) bot difficulty picker
+  const VS_DIFFS = [
+    { id: 'easy', name: 'Easy', sub: 'Passive bots, weaker economy. A gentle match.' },
+    { id: 'normal', name: 'Normal', sub: 'A balanced, fair fight.' },
+    { id: 'hard', name: 'Hard', sub: 'Aggressive bots with a faster economy.' },
+  ];
+  function buildVsDiff() {
+    const wrap = document.getElementById('ss-aidiff');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    VS_DIFFS.forEach(d => {
+      const b = document.createElement('div');
+      b.className = 'modebtn' + (d.id === selVsDiff ? ' sel' : '');
+      b.innerHTML = `<div class="mb-name">${d.name}</div><div class="mb-sub">${d.sub}</div>`;
+      b.addEventListener('click', () => {
+        selVsDiff = d.id;
+        wrap.querySelectorAll('.modebtn').forEach(x => x.classList.remove('sel'));
+        b.classList.add('sel');
+      });
+      wrap.appendChild(b);
+    });
   }
 
   const DIFFS = [
@@ -254,6 +279,7 @@ window.RC = window.RC || {};
     show('panel-tutorial', m === 'tutorial');
     show('sec-map', m === 'vs');
     show('sec-mode', m === 'vs');
+    show('sec-aidiff', m === 'vs');
     show('sec-diff', m === 'survival');
     show('sec-squad', m === 'survival');
     show('sec-race', m !== 'tutorial');
@@ -290,7 +316,7 @@ window.RC = window.RC || {};
     const mode = RC.MODES[selMode];
     const racePick = {};
     mode.players.forEach(p => { racePick[p.owner] = p.ai ? RC.otherRace(selRace) : selRace; });
-    game.setup(RC.getMap(selMap), mode, racePick);
+    game.setup(RC.getMap(selMap), mode, racePick, selVsDiff);
     RC.AI.reset();
     resize();
     RC.Input.centerOn(game.spawn1.x, game.spawn1.y);

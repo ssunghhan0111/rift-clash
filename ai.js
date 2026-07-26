@@ -104,6 +104,12 @@ RC.AI = (function () {
 
   function think(dt, g, own) {
     const s = st(g, own);
+    // 난이도 프로필 — 없으면(온라인 드롭 등) 기존 CFG 상수와 동일한 Normal 값으로 폴백
+    const P = (g.aiProfile && g.aiProfile(own)) || (RC.AI_DIFF && RC.AI_DIFF.normal) || {
+      workerCap: K.AI_WORKER_CAP, firstWave: K.AI_FIRST_WAVE, waveSize: K.AI_WAVE_SIZE,
+      waveGap: K.AI_WAVE_GAP, secondFactory: K.AI_SECOND_FACTORY, tower: true, tech: true,
+    };
+    if (!s.diffInit) { s.waveTimer = P.firstWave; s.diffInit = true; }   // 첫 공격 타이밍은 난이도가 정한다
     s.think -= dt;
     s.waveTimer -= dt;
     if (s.think > 0) return;
@@ -140,30 +146,30 @@ RC.AI = (function () {
     }
 
     // 3) 일꾼 보충
-    if (workers.length < K.AI_WORKER_CAP && core.queue.length === 0 && shard >= 50) g.train(core, R.worker);
+    if (workers.length < P.workerCap && core.queue.length === 0 && shard >= 50) g.train(core, R.worker);
 
     // 4) 병영
     const barracksAll = myBuildings(g, own, R.barracks);
-    const barracksCap = g.time > K.AI_SECOND_FACTORY ? 2 : 1;
+    const barracksCap = g.time > P.secondFactory ? 2 : 1;
     if (barracksAll.length < barracksCap && shard >= 150 && workers.length >= 5) {
       const spot = findSpot(g, R.barracks, core, own);
       if (spot) { g.placeBuilding(R.barracks, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
     // 4.5) 공중 건물 (후반)
-    if (R.air && myBuildings(g, own, R.air).length === 0 && g.time > K.AI_SECOND_FACTORY && shard >= 180 && workers.length >= 6) {
+    if (R.air && myBuildings(g, own, R.air).length === 0 && g.time > P.secondFactory && shard >= 180 && workers.length >= 6) {
       const spot = findSpot(g, R.air, core, own);
       if (spot) { g.placeBuilding(R.air, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
     // 4.6) 테크/연구 건물
-    if (R.tech && myBuildings(g, own, R.tech).length === 0 && g.time > K.AI_ARCLAB && shard >= 200 && workers.length >= 6) {
+    if (R.tech && P.tech && myBuildings(g, own, R.tech).length === 0 && g.time > K.AI_ARCLAB && shard >= 200 && workers.length >= 6) {
       const spot = findSpot(g, R.tech, core, own);
       if (spot) { g.placeBuilding(R.tech, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
     // 4.7) 방어 타워 (본진 방어)
-    if (R.tower && g.time > K.AI_TOWER && myBuildings(g, own, R.tower).length < 2 && shard >= 130 && workers.length >= 5) {
+    if (R.tower && P.tower && g.time > K.AI_TOWER && myBuildings(g, own, R.tower).length < 2 && shard >= 130 && workers.length >= 5) {
       const spot = findSpot(g, R.tower, core, own);
       if (spot) { g.placeBuilding(R.tower, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
@@ -185,7 +191,7 @@ RC.AI = (function () {
     // 5.6) 테크 — 연구 + 상급 유닛
     if (R.tech) myBuildings(g, own, R.tech).filter(b => b.done).forEach(lab => {
       // 여유 자원이 있으면 업그레이드 연구 (번갈아)
-      if (lab.def.research && !lab.research && shard >= 200) {
+      if (lab.def.research && P.tech && !lab.research && shard >= 200) {
         const order = ['atk', 'spd', 'arm', 'crit', 'tough', 'eng', 'frost'];
         for (const kind of order) {
           if (g.upLevel(own, kind) < RC.UPGRADES[kind].costs.length) { if (g.research(lab, kind)) break; }
@@ -199,7 +205,7 @@ RC.AI = (function () {
     if (defending) return;                      // survival allies hold the crystal; they never march out
     const army = g.units.filter(u => u.owner === own && !u.def.worker);
     if (s.waveTimer <= 0) {
-      const need = K.AI_WAVE_SIZE + s.waveNum * K.AI_WAVE_GROWTH;
+      const need = P.waveSize + s.waveNum * K.AI_WAVE_GROWTH;
       if (army.length >= need) {
         const target = nearestEnemyCore(g, own, core) || { x: core.x, y: core.y };
         army.forEach((u, i) => {
@@ -207,7 +213,7 @@ RC.AI = (function () {
           u.attackMoveTo(target.x + Math.cos(a) * 70, target.y + Math.sin(a) * 70);   // engage defenders on the way
         });
         s.waveNum++;
-        s.waveTimer = K.AI_WAVE_GAP;
+        s.waveTimer = P.waveGap;
         if (own !== g.playerOwner && g.areEnemies(own, g.playerOwner)) g.notify('Enemy forces incoming!');
       } else {
         s.waveTimer = 12;

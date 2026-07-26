@@ -959,6 +959,103 @@ RC.Renderer = (function () {
         ctx.globalAlpha = pulse; ctx.fillStyle = '#7dff9e';
         ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
+      } else if (b.type === 'nexus') {
+        // Aether 넥서스 — 공중에 뜬 회전 사이오닉 프리즘 + 궤도 파편 (본진)
+        const t = performance.now() / 1000;
+        ctx.save(); ctx.translate(b.x, b.y);
+        blitGlow(softGlow('201,166,255'), 0, 0, 32, 32, 0.24 + 0.1 * Math.sin(t * 1.6));
+        ctx.save(); ctx.rotate(t * 0.6);
+        const prism = (rot, R2, col) => {
+          ctx.save(); ctx.rotate(rot); ctx.fillStyle = col;
+          ctx.beginPath(); ctx.moveTo(0, -R2); ctx.lineTo(R2 * 0.7, 0); ctx.lineTo(0, R2); ctx.lineTo(-R2 * 0.7, 0); ctx.closePath(); ctx.fill();
+          ctx.restore();
+        };
+        prism(0, 21, mix(AETHER_TINT, '#160a24', 0.15));
+        prism(Math.PI / 4, 14, PSI);
+        ctx.restore();
+        const pulse = 0.6 + 0.4 * Math.abs(Math.sin(t * 2.2));
+        ctx.globalAlpha = pulse; ctx.fillStyle = PSI_HOT;
+        ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.85; ctx.fillStyle = PSI;
+        for (let i = 0; i < 3; i++) {
+          const a = -t * 1.4 + i * (Math.PI * 2 / 3);
+          const px = Math.cos(a) * 27, py = Math.sin(a) * 18;
+          ctx.beginPath(); ctx.moveTo(px, py - 4); ctx.lineTo(px + 3, py); ctx.lineTo(px, py + 4); ctx.lineTo(px - 3, py); ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+      } else if (b.type === 'conduit') {
+        // 워프 도관 — 짧은 결정 기둥 + 발밑을 도는 워프 소용돌이 (인구 + 워프 비콘)
+        const t = performance.now() / 1000;
+        ctx.save(); ctx.translate(b.x, b.y);
+        ctx.fillStyle = mix(AETHER_TINT, '#160a24', 0.2);
+        ctx.beginPath(); ctx.moveTo(-7, 12); ctx.lineTo(-4, -15); ctx.lineTo(4, -15); ctx.lineTo(7, 12); ctx.closePath(); ctx.fill();
+        const pulse = 0.55 + 0.45 * Math.abs(Math.sin(t * 2.4));
+        ctx.globalAlpha = pulse; ctx.fillStyle = PSI;
+        ctx.beginPath(); ctx.moveTo(-3, 10); ctx.lineTo(-1.5, -13); ctx.lineTo(1.5, -13); ctx.lineTo(3, 10); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 0.75; ctx.strokeStyle = PSI; ctx.lineWidth = 1.6;
+        ctx.setLineDash([5, 4]); ctx.lineDashOffset = -t * 20;
+        ctx.beginPath(); ctx.ellipse(0, 13, 15, 5, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      } else if (b.type === 'warpgate') {
+        // 워프 게이트 — 회전하는 사이오닉 포털 링 (지상 유닛이 여기로 워프인)
+        const t = performance.now() / 1000;
+        ctx.save(); ctx.translate(b.x, b.y);
+        blitGlow(softGlow('201,166,255'), 0, 0, 24, 16, 0.3);
+        ctx.strokeStyle = PSI; ctx.lineWidth = 3; ctx.globalAlpha = 0.9;
+        ctx.setLineDash([9, 6]); ctx.lineDashOffset = -t * 34;
+        ctx.beginPath(); ctx.ellipse(0, 0, 20, 13, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(t * 3);
+        ctx.fillStyle = mix(AETHER_TINT, PSI, 0.5);
+        ctx.beginPath(); ctx.ellipse(0, 0, 13, 8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      } else if (b.type === 'astralgate') {
+        // 아스트랄 게이트 — 위로 솟은 결정 첨탑 + 떠 있는 후광 링 (공중 유닛)
+        const t = performance.now() / 1000;
+        ctx.save(); ctx.translate(b.x, b.y);
+        ctx.fillStyle = mix(AETHER_TINT, '#160a24', 0.15);
+        ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(8, 8); ctx.lineTo(-8, 8); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = PSI; ctx.globalAlpha = 0.55 + 0.35 * Math.abs(Math.sin(t * 2));
+        ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(3.5, 4); ctx.lineTo(-3.5, 4); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 0.8; ctx.strokeStyle = PSI; ctx.lineWidth = 2;
+        const ry = 6 + Math.sin(t * 1.8) * 1.5;
+        ctx.beginPath(); ctx.ellipse(0, -20, 11, ry, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      } else if (b.type === 'conclave') {
+        // 아이테르 콘클라베 — 회전하는 삼중 결정 호 + 발광 핵 (연구)
+        const tt = performance.now() / 1000;
+        ctx.save(); ctx.translate(b.x, b.y);
+        ctx.strokeStyle = PSI; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(0, 0, 17, 0, Math.PI * 2); ctx.stroke();
+        ctx.rotate(tt * 1.15);
+        ctx.strokeStyle = AETHER_TINT; ctx.lineWidth = 3;
+        for (let i = 0; i < 3; i++) { ctx.rotate((Math.PI * 2) / 3); ctx.beginPath(); ctx.arc(0, 0, 22, -0.5, 0.5); ctx.stroke(); }
+        ctx.restore();
+        const pulse = 0.6 + 0.4 * Math.abs(Math.sin(performance.now() / 420));
+        ctx.globalAlpha = pulse; ctx.fillStyle = PSI;
+        ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1; ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(b.x - 2, b.y - 2, 3, 0, Math.PI * 2); ctx.fill();
+      } else if (b.type === 'photonprism') {
+        // 포톤 프리즘 — 표적을 향해 도는 결정 렌즈 포탑 (지상·공중)
+        const ang = b.foe ? Math.atan2(b.foe.y - b.y, b.foe.x - b.x) : -Math.PI / 2;
+        ctx.save(); ctx.translate(b.x, b.y);
+        ctx.fillStyle = mix(AETHER_TINT, '#160a24', 0.18);
+        ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill();
+        ctx.rotate(ang);
+        // 각진 결정 렌즈 (앞으로 뻗은 마름모)
+        ctx.fillStyle = mix(AETHER_TINT, PSI, 0.35);
+        ctx.beginPath(); ctx.moveTo(4, -7); ctx.lineTo(22, 0); ctx.lineTo(4, 7); ctx.lineTo(-2, 0); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = PSI_HOT;
+        ctx.beginPath(); ctx.arc(19, 0, 2.6, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        const pulse = 0.6 + 0.4 * Math.abs(Math.sin(performance.now() / 400));
+        ctx.globalAlpha = pulse; ctx.fillStyle = PSI;
+        ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
       } else if (b.type === 'guardtower' || b.type === 'arcbattery' || b.type === 'acidtower') {
         // 타워 — 표적을 향해 회전하는 포신
         const big = b.type === 'arcbattery';
@@ -1056,6 +1153,16 @@ RC.Renderer = (function () {
           ctx.restore();
         }
       }
+    }
+
+    // 피격 섬광 — 몸체 위로 짧게 번쩍 (건설 중 포함)
+    if (b.hitFlash > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(0.5, b.hitFlash * 4);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = '#fff';
+      rrect(x, y, b.w, b.h, 7); ctx.fill();
+      ctx.restore();
     }
 
     // 연구 진행 바 (아크 랩) — 생산 바 위쪽에 하늘색으로
@@ -1568,6 +1675,15 @@ RC.Renderer = (function () {
     const c = unitColors(u, flash);
     const tNow = performance.now() / 1000;
 
+    // 공격 모션 — atkAnim 1(발사 순간)→0. 근접은 전방으로 짧게 돌진하고, 원거리는 뒤로 반동한다.
+    let lunge = 0;
+    if (u.atkAnim > 0) {
+      const ph = 1 - u.atkAnim;                                   // 0(발사)→1(끝)
+      const strike = ph < 0.3 ? ph / 0.3 : 1 - (ph - 0.3) / 0.7;  // 빠르게 나갔다 천천히 복귀
+      const melee = (u.def.range || 0) <= 45;
+      lunge = strike * (melee ? u.r * 0.6 : -u.r * 0.22);
+    }
+
     // 공중 유닛 고도 — 살짝 떠 있는 듯한 부유 흔들림 (순수 연출: 그리기 위치만 움직이고
     // u.x/u.y는 그대로라 명령·피격 판정·동기화에 영향 없음)
     const bob = u.def.flying ? Math.sin(tNow * 2.6 + (u.id || 0) * 1.7) * 2.4 : 0;
@@ -1613,8 +1729,15 @@ RC.Renderer = (function () {
     }
     ctx.restore();
 
+    // 피격 움찔 — 몸체만 hurtDir 방향으로 살짝 밀린다 (발밑 원반은 제자리)
+    if (u.hurt > 0) {
+      const k = u.hurt * u.r * 0.38;
+      ctx.translate(Math.cos(u.hurtDir) * k, Math.sin(u.hurtDir) * k);
+    }
+
     ctx.translate(0, -alt);
     ctx.rotate(u.facing);
+    if (lunge) ctx.translate(lunge, 0);   // 공격 돌진/반동 (바라보는 방향 기준)
     // 공중 유닛 — 기체 후미의 엔진 광 (이동 중엔 더 길고 밝은 분사 꼬리)
     if (u.def.flying && !flash) {
       const eng = u.def.race === 'gloop' ? '125,255,158' : u.def.race === 'aether' ? '226,198,255' : '140,211,255';

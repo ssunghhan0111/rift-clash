@@ -120,6 +120,25 @@ RC.CFG = {
   AI_TOWER: 150,        // 이 시간 이후 방어 타워 건설
 };
 
+// ── Versus AI difficulty (1v1 / 2v2 vs bots) ──────────────────────────────
+// One profile per level. `normal` reproduces the historical AI tuning EXACTLY
+// (see the AI_* constants above), so choosing Normal changes nothing from before.
+// Difficulty only ever tunes the human's OPPONENTS — an allied bot always plays
+// Normal (see game.aiProfile), so picking Easy never nerfs your teammate.
+//   income        : multiplier on shards an AI worker banks (the one economy cheat)
+//   workerCap     : how many workers the bot saturates to
+//   firstWave     : seconds before the bot's first attack push
+//   waveSize      : army size the bot masses before it attacks (smaller = pushier)
+//   waveGap       : seconds between attack waves
+//   secondFactory : seconds before the bot expands to a 2nd production building / air
+//   tower / tech  : whether the bot builds defensive towers / researches upgrades
+RC.AI_DIFF = {
+  easy:   { id: 'easy',   name: 'Easy',   income: 0.80, workerCap: 6,  firstWave: 300, waveSize: 8, waveGap: 170, secondFactory: 400, tower: false, tech: false },
+  normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 8,  firstWave: 210, waveSize: 5, waveGap: 120, secondFactory: 300, tower: true,  tech: true  },
+  hard:   { id: 'hard',   name: 'Hard',   income: 1.25, workerCap: 12, firstWave: 120, waveSize: 4, waveGap: 75,  secondFactory: 190, tower: true,  tech: true  },
+};
+RC.AI_DIFF_ORDER = ['easy', 'normal', 'hard'];
+
 // 색상 — 플레이어 4명 각자 색
 RC.COLORS = {
   bg:        '#131a24',
@@ -378,8 +397,10 @@ RC.UNITS = {
         desc: 'Smashes the ground for heavy area damage.' },
       { id: 'mend',  name: 'Repair Pulse', key: 'G', cost: 35, cd: 7, radius: 170, heal: 60, healPerRank: 40,
         desc: 'Repairs the Warden and nearby allies.' },
-      { id: 'warp',  name: 'Warp Charge',  key: 'C', cost: 25, cd: 6, dist: 240, distPerRank: 40,
-        desc: 'Blinks forward to close in or escape.' },
+      // Signature (LoL: Malphite — Unstoppable Force): a dash that lands with AoE damage
+      // and leaves enemies reeling. Turns the Warden into a true front-line initiator.
+      { id: 'leap',  name: 'Leap Slam',    key: 'C', cost: 30, cd: 9, dist: 250, distPerRank: 30, radius: 135, dmg: 40, dmgPerRank: 22, stun: 1.3,
+        desc: 'Vaults to the front line and smashes down — heavy area damage that leaves enemies reeling.' },
     ],
     // ── ULTIMATE ── one per hero. Unlocks at a level, costs most of the energy
     //    bar, very long cooldown, and is meant to be the moment of the match.
@@ -396,8 +417,10 @@ RC.UNITS = {
     grow: { hp: 55, dmg: 4, armor: 0.4 },
     revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
     skills: [
-      { id: 'nova',  name: 'Corrosive Nova', key: 'A', cost: 40, cd: 8, radius: 175, dmg: 26, dmgPerRank: 16, drain: 0, slowDur: 3,
-        desc: 'Acidic blast that damages and slows nearby foes.' },
+      // Signature (LoL: Cassiopeia — Twin Fang): damages and corrodes nearby foes, and
+      // the Matriarch feeds on each one she hits to heal — sustain built on her acid.
+      { id: 'devour', name: 'Devouring Acid', key: 'A', cost: 40, cd: 8, radius: 170, dmg: 24, dmgPerRank: 15, heal: 20, healPerRank: 12, healCap: 4, slowDur: 2,
+        desc: 'Sprays devouring acid: damages and corrodes nearby foes while the Matriarch feeds on them to heal.' },
       { id: 'salvo', name: 'Spore Storm',    key: 'F', cost: 45, cd: 9, radius: 115, dmg: 38, dmgPerRank: 24,
         desc: 'Rains acid spores over an area.' },
       { id: 'weld',  name: 'Regenerate',     key: 'G', cost: 35, cd: 7, radius: 180, heal: 90, healPerRank: 55, target: 'repair',
@@ -419,8 +442,10 @@ RC.UNITS = {
         desc: 'Tears open a storm of psionic energy over an area.' },
       { id: 'mend',  name: 'Shield Cascade', key: 'G', cost: 35, cd: 7, radius: 180, heal: 55, healPerRank: 35, shieldHeal: 90, shieldHealPerRank: 55,
         desc: 'Recharges the shields and health of the Archon and nearby allies.' },
-      { id: 'warp',  name: 'Rift Walk', key: 'C', cost: 25, cd: 6, dist: 250, distPerRank: 45,
-        desc: 'Steps through the rift to reappear further ahead.' },
+      // Signature (LoL: Kassadin — Riftwalk): blinks through the rift and erupts on
+      // arrival, blasting enemies where the Archon reappears. Reposition + burst in one.
+      { id: 'riftblast', name: 'Rift Surge', key: 'C', cost: 30, cd: 7, dist: 250, distPerRank: 35, radius: 120, dmg: 34, dmgPerRank: 22,
+        desc: 'Steps through the rift and erupts on arrival, blasting enemies where the Archon reappears.' },
     ],
     ult: { id: 'aegis', name: 'Aegis Storm', key: 'R', cost: 115, cd: 80, minLevel: 6,
       radius: 260, dmg: 95, dmgPerLevel: 9, shieldGrant: 200, shieldPerLevel: 22, heal: 80, shake: 0.8,

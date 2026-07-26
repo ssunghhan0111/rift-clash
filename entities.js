@@ -150,6 +150,7 @@ window.RC = window.RC || {};
       this.maxShield = d.shield || 0;
       this.shield = prebuilt ? this.maxShield : 0;
       this.shieldT = 0; this.shieldFx = 0;
+      this.hitFlash = 0;        // 피격 섬광 (연출 전용)
       this.dead = false;
     }
 
@@ -165,6 +166,7 @@ window.RC = window.RC || {};
     }
 
     update(dt, game) {
+      if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - dt);   // 피격 섬광 감쇠
       // 산성 지속 피해 (건설 중에도 진행)
       if (this.acidStacks > 0) {
         this.acidT -= dt;
@@ -290,6 +292,10 @@ window.RC = window.RC || {};
       this.carry = 0;
       this.gatherTimer = 0;
       this.hitFlash = 0;
+      // 공격/피격 연출 타이머 — 순수 그리기용. 1에서 0으로 감쇠하며 sim/동기화엔 영향 없다.
+      // atkAnim: 공격하는 순간의 돌진(근접)/반동(원거리) 모션.
+      // hurt: 맞은 순간 뒤로 밀리는 반응. hurtDir는 공격자→피격자 방향(밀려나는 쪽).
+      this.atkAnim = 0; this.hurt = 0; this.hurtDir = 0;
       // 산성 중첩 (글룹 피격 시) — 방어 감소 + 지속 피해
       this.acidStacks = 0; this.acidT = 0; this.acidDmg = 0; this.acidShred = 0;
       // 플라즈마 실드 (Aether) — 체력보다 먼저 소모되고 전투 이탈 후 빠르게 재충전
@@ -624,6 +630,9 @@ window.RC = window.RC || {};
       }
       this.cd = Math.max(0, this.cd - dt);
       this.hitFlash = Math.max(0, this.hitFlash - dt);
+      // 연출 감쇠 — atkAnim은 0.22초, hurt는 0.18초에 걸쳐 1→0
+      if (this.atkAnim > 0) this.atkAnim = Math.max(0, this.atkAnim - dt / 0.22);
+      if (this.hurt > 0)    this.hurt    = Math.max(0, this.hurt    - dt / 0.18);
       this.abilityCd = Math.max(0, this.abilityCd - dt);
       if (this.hero) { for (const k in this.skillCd) if (this.skillCd[k] > 0) this.skillCd[k] = Math.max(0, this.skillCd[k] - dt); }
       this.castFx = Math.max(0, this.castFx - dt);
@@ -783,6 +792,8 @@ window.RC = window.RC || {};
     _fireAt(foe, game) {
       if (!foe || foe.dead) return;
       this.cd = this.effCd(game);
+      this.atkAnim = 1;                        // 공격 모션 트리거 (근접=돌진 / 원거리=반동)
+      this.facing = Math.atan2(foe.y - this.y, foe.x - this.x);
       let dmg = this.effAtk(game);
       // 치명 타격 업그레이드 — 확률적 2배
       const critLvl = this._up(game, 'crit');
@@ -820,6 +831,8 @@ window.RC = window.RC || {};
       if (foe.kind === 'unit') {
         RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
         foe.hitFlash = 0.12;
+        foe.hurt = 1;                                         // 피격 반응 — 뒤로 움찔
+        foe.hurtDir = Math.atan2(foe.y - this.y, foe.x - this.x);
         // 동결 탄자 업그레이드 — 피격 시 둔화
         if (this._up(game, 'frost') > 0) foe.slow = Math.max(foe.slow, RC.CFG.FROST_DUR);
         // 반격 — 가만히 서 있다가 맞았으면 되받아친다. 일꾼도 마찬가지지만,
@@ -827,6 +840,7 @@ window.RC = window.RC || {};
         if (!foe.dead && foe.state === 'idle' && foe.canFight && foe.canFight()) foe.engage(this);
       } else {
         foe.damage(dealt);
+        foe.hitFlash = 0.09;                                  // 건물 피격 섬광
       }
     }
 
@@ -1036,6 +1050,75 @@ window.RC = window.RC || {};
         case 'afterburn': {   // 팰컨 제트 — 애프터버너 (자가 가속)
           this.surge = ab.dur;
           return true;
+        }
+        case 'leap': {   // 워든 시그니처 — 도약 강타 (LoL Malphite: Unstoppable Force)
+          // 앞으로(또는 표적을 향해) 뛰어들어 착지 지점에 광역 피해 + 적을 잠시 비틀거리게(slow=스턴 대용)
+          let tx = this.x + Math.cos(this.facing) * ab.dist;
+          let ty = this.y + Math.sin(this.facing) * ab.dist;
+          if (this.foe && !this.foe.dead) {
+            const a = Math.atan2(this.foe.y - this.y, this.foe.x - this.x);
+            const reach = Math.min(RC.dist(this.x, this.y, this.foe.x, this.foe.y), ab.dist);
+            tx = this.x + Math.cos(a) * reach; ty = this.y + Math.sin(a) * reach;
+          }
+          tx = Math.max(this.r, Math.min(RC.CFG.WORLD_W - this.r, tx));
+          ty = Math.max(this.r, Math.min(RC.CFG.WORLD_H - this.r, ty));
+          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.3, radius: this.r, owner: this.owner });
+          this.x = tx; this.y = ty;
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(tx, ty, u.x, u.y) > ab.radius) continue;
+            this._hit(u, ab.dmg, game);
+            u.slow = Math.max(u.slow || 0, ab.stun || 0);   // 착지 충격 — 잠시 비틀거림
+          }
+          for (const b of game.buildings) {
+            if (b.dead || !b.done || !game.areEnemies(b.owner, this.owner)) continue;
+            if (RC.dist(tx, ty, b.x, b.y) > ab.radius + b.r) continue;
+            this._hit(b, ab.dmg * 0.6, game);
+          }
+          game.fx.push({ abil: 'salvo', ax: tx, ay: ty, t: 0.45, radius: ab.radius, owner: this.owner });
+          if (game.shake) game.shake(0.35);
+          return true;   // 이동기이므로 적이 없어도 시전됨
+        }
+        case 'devour': {   // 매트리아크 시그니처 — 포식성 산 (LoL Cassiopeia: Twin Fang)
+          // 주변 적에게 광역 피해(+매트리아크 산성은 _hit이 자동 적용). 명중한 적 수만큼 자신을 회복한다.
+          let hits = 0;
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(this.x, this.y, u.x, u.y) > ab.radius) continue;
+            this._hit(u, ab.dmg, game);
+            u.slow = Math.max(u.slow || 0, ab.slowDur || 0);
+            hits++;
+          }
+          if (!hits) return false;   // 적이 없으면 소모 안 함
+          const healed = (ab.heal || 0) * Math.min(hits, ab.healCap || 4);
+          if (healed > 0 && this.hp < this.maxHp) {
+            this.hp = Math.min(this.maxHp, this.hp + healed);
+            if (game.marks) game.marks.push({ dmg: Math.round(healed), heal: true, x: this.x, y: this.y - (this.r || 10) - 4, t: 0.8 });
+          }
+          game.fx.push({ abil: 'nova', ax: this.x, ay: this.y, t: 0.5, radius: ab.radius, owner: this.owner });
+          return true;
+        }
+        case 'riftblast': {   // 아콘 시그니처 — 리프트 서지 (LoL Kassadin: Riftwalk)
+          // 전방으로 순간이동한 뒤 도착 지점에서 광역 폭발. 재배치 + 폭발을 한 번에.
+          let tx = this.x + Math.cos(this.facing) * ab.dist;
+          let ty = this.y + Math.sin(this.facing) * ab.dist;
+          if (this.foe && !this.foe.dead) {
+            const a = Math.atan2(this.foe.y - this.y, this.foe.x - this.x);
+            const reach = Math.min(RC.dist(this.x, this.y, this.foe.x, this.foe.y) + ab.radius * 0.5, ab.dist);
+            tx = this.x + Math.cos(a) * reach; ty = this.y + Math.sin(a) * reach;
+          }
+          tx = Math.max(this.r, Math.min(RC.CFG.WORLD_W - this.r, tx));
+          ty = Math.max(this.r, Math.min(RC.CFG.WORLD_H - this.r, ty));
+          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.35, radius: this.r, owner: this.owner });
+          this.x = tx; this.y = ty;
+          game.fx.push({ abil: 'warp', ax: tx, ay: ty, t: 0.35, radius: this.r, owner: this.owner });
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(tx, ty, u.x, u.y) > ab.radius) continue;
+            this._hit(u, ab.dmg, game);
+          }
+          game.fx.push({ abil: 'nova', ax: tx, ay: ty, t: 0.45, radius: ab.radius, owner: this.owner });
+          return true;   // 이동기이므로 적이 없어도 시전됨
         }
         // ── ULTIMATES ─────────────────────────────────────────────────────
         case 'barrage': {   // 아이언클래드 워든 — 궤도 폭격
