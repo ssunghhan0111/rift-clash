@@ -89,6 +89,7 @@ window.RC = window.RC || {};
   let selMap = RC.MAPS[0].id;
   let selMode = '1v1';
   let selRace = 'forge';
+  let selColor = (RC.DEFAULT_COLOR || 'azure');   // chosen team color (see RC.TEAMCOLORS)
   let selGameMode = 'vs';       // 'tutorial' | 'vs' | 'survival'
   let selSquad = 'solo';        // survival: 'solo' | 'ally'
   let selDiff = 'medium';       // survival: 'easy' | 'medium' | 'insane'
@@ -183,12 +184,33 @@ window.RC = window.RC || {};
       drawRaceFaces();
     }
 
+    buildColorPicker();
     buildGameModes();
     buildSquad();
     buildDiff();
     buildVsDiff();
     renderDailyCard();     // Daily banner is always on the front page now
     renderProfile();       // your local record, under the banner
+  }
+
+  // 팀 색상 선택 — 종족 아래에 색 스와치를 한 줄로 보여준다
+  function buildColorPicker() {
+    const wrap = document.getElementById('ss-colors');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    (RC.TEAMCOLORS || []).forEach(c => {
+      const sw = document.createElement('div');
+      sw.className = 'colorsw' + (c.id === selColor ? ' sel' : '');
+      sw.title = c.name;
+      sw.style.background = c.body;
+      sw.style.borderColor = c.trim;
+      sw.addEventListener('click', () => {
+        selColor = c.id;
+        wrap.querySelectorAll('.colorsw').forEach(x => x.classList.remove('sel'));
+        sw.classList.add('sel');
+      });
+      wrap.appendChild(sw);
+    });
   }
 
   // Versus (1v1 / 2v2) bot difficulty picker
@@ -288,6 +310,7 @@ window.RC = window.RC || {};
     show('sec-diff', m === 'survival');
     show('sec-squad', m === 'survival');
     show('sec-race', m !== 'tutorial');
+    show('sec-color', m !== 'tutorial');
     show('act-vs', m === 'vs', 'flex');
     show('act-survival', m === 'survival', 'flex');
     show('ss-onlinehint', m === 'vs');
@@ -320,6 +343,7 @@ window.RC = window.RC || {};
     const mode = RC.MODES[selMode];
     const racePick = {};
     mode.players.forEach(p => { racePick[p.owner] = p.ai ? RC.otherRace(selRace) : selRace; });
+    game.playerColorId = selColor;
     game.setup(RC.getMap(selMap), mode, racePick, selVsDiff);
     RC.AI.reset();
     resize();
@@ -348,6 +372,7 @@ window.RC = window.RC || {};
     game.heroesEnabled = true;
     goFullscreen();
     audioGo();
+    game.playerColorId = selColor;
     game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
     openRunToken(selDiff);
     RC.AI.reset();
@@ -367,6 +392,7 @@ window.RC = window.RC || {};
     game.heroesEnabled = true;
     goFullscreen();
     audioGo();
+    game.playerColorId = selColor;
     game.setupSurvival({ race: selRace, ally: false, difficulty: 'medium', daily: true });
     openRunToken('daily');
     RC.AI.reset();

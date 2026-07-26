@@ -13,6 +13,10 @@ RC.Renderer = (function () {
   }
 
   function pal(owner) {
+    // Per-owner chosen colors (set by game.reset from the player's pick) take
+    // precedence; otherwise fall back to the fixed p1..p4 defaults.
+    const pc = RC.playerColors;
+    if (pc && pc[owner]) return pc[owner];
     const o = (owner >= 1 && owner <= 4) ? owner : 1;
     return { body: C['p' + o + '_body'], trim: C['p' + o + '_trim'], dark: C['p' + o + '_dark'] };
   }

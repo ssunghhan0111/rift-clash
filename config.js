@@ -286,8 +286,8 @@ RC.UNITS = {
   },
   globling: {
     id: 'globling', name: 'Globling', role: 'Swarm Melee',
-    hp: 70, dmg: 7, range: 20, cd: 0.7, speed: 120, r: 12, sight: 160,
-    cost: 45, time: 9, supply: 1, armor: 0, energy: 50, regen: 4, race: 'gloop',
+    hp: 70, dmg: 7, range: 20, cd: 0.7, speed: 132, r: 12, sight: 160,
+    cost: 40, time: 8, supply: 1, armor: 0, energy: 50, regen: 5, race: 'gloop',
     acid: { dmg: 2, dur: 4, shred: 1, max: 5 }, key: 'Q',
     ability: { id: 'surge', name: 'Frenzy', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 0, spd: 1.4, fire: 0.55,
                desc: 'Move and attack speed surge for 5s.' },
@@ -295,8 +295,8 @@ RC.UNITS = {
   },
   spitter: {
     id: 'spitter', name: 'Spitter', role: 'Acid Ranged',
-    hp: 90, dmg: 11, range: 120, cd: 1.0, speed: 80, r: 14, sight: 205,
-    cost: 80, time: 16, supply: 2, armor: 0, energy: 80, regen: 3, race: 'gloop',
+    hp: 90, dmg: 11, range: 120, cd: 1.0, speed: 86, r: 14, sight: 205,
+    cost: 65, time: 14, supply: 1, armor: 0, energy: 80, regen: 3, race: 'gloop',
     acid: { dmg: 4, dur: 5, shred: 2, max: 5 }, key: 'W',
     ability: { id: 'nova', name: 'Corrosive Spray', key: 'A', cost: 40, cd: 9, radius: 150, dmg: 16, drain: 0, slowDur: 2,
                desc: 'Sprays acid over nearby enemies, damaging and slowing them.' },
@@ -305,14 +305,14 @@ RC.UNITS = {
   bloat: {
     id: 'bloat', name: 'Bloat', role: 'Acid Tank',
     hp: 300, dmg: 10, range: 22, cd: 1.3, speed: 58, r: 18, sight: 150,
-    cost: 120, time: 24, supply: 3, armor: 2, energy: 0, regen: 6, race: 'gloop',
+    cost: 105, time: 22, supply: 2, armor: 2, energy: 0, regen: 6, race: 'gloop',
     acid: { dmg: 3, dur: 4, shred: 1, max: 5 }, deathBurst: { radius: 110, dmg: 40 }, key: 'E',
     desc: 'Giant slime that soaks damage. Regenerates fast and bursts with acid on death.'
   },
   hydra: {
     id: 'hydra', name: 'Venom Hydra', role: 'Venom Artillery',
     hp: 165, dmg: 15, range: 150, cd: 1.35, speed: 72, r: 17, sight: 185,
-    cost: 135, time: 26, supply: 3, armor: 1, energy: 90, regen: 4, race: 'gloop',
+    cost: 120, time: 24, supply: 2, armor: 1, energy: 90, regen: 4, race: 'gloop',
     acid: { dmg: 7, dur: 6, shred: 3, max: 6 }, key: 'R',
     ability: { id: 'nova', name: 'Venom Burst', key: 'A', cost: 45, cd: 9, radius: 165, dmg: 24, drain: 0, slowDur: 3,
                desc: 'Every head spits at once — a wide cloud that damages and slows.' },
@@ -320,8 +320,8 @@ RC.UNITS = {
   },
   floater: {
     id: 'floater', name: 'Floater', role: 'Air Bomber',
-    hp: 130, dmg: 16, range: 100, cd: 1.1, speed: 120, r: 16,
-    cost: 150, time: 24, supply: 3, armor: 0, energy: 80, regen: 3, race: 'gloop',
+    hp: 130, dmg: 16, range: 100, cd: 1.1, speed: 122, r: 16,
+    cost: 135, time: 22, supply: 2, armor: 0, energy: 80, regen: 3, race: 'gloop',
     flying: true, sight: 255, splash: 18, acid: { dmg: 3, dur: 4, shred: 1, max: 4 }, key: 'Q',
     ability: { id: 'salvo', name: 'Spore Barrage', key: 'B', cost: 40, cd: 9, radius: 95, dmg: 30,
                desc: 'Drops acid spores on a target point for area damage.' },
@@ -343,8 +343,8 @@ RC.UNITS = {
   },
   ardent: {
     id: 'ardent', name: 'Ardent', role: 'Melee Vanguard',
-    hp: 105, dmg: 14, range: 22, cd: 0.8, speed: 96, r: 14, sight: 175,
-    cost: 75, time: 16, supply: 2, armor: 1, energy: 60,
+    hp: 105, dmg: 17, range: 22, cd: 0.8, speed: 96, r: 14, sight: 175,
+    cost: 80, time: 16, supply: 2, armor: 1, energy: 60,
     shield: 70, race: 'aether', key: 'Q',
     ability: { id: 'surge', name: 'Zeal', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 0, spd: 1.45, fire: 0.5,
                desc: 'Blazing charge — big move and attack speed boost for 5s.' },
@@ -352,8 +352,8 @@ RC.UNITS = {
   },
   lancer: {
     id: 'lancer', name: 'Void Lancer', role: 'Ranged Support',
-    hp: 100, dmg: 16, range: 128, cd: 1.15, speed: 82, r: 15, sight: 215,
-    cost: 115, time: 22, supply: 2, armor: 1, energy: 80,
+    hp: 100, dmg: 19, range: 128, cd: 1.15, speed: 82, r: 15, sight: 215,
+    cost: 125, time: 22, supply: 2, armor: 1, energy: 80,
     shield: 90, race: 'aether', key: 'W',
     ability: { id: 'warp', name: 'Phase Step', key: 'X', cost: 20, cd: 6, dist: 235,
                desc: 'Blinks a short distance — dive in or slip out of a fight.' },
@@ -361,8 +361,8 @@ RC.UNITS = {
   },
   bastion: {
     id: 'bastion', name: 'Bastion', role: 'Heavy Siege',
-    hp: 190, dmg: 34, range: 140, cd: 2.0, speed: 56, r: 18, sight: 180,
-    cost: 175, time: 32, supply: 3, armor: 3, energy: 70,
+    hp: 190, dmg: 42, range: 140, cd: 2.0, speed: 56, r: 18, sight: 180,
+    cost: 195, time: 32, supply: 4, armor: 3, energy: 70,
     shield: 160, splash: 38, race: 'aether', key: 'E',
     ability: { id: 'raillock', name: 'Anchor Field', key: 'V', cost: 35, cd: 8, dur: 5, rangeBonus: 75, dmgBonus: 18, splashBonus: 16,
                desc: 'Locks down and unleashes vastly stronger long-range fire for 5s.' },
@@ -370,8 +370,8 @@ RC.UNITS = {
   },
   seraph: {
     id: 'seraph', name: 'Seraph', role: 'Air Superiority',
-    hp: 110, dmg: 19, range: 118, cd: 0.75, speed: 158, r: 15,
-    cost: 165, time: 26, supply: 3, armor: 0, energy: 80,
+    hp: 110, dmg: 23, range: 118, cd: 0.75, speed: 158, r: 15,
+    cost: 185, time: 26, supply: 4, armor: 0, energy: 80,
     shield: 110, flying: true, sight: 300, race: 'aether', key: 'Q',
     ability: { id: 'afterburn', name: 'Solar Wind', key: 'N', cost: 25, cd: 11, dur: 4, spd: 1.55, fire: 0.55,
                desc: 'Rides a solar current — move and attack speed spike for 4s.' },
@@ -379,8 +379,8 @@ RC.UNITS = {
   },
   bladesworn: {
     id: 'bladesworn', name: 'Bladesworn', role: 'Blade Assassin',
-    hp: 95, dmg: 21, range: 24, cd: 0.55, speed: 122, r: 13, sight: 200,
-    cost: 100, time: 18, supply: 2, armor: 0, energy: 70,
+    hp: 95, dmg: 24, range: 24, cd: 0.55, speed: 122, r: 13, sight: 200,
+    cost: 110, time: 18, supply: 2, armor: 0, energy: 70,
     shield: 65, race: 'aether', key: 'R',
     ability: { id: 'warp', name: 'Shadow Step', key: 'X', cost: 20, cd: 5, dist: 260,
                desc: 'Flickers forward in a blink to land on a target — or slip away.' },
@@ -596,7 +596,7 @@ RC.BUILDABLE = ['cell', 'factory', 'hoverpad', 'arclab', 'guardtower', 'arcbatte
 RC.RACES = {
   forge: {
     id: 'forge', name: 'Forge', tint: '#f08a2a',
-    blurb: 'Machine legion — a straightforward army of skills, upgrades and towers, with Patch Bot / Pulse Coil support.',
+    blurb: 'Machine legion — the balanced all-rounder. The widest roster, army upgrades and towers, with Patch Bot / Pulse Coil support. Strong everywhere, extreme nowhere.',
     core: 'core', worker: 'wrench', hero: 'warden',
     buildable: ['cell', 'factory', 'hoverpad', 'arclab', 'guardtower', 'arcbattery'],
     ai: {
@@ -609,7 +609,7 @@ RC.RACES = {
   },
   gloop: {
     id: 'gloop', name: 'Gloop', tint: '#5ddc7a',
-    blurb: 'Acid swarm — units self-heal and their attacks melt enemy armor. No healers required.',
+    blurb: 'Acid swarm — cheap, fast, self-healing units you field in overwhelming numbers. Low supply means far bigger armies; attacks melt armor and no healers are needed. Quantity IS the strategy.',
     core: 'biocore', worker: 'slug', hero: 'matriarch',
     buildable: ['membrane', 'hatchery', 'spire', 'evochamber', 'acidtower'],
     ai: {
@@ -622,7 +622,7 @@ RC.RACES = {
   },
   aether: {
     id: 'aether', name: 'Aether', tint: '#b98cff',
-    blurb: 'Alien ascendants — every unit carries a recharging plasma shield, and combat units warp in at forward Warp Conduits. Few, costly, devastating.',
+    blurb: 'Alien ascendants — a handful of shielded elites that warp in at forward Warp Conduits and hit like a siege. Heavy units eat supply, so you field FEW units — but each one is devastating.',
     core: 'nexus', worker: 'acolyte', hero: 'archon',
     buildable: ['conduit', 'warpgate', 'astralgate', 'conclave', 'photonprism'],
     ai: {
@@ -657,3 +657,46 @@ RC.UPGRADES = {
   tough: { id: 'tough', name: 'Reinforced Frame',  costs: [110, 160, 210], time: [26, 32, 38], desc: 'All units gain max HP and regen' },
 };
 RC.UPGRADE_ORDER = ['atk', 'arm', 'eng', 'spd', 'crit', 'frost', 'tough'];
+
+// ── 팀 색상 (선택 가능) / Selectable team colors ───────────
+// After picking a race, the player picks one of these. Each entry carries the
+// body / trim / dark triplet the renderer needs (renderer.pal reads RC.playerColors).
+RC.TEAMCOLORS = [
+  { id: 'azure',   name: 'Azure',   body: '#3a86e0', trim: '#ffb04a', dark: '#1e4a80' },
+  { id: 'crimson', name: 'Crimson', body: '#e6483f', trim: '#ffd23f', dark: '#8a221c' },
+  { id: 'jade',    name: 'Jade',    body: '#38c46a', trim: '#d7f05a', dark: '#1f6b3c' },
+  { id: 'violet',  name: 'Violet',  body: '#b46bff', trim: '#e0a0ff', dark: '#573a80' },
+  { id: 'teal',    name: 'Teal',    body: '#22c6c6', trim: '#9ff0e6', dark: '#125e5e' },
+  { id: 'amber',   name: 'Amber',   body: '#f0872a', trim: '#ffd694', dark: '#8a4712' },
+  { id: 'rose',    name: 'Rose',    body: '#ff6ba8', trim: '#ffc4dc', dark: '#8a2f55' },
+  { id: 'gold',    name: 'Gold',    body: '#e8c53f', trim: '#fff2a6', dark: '#8a7016' },
+];
+RC.DEFAULT_COLOR = 'azure';
+// Default color each owner falls back to when the player has not chosen (or for
+// AI seats). Kept distinct so 2v2 never has two same-colored seats by default.
+RC.OWNER_DEFAULT_COLOR = { 1: 'azure', 2: 'crimson', 3: 'jade', 4: 'violet' };
+
+// ── 생존성 밸런스 패스 / Survivability pass ────────────────
+// The attack numbers stayed the same; instead every unit's HP and every plasma
+// shield (units AND buildings) is scaled up so fights last longer and units stop
+// evaporating. Tweak HP_MULT / SHIELD_MULT here to retune the whole game at once.
+RC.BALANCE = { HP_MULT: 1.35, SHIELD_MULT: 1.35 };
+(function scaleSurvivability() {
+  const hm = RC.BALANCE.HP_MULT, sm = RC.BALANCE.SHIELD_MULT;
+  const R = (v, m) => Math.round(v * m);
+  for (const k in RC.UNITS) {
+    const u = RC.UNITS[k];
+    if (u.hp) u.hp = R(u.hp, hm);
+    if (u.shield) u.shield = R(u.shield, sm);
+    if (u.grow) {
+      if (u.grow.hp) u.grow.hp = R(u.grow.hp, hm);
+      if (u.grow.shield) u.grow.shield = R(u.grow.shield, sm);
+    }
+  }
+  // Buildings keep their HP (base race stays the same to break) but their plasma
+  // shields scale so Aether structures stay proportionally tanky.
+  for (const k in RC.BUILDINGS) {
+    const b = RC.BUILDINGS[k];
+    if (b.shield) b.shield = R(b.shield, sm);
+  }
+})();

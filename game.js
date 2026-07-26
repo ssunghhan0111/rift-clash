@@ -125,6 +125,28 @@ window.RC = window.RC || {};
         this.upgrades[p.owner] = { atk: 0, arm: 0, eng: 0, spd: 0, crit: 0, frost: 0, tough: 0 };
       });
 
+      // ── 플레이어 색상 / Player colors ──
+      // The human's owner takes the color they picked; every other seat takes a
+      // distinct default, skipping any color already in use so no two seats clash.
+      this.playerColors = {};
+      RC.playerColors = this.playerColors;
+      const cList = RC.TEAMCOLORS || [];
+      if (cList.length) {
+        const byId = id => cList.find(c => c.id === id) || cList[0];
+        const used = new Set();
+        const chosen = byId(this.playerColorId || RC.DEFAULT_COLOR);
+        this.playerColors[this.playerOwner] = chosen;
+        used.add(chosen.id);
+        this.players.forEach(p => {
+          if (this.playerColors[p.owner]) return;
+          const pref = (RC.OWNER_DEFAULT_COLOR && RC.OWNER_DEFAULT_COLOR[p.owner]) || null;
+          let c = (pref && !used.has(pref)) ? byId(pref) : cList.find(x => !used.has(x.id));
+          if (!c) c = cList[0];
+          this.playerColors[p.owner] = c;
+          used.add(c.id);
+        });
+      }
+
       this.zones = this.zones || [];
       this.crystal = null;
       this.survivalWave = 0;

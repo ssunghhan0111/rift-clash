@@ -448,3 +448,72 @@ RC.SURVIVAL = {
     rocks(900, 1400, 110, 3, 95, 424)
   ),
 };
+
+// ── 맵별 고유 크기 + 시그니처 강조 / Distinct dimensions + signature amplify ──
+// Every map now has its OWN world size and aspect ratio, so they play differently
+// (wide + open favors mobility and air; tall + compact favors rushes and choke
+// fighting). One signature terrain feature per map is enlarged so the thing that
+// makes each planet special actually dominates the fight.
+RC.MAP_DIMS = {
+  earth:   { w: 2800, h: 2600 },   // compact, near-square home
+  venus:   { w: 3800, h: 2000 },   // wide-open scorched desert
+  pluto:   { w: 2600, h: 3000 },   // tall vertical frozen canyon
+  mars:    { w: 4000, h: 2000 },   // widest — the great canyon runs across it
+  jupiter: { w: 3000, h: 2800 },   // tall storm columns
+  saturn:  { w: 4200, h: 1800 },   // ultra-wide ring belt
+};
+// { t: zone type to amplify, s: enlarge factor } — the planet's signature terrain.
+RC.MAP_SIGNATURE = {
+  earth:   { t: 'mud', s: 1.25 },  // the river that splits the map north–south
+  venus:   { t: 'mud', s: 1.30 },  // the deep sand you must go around
+  pluto:   { t: 'mud', s: 1.30 },  // deep snow that drags you down
+  mars:    { t: 'low', s: 1.32 },  // Valles Marineris — the canyon
+  jupiter: { t: 'mud', s: 1.30 },  // the jet-stream bands
+  saturn:  { t: 'mud', s: 1.28 },  // the debris arcs of the rings
+};
+
+(function reshapeMaps() {
+  const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+  RC.MAPS.forEach(m => {
+    const dim = RC.MAP_DIMS[m.id];
+    if (!dim) return;
+    const oldW = m.world.w, oldH = m.world.h;
+    const sx = dim.w / oldW, sy = dim.h / oldH;
+    const scalePoly = poly => { for (const p of poly) { p[0] = Math.round(p[0] * sx); p[1] = Math.round(p[1] * sy); } };
+
+    (m.spawns || []).forEach(s => {
+      s.x = clamp(Math.round(s.x * sx), 130, dim.w - 130);
+      s.y = clamp(Math.round(s.y * sy), 130, dim.h - 130);
+    });
+    (m.terrain || []).forEach(t => { if (t.poly) scalePoly(t.poly); });
+    (m.obstacles || []).forEach(o => {
+      o.x = Math.round(o.x * sx); o.y = Math.round(o.y * sy);
+      o.w = Math.round(o.w * sx); o.h = Math.round(o.h * sy);
+    });
+    (m.midNodes || []).forEach(n => {
+      n.x = Math.round(n.x * sx); n.y = Math.round(n.y * sy);
+      n.rad = Math.round(n.rad * (sx + sy) / 2);
+    });
+
+    const sig = RC.MAP_SIGNATURE[m.id];
+    (m.zones || []).forEach(z => {
+      if (z.poly) {
+        scalePoly(z.poly);
+        // Amplify the signature zone by scaling it around its own centroid.
+        if (sig && z.t === sig.t) {
+          let cx = 0, cy = 0;
+          for (const p of z.poly) { cx += p[0]; cy += p[1]; }
+          cx /= z.poly.length; cy /= z.poly.length;
+          for (const p of z.poly) {
+            p[0] = clamp(Math.round(cx + (p[0] - cx) * sig.s), -60, dim.w + 60);
+            p[1] = clamp(Math.round(cy + (p[1] - cy) * sig.s), -60, dim.h + 60);
+          }
+        }
+      }
+      z.bb = null;
+      RC.prepZone(z);
+    });
+
+    m.world = { w: dim.w, h: dim.h };
+  });
+})();

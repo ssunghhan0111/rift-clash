@@ -312,6 +312,10 @@
   .mapcard .mc-desc { font-size: 11px; color: var(--dim); padding: 0 10px 10px; line-height: 1.4; min-height: 44px; }
 
   #ss-modes, #ss-races { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
+  #ss-colors { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
+  .colorsw { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.4); transition: transform .08s ease; }
+  .colorsw:hover { transform: scale(1.12); }
+  .colorsw.sel { border-color: #fff; transform: scale(1.18); box-shadow: 0 0 0 2px rgba(255,255,255,0.35), 0 2px 8px rgba(0,0,0,0.5); }
   .racebtn { min-width: 280px; max-width: 300px; text-align: left; border-top-width: 3px; }
   .racebtn .mb-sub { line-height: 1.45; margin-top: 5px; }
   /* 종족 얼굴 — 각 종족의 영웅 초상 */
@@ -955,6 +959,10 @@
   <div id="sec-race" class="mode-sec">
     <div class="ss-h" id="race-h">Faction (enemy AI takes the other)</div>
     <div id="ss-races"></div>
+  </div>
+  <div id="sec-color" class="mode-sec">
+    <div class="ss-h">Your color</div>
+    <div id="ss-colors"></div>
   </div>
 
   <div id="act-vs" class="mode-sec row">
