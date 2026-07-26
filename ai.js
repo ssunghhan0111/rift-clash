@@ -130,6 +130,9 @@ RC.AI = (function () {
     });
 
     // 2) 인구 여유
+    // (Tried widening this buffer when the cap went to 100 — measured no gain over
+    // 8 AI-vs-AI runs. The AI is gated on shard income, not on the buffer, so the
+    // simple rule stays.)
     const buildingSupply = myBuildings(g, own, R.supply).some(b => !b.done);
     if (sup.max - sup.used <= 3 && sup.max < K.POP_CAP && !buildingSupply && shard >= 80) {
       const spot = findSpot(g, R.supply, core, own);

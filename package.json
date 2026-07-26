@@ -8,7 +8,7 @@
     "start": "node server.js",
     "test": "npm run test:sim && npm run test:browser",
     "test:sim": "node tests/wavecheck.js && node tests/simtest.js && node tests/sighttest.js && node tests/reachtest.js && node tests/planettest.js",
-    "test:browser": "node tests/lobbytest.js && node tests/uitest.js && node tests/devtest.js && node tests/touchtest.js && node tests/fstest.js && node tests/voicetest.js && node tests/sharetest.js && node tests/herotest.js",
+    "test:browser": "node tests/lobbytest.js && node tests/uitest.js && node tests/devtest.js && node tests/touchtest.js && node tests/fstest.js && node tests/voicetest.js && node tests/sharetest.js && node tests/herotest.js && node tests/zoomtest.js",
     "test:waves": "node tests/wavecheck.js",
     "test:survival": "node tests/simtest.js",
     "test:sight": "node tests/sighttest.js",
@@ -22,7 +22,8 @@
     "test:share": "node tests/sharetest.js",
     "test:touch": "node tests/touchtest.js",
     "test:fullscreen": "node tests/fstest.js",
-    "test:hero": "node tests/herotest.js"
+    "test:hero": "node tests/herotest.js",
+    "test:zoom": "node tests/zoomtest.js"
   },
   "engines": {
     "node": ">=18"

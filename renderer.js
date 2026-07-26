@@ -94,8 +94,19 @@ RC.Renderer = (function () {
     return { x: Math.sin(p * 61) * amp, y: Math.cos(p * 47) * amp * 0.8 };
   }
 
+  // 카메라 배율. 클라이언트 전용 — 시뮬레이션에는 절대 영향을 주지 않는다.
+  function camZoom(g) {
+    const z = g && g.camera ? g.camera.z : 1;
+    return (typeof z === 'number' && z > 0) ? z : 1;
+  }
+
   function draw(g, input) {
     const W = cv.width, H = cv.height;
+    const z = camZoom(g);
+    // How much WORLD the canvas shows. At zoom 1 this is just the canvas size;
+    // every world-space pass below culls and tiles against these, not W/H, or the
+    // grid, clouds and fog stop short of the screen edge the moment you zoom out.
+    const VW = W / z, VH = H / z;
     const shk = shakeOffset(g);
     if (shk) { ctx.save(); ctx.translate(shk.x, shk.y); }
     // 행성마다 하늘/땅 색이 다르다 (지구=초록, 작열=붉음, 얼음=검푸름)
@@ -104,26 +115,30 @@ RC.Renderer = (function () {
     // 표면 질감 (카메라를 따라 흘러가도록 패턴 원점을 이동)
     const tex = groundTexture(g);
     if (tex) {
-      // 반점 + 대규모 명암이 한 타일에 구워져 있어 채우기 한 번이면 된다
+      // 반점 + 대규모 명암이 한 타일에 구워져 있어 채우기 한 번이면 된다.
+      // 오프셋은 화면 픽셀 기준 — 배율을 곱해야 지면과 같은 속도로 흐른다.
       ctx.save();
-      ctx.translate(-Math.round(g.camera.x) % 512, -Math.round(g.camera.y) % 512);
+      ctx.translate(-Math.round(g.camera.x * z) % 512, -Math.round(g.camera.y * z) % 512);
       ctx.fillStyle = tex;
       ctx.fillRect(0, 0, W + 512, H + 512);
       ctx.restore();
     }
 
     ctx.save();
-    ctx.translate(-Math.round(g.camera.x), -Math.round(g.camera.y));
+    // Snap the translation to whole SCREEN pixels (hence the *z ... /z) so the
+    // world layer stays crisp instead of landing on a half pixel.
+    ctx.scale(z, z);
+    ctx.translate(-Math.round(g.camera.x * z) / z, -Math.round(g.camera.y * z) / z);
 
-    drawTerrain(g, W, H);
+    drawTerrain(g, VW, VH);
     drawZones(g);                     // 전술 지형 (고지/숲/늪/분출구)
-    drawClouds(g, W, H);              // 흘러가는 구름 그림자 (지면 위, 유닛 아래)
+    drawClouds(g, VW, VH);            // 흘러가는 구름 그림자 (지면 위, 유닛 아래)
     (g.obstacles || []).forEach(o => drawObstacle(o));
     g.nodes.forEach(n => drawNode(n));
     g.buildings.forEach(b => drawBuilding(g, b));
     g.fx.forEach(f => drawShot(f));
     g.units.forEach(u => drawUnit(g, u));
-    drawFog(g, W, H);                 // 전장의 안개 — 적/지형을 덮는다
+    drawFog(g, VW, VH);               // 전장의 안개 — 적/지형을 덮는다
     drawSelection(g);
     drawMarks(g);                     // 명령 표식 + 데미지 숫자
     if (g.placing) drawGhost(g, input);
@@ -2800,7 +2815,9 @@ RC.Renderer = (function () {
 
     mctx.strokeStyle = '#ffffff';
     mctx.lineWidth = 1;
-    mctx.strokeRect(g.camera.x * sx, g.camera.y * sy, W * sx, H * sy);
+    // 뷰포트 사각형 — 확대/축소하면 보이는 월드 크기가 달라진다
+    const z = camZoom(g);
+    mctx.strokeRect(g.camera.x * sx, g.camera.y * sy, (W / z) * sx, (H / z) * sy);
   }
 
   // ── 종족 얼굴 (시작 화면 종족 선택용) ────────────────

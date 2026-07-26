@@ -24,6 +24,7 @@ npm run test:browser  # real Chromium, real WebSockets, real WebRTC
 | `voicetest.js` | Two browsers holding a real WebRTC call with audio flowing |
 | `sharetest.js` | The share card renders and the `?join=` deep link works |
 | `herotest.js` | Heroes in every mode incl. online: skills, cooldowns, casting |
+| `zoomtest.js` | Wheel + pinch zoom, cursor anchoring, clicks while zoomed, pop cap |
 | `shots.js` | Renders each planet to `shots/` for eyeballing (not a test) |
 
 ## Notes
@@ -57,6 +58,11 @@ Worth knowing what they are for. All of these were live in shipped code:
   every hero as level 1 (`simtest.js` netcode checks).
 - **Heroes were switched off in online matches entirely** — every other mode had
   them (`herotest.js`).
+- **The snapshot was too fat for the new population cap.** A full state dump 15
+  times a second at ~155 bytes per unit meant a 2v2 at 100 supply each would have
+  pushed nearly a megabyte a second at every client. Type ids and unit states now
+  travel as integers and default fields are omitted: 78 B/unit, roughly half
+  (`zoomtest.js`).
 - **The Survival ally never defended the Rift Crystal.** The horde has no base,
   so the AI's attack wave looked for the nearest enemy core, found none, sent the
   army to its own core and left it there. About one run in twenty died on wave 1

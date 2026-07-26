@@ -7,12 +7,21 @@ RC.CFG = {
   WORLD_W: 3200,
   WORLD_H: 2400,
 
-  POP_CAP: 30,
+  POP_CAP: 100,         // 인구 상한 — 대규모 교전용 (was 30)
   START_SHARD: 250,
 
   GATHER_AMOUNT: 5,     // 한 번 캘 때 샤드
   GATHER_TIME: 2.4,     // 채집에 걸리는 초
   NODE_START: 1200,     // 결정 무더기 매장량
+
+  // ── 확대/축소 (zoom) ──
+  // Deliberately a narrow band. A wide zoom range on an RTS makes units tiny and
+  // click targets unreliable; this is only enough to take in a bigger fight or to
+  // lean into a base. 1.0 is the design scale everything was drawn for.
+  ZOOM_MIN: 0.72,       // 축소 한계 (더 넓게)
+  ZOOM_MAX: 1.30,       // 확대 한계 (더 가깝게)
+  ZOOM_STEP: 1.10,      // 휠 한 칸
+  ZOOM_PINCH: 1.0,      // 핀치 감도 배수
 
   CAM_SPEED: 2200,      // px/sec (max, at the true screen edge)
   EDGE_PAN: 56,         // 화면 가장자리 감지 픽셀 (edge-scroll zone width; ramps up to CAM_SPEED)

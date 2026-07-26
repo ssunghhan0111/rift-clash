@@ -86,26 +86,57 @@ window.RC = window.RC || {};
     }
   }
 
+  // ── Wire dictionaries ──
+  // The snapshot is a full state dump at 15 Hz, so every byte per unit is paid
+  // ~15 times a second by every client. With the population cap at 100 a 2v2 can
+  // put 300+ units on the field, where a fat row turns into megabits. Two cheap
+  // wins, both loss-free: unit/building type ids and unit states travel as
+  // integers instead of strings, and any field sitting at its default is left
+  // out of the row entirely (the reader fills the default back in).
+  // Both sides run THIS file, so the tables can never disagree. An id that
+  // somehow isn't in the table falls back to the plain string.
+  const STATES = ['idle', 'move', 'attack', 'gather', 'build'];
+  let UTYPES = null, BTYPES = null;             // built lazily — RC.UNITS is defined by config.js
+  function utypes() { return UTYPES || (UTYPES = Object.keys(RC.UNITS)); }
+  function btypes() { return BTYPES || (BTYPES = Object.keys(RC.BUILDINGS)); }
+  function packType(list, t) { const i = list.indexOf(t); return i < 0 ? t : i; }
+  function unpackType(list, v) { return typeof v === 'number' ? list[v] : v; }
+
   // ── Serialize the authoritative game into a compact snapshot ──
   function serialize(game) {
-    const U = game.units.map(u => ({
-      i: u.id, t: u.type, o: u.owner,
-      x: Math.round(u.x), y: Math.round(u.y),
-      h: Math.round(u.hp), m: Math.round(u.maxHp),
-      f: Math.round(u.facing * 128), s: u.state, c: u.carry, e: Math.round(u.energy),
-      b: (u.surge > 0 ? 1 : 0) | (u.rail > 0 ? 2 : 0) | (u.bulwark > 0 ? 4 : 0) | (u.slow > 0 ? 8 : 0),
-      a: u.acidStacks || 0, cg: (u.cargo ? u.cargo.length : 0), hf: u.hitFlash > 0 ? 1 : 0,
-      sh: u.maxShield ? Math.round(u.shield) : 0, sm: u.maxShield ? Math.round(u.maxShield) : 0,
+    const UT = utypes(), BT = btypes();
+    const U = game.units.map(u => {
+      const st = STATES.indexOf(u.state);
+      const d = {
+        i: u.id, t: packType(UT, u.type), o: u.owner,
+        x: Math.round(u.x), y: Math.round(u.y),
+        h: Math.round(u.hp), m: Math.round(u.maxHp),
+        f: Math.round(u.facing * 128),
+      };
+      if (st > 0) d.s = st;                                   // 0 = idle, the default
+      else if (st < 0) d.s = u.state;
+      const carry = u.carry || 0;            if (carry) d.c = carry;
+      const en = Math.round(u.energy || 0);  if (en) d.e = en;
+      const b = (u.surge > 0 ? 1 : 0) | (u.rail > 0 ? 2 : 0) | (u.bulwark > 0 ? 4 : 0) | (u.slow > 0 ? 8 : 0);
+      if (b) d.b = b;
+      if (u.acidStacks) d.a = u.acidStacks;
+      if (u.cargo && u.cargo.length) d.cg = u.cargo.length;
+      if (u.hitFlash > 0) d.hf = 1;
+      if (u.maxShield) { d.sh = Math.round(u.shield); d.sm = Math.round(u.maxShield); }
       // 영웅 상태 — 레벨/경험치/스킬 쿨다운이 없으면 클라이언트 스킬 패널이 항상 1레벨로 보인다
-      hr: u.hero ? {
-        l: u.level, xp: Math.round(u.xp),
-        d: u.downed ? 1 : 0, rt: Math.round((u.reviveT || 0) * 10), rc: u.reviveCost || 0,
-        cd: (function () { const o = {}; for (const k in u.skillCd) if (u.skillCd[k] > 0) o[k] = Math.round(u.skillCd[k] * 10); return o; })(),
-      } : null,
-      tp: (u.temp != null) ? 1 : 0,       // 궁극기 소환 유닛 (임시)
-    }));
+      if (u.hero) {
+        const cd = {};
+        for (const k in u.skillCd) if (u.skillCd[k] > 0) cd[k] = Math.round(u.skillCd[k] * 10);
+        d.hr = { l: u.level, xp: Math.round(u.xp), cd };
+        if (u.downed) d.hr.d = 1;
+        if (u.reviveT) d.hr.rt = Math.round(u.reviveT * 10);
+        if (u.reviveCost) d.hr.rc = u.reviveCost;
+      }
+      if (u.temp != null) d.tp = 1;          // 궁극기 소환 유닛 (임시)
+      return d;
+    });
     const B = game.buildings.map(b => ({
-      i: b.id, t: b.type, o: b.owner, x: b.x, y: b.y,
+      i: b.id, t: packType(BT, b.type), o: b.owner, x: b.x, y: b.y,
       h: Math.round(b.hp), m: b.maxHp, p: Math.round(b.buildProgress * 1000),
       q: b.queue.map(j => ({ t: j.type, l: Math.round(j.timeLeft * 100), n: j.total })),
       r: b.research ? { k: b.research.kind, l: Math.round(b.research.timeLeft * 100), n: b.research.total } : null,
@@ -133,23 +164,28 @@ window.RC = window.RC || {};
     for (const o in s.res) { if (!game.res[o]) game.res[o] = { shard: 0 }; game.res[o].shard = s.res[o]; }
     game.upgrades = s.up;
 
+    const UT = utypes(), BT = btypes();
     const umap = game._umap || (game._umap = new Map());
     const useen = new Set();
     for (const d of s.U) {
       useen.add(d.i);
+      const type = unpackType(UT, d.t);
       let u = umap.get(d.i);
-      if (!u || u.type !== d.t) { u = new RC.Unit(d.t, d.x, d.y, d.o); u.id = d.i; umap.set(d.i, u); }
+      if (!u || u.type !== type) { u = new RC.Unit(type, d.x, d.y, d.o); u.id = d.i; umap.set(d.i, u); }
       u.owner = d.o; u.x = d.x; u.y = d.y; u.hp = d.h; u.maxHp = d.m; u.facing = d.f / 128;
-      u.state = d.s; u.carry = d.c; u.energy = d.e;
-      u.surge = (d.b & 1) ? 1 : 0; u.rail = (d.b & 2) ? 1 : 0; u.bulwark = (d.b & 4) ? 1 : 0; u.slow = (d.b & 8) ? 1 : 0;
-      u.acidStacks = d.a; u.hitFlash = d.hf ? 0.12 : 0;
+      // anything the sender left out is at its default — that is how the row stays small
+      u.state = (typeof d.s === 'number') ? STATES[d.s] : (d.s || 'idle');
+      u.carry = d.c || 0; u.energy = d.e || 0;
+      const bf = d.b || 0;
+      u.surge = (bf & 1) ? 1 : 0; u.rail = (bf & 2) ? 1 : 0; u.bulwark = (bf & 4) ? 1 : 0; u.slow = (bf & 8) ? 1 : 0;
+      u.acidStacks = d.a || 0; u.hitFlash = d.hf ? 0.12 : 0;
       // 실드는 서버가 권위 — 클라이언트는 값만 반영하고 반짝임만 로컬로 연출
       if (d.sm) { if (d.sh < u.shield) u.shieldFx = 0.18; u.shield = d.sh; u.maxShield = d.sm; }
-      u.cargo = u.def.transport ? new Array(d.cg) : null;
+      u.cargo = u.def.transport ? new Array(d.cg || 0) : null;
       // 영웅 — 서버가 권위. 레벨/부활/쿨다운을 그대로 반영해야 스킬·궁극기 버튼이 맞는다
       if (d.hr && u.hero) {
         u.level = d.hr.l; u.xp = d.hr.xp;
-        u.downed = !!d.hr.d; u.reviveT = d.hr.rt / 10; u.reviveCost = d.hr.rc;
+        u.downed = !!d.hr.d; u.reviveT = (d.hr.rt || 0) / 10; u.reviveCost = d.hr.rc || 0;
         u.skillCd = {};
         for (const k in d.hr.cd) u.skillCd[k] = d.hr.cd[k] / 10;
       }
@@ -165,8 +201,9 @@ window.RC = window.RC || {};
     const bseen = new Set();
     for (const d of s.B) {
       bseen.add(d.i);
+      const btype = unpackType(BT, d.t);
       let b = bmap.get(d.i);
-      if (!b || b.type !== d.t) { b = new RC.Building(d.t, d.x, d.y, d.o, true); b.id = d.i; bmap.set(d.i, b); }
+      if (!b || b.type !== btype) { b = new RC.Building(btype, d.x, d.y, d.o, true); b.id = d.i; bmap.set(d.i, b); }
       b.owner = d.o; b.x = d.x; b.y = d.y; b.hp = d.h; b.maxHp = d.m; b.buildProgress = d.p / 1000;
       b.queue = d.q.map(j => ({ type: j.t, timeLeft: j.l / 100, total: j.n }));
       b.research = d.r ? { kind: d.r.k, timeLeft: d.r.l / 100, total: d.r.n } : null;

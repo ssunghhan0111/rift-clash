@@ -74,11 +74,46 @@ RC.Input = (function () {
   let panSingle = false;     // pan driven by a single pointer (touch or middle mouse)
   let panMoved = false;      // the pan pointer actually moved (→ it was navigation, not a tap)
   let panLast = null;
+  let pinchDist = 0;         // finger spread when the pinch was last measured
   let longPressTimer = null;
   let longPressFired = false;
 
+  // ── 확대/축소 ──────────────────────────────────────────────────────────
+  // Zoom lives on g.camera.z, next to x/y, and like them it is client-only —
+  // the server never reads the camera, so zooming can never affect the match.
+  // The band is deliberately narrow (CFG.ZOOM_MIN/MAX): on an RTS a wide zoom
+  // makes units too small to click reliably.
+  function zoom() {
+    const z = g && g.camera ? g.camera.z : 1;
+    return (typeof z === 'number' && z > 0) ? z : 1;
+  }
+  // You can never zoom out past the map — beyond that the camera clamp has
+  // nothing left to hold on to and you'd be staring at the void past the edge.
+  function minZoom() {
+    if (!cv) return CFG.ZOOM_MIN;
+    return Math.max(CFG.ZOOM_MIN, cv.width / CFG.WORLD_W, cv.height / CFG.WORLD_H);
+  }
+  // Zoom about a screen point: whatever world point sits under the cursor (or the
+  // pinch centre) must still be under it afterwards, or zooming feels like a shove.
+  function setZoom(z, ax, ay) {
+    if (!g || !g.camera || !cv) return;
+    const z0 = zoom();
+    const z1 = Math.max(minZoom(), Math.min(CFG.ZOOM_MAX, z));
+    if (Math.abs(z1 - z0) < 1e-4) return;
+    const px = (ax == null) ? cv.width / 2 : ax;
+    const py = (ay == null) ? cv.height / 2 : ay;
+    const wx = px / z0 + g.camera.x, wy = py / z0 + g.camera.y;
+    g.camera.z = z1;
+    g.camera.x = wx - px / z1;
+    g.camera.y = wy - py / z1;
+    clampCam();
+  }
+  function zoomBy(f, ax, ay) { setZoom(zoom() * f, ax, ay); }
+  function resetZoom() { setZoom(1, null, null); }
+
   function toWorld(sx, sy) {
-    return { x: sx + g.camera.x, y: sy + g.camera.y };
+    const z = zoom();
+    return { x: sx / z + g.camera.x, y: sy / z + g.camera.y };
   }
 
   function rectPoint(e, r) {
@@ -92,6 +127,18 @@ RC.Input = (function () {
     mini.style.touchAction = 'none';
 
     cv.addEventListener('contextmenu', e => e.preventDefault());
+
+    // 마우스 휠 = 확대/축소 (PC). 커서 아래 지점을 고정한 채 배율만 바뀐다.
+    // passive:false — 페이지가 대신 스크롤되면 안 된다.
+    cv.addEventListener('wheel', e => {
+      if (!e.deltaY) return;
+      e.preventDefault();
+      const r = cv.getBoundingClientRect();
+      const p = rectPoint(e, r);
+      // Trackpads report tiny deltas and mice report ~100 per notch; normalising
+      // by sign keeps one notch feeling like one notch on both.
+      zoomBy(e.deltaY < 0 ? CFG.ZOOM_STEP : 1 / CFG.ZOOM_STEP, p.x, p.y);
+    }, { passive: false });
 
     cv.addEventListener('pointerdown', onPointerDown);
     cv.addEventListener('pointermove', onPointerMove);
@@ -129,8 +176,9 @@ RC.Input = (function () {
       const r = mini.getBoundingClientRect();
       const fx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
       const fy = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
-      g.camera.x = fx * CFG.WORLD_W - cv.width / 2;
-      g.camera.y = fy * CFG.WORLD_H - cv.height / 2;
+      const z = zoom();
+      g.camera.x = fx * CFG.WORLD_W - (cv.width / z) / 2;
+      g.camera.y = fy * CFG.WORLD_H - (cv.height / z) / 2;
       clampCam();
     };
     mini.addEventListener('pointerdown', e => {
@@ -175,8 +223,9 @@ RC.Input = (function () {
 
     pointers.set(e.pointerId, { x: p.x, y: p.y });
 
-    if (pointers.size >= 2) {            // two fingers → pan
+    if (pointers.size >= 2) {            // two fingers → pan + pinch zoom
       panMode = true; panSingle = false; panMoved = false;
+      pinchDist = spread();
       clearLongPress();
       // A second finger landing mid-drag means the player wanted to navigate,
       // not select — abandon the box silently rather than selecting on release.
@@ -216,9 +265,21 @@ RC.Input = (function () {
 
     if (panMode) {
       const c = panSingle ? { x: p.x, y: p.y } : centroid();
+      // Two fingers do BOTH at once: the centroid pans, the spread between them
+      // zooms — the same gesture every map app uses. The zoom is anchored on the
+      // centroid so the ground stays put under the fingers.
+      if (!panSingle && pointers.size >= 2) {
+        const d = spread();
+        if (d && pinchDist && c) {
+          const f = 1 + (d / pinchDist - 1) * (CFG.ZOOM_PINCH || 1);
+          if (Math.abs(f - 1) > 0.002) setZoom(zoom() * f, c.x, c.y);
+        }
+        if (d) pinchDist = d;
+      }
+      const zc = zoom();
       if (panLast && c) {
-        g.camera.x -= (c.x - panLast.x);
-        g.camera.y -= (c.y - panLast.y);
+        g.camera.x -= (c.x - panLast.x) / zc;     // screen pixels → world units
+        g.camera.y -= (c.y - panLast.y) / zc;
         clampCam();
       }
       panLast = c;
@@ -260,7 +321,9 @@ RC.Input = (function () {
     if (panMode) {
       // a single-finger touch that didn't move was actually a tap → select/command
       if (panSingle && wasPrimary && !panMoved && !longPressFired && e.pointerType !== 'mouse') handleTap(e);
-      if (pointers.size < 2) { panMode = false; panSingle = false; panLast = null; }
+      if (pointers.size < 2) { panMode = false; panSingle = false; panLast = null; pinchDist = 0; }
+      // a third finger lifting must not read as a sudden pinch — re-measure
+      else { pinchDist = spread(); panLast = centroid(); }
       if (wasPrimary) primaryId = null;
       clearLongPress();
       return;
@@ -292,6 +355,14 @@ RC.Input = (function () {
     let x = 0, y = 0, n = 0;
     pointers.forEach(pt => { x += pt.x; y += pt.y; n++; });
     return n ? { x: x / n, y: y / n } : null;
+  }
+
+  // Distance between the first two fingers — the pinch measurement.
+  function spread() {
+    const pts = [];
+    pointers.forEach(pt => { if (pts.length < 2) pts.push(pt); });
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
   }
 
   function ME() { return g.playerOwner; }
@@ -411,6 +482,10 @@ RC.Input = (function () {
 
     const me = g.playerOwner;
     if (k === 'escape') { g.placing = null; g.selection = []; return; }
+    // 확대/축소 — 휠이 없는 노트북용. 0 은 기본 배율로 복귀.
+    if (k === '+' || k === '=') { e.preventDefault(); zoomBy(CFG.ZOOM_STEP, null, null); return; }
+    if (k === '-' || k === '_') { e.preventDefault(); zoomBy(1 / CFG.ZOOM_STEP, null, null); return; }
+    if (k === '0') { e.preventDefault(); resetZoom(); return; }
     if (k === ' ') {
       e.preventDefault();
       const c = g.core(me);
@@ -482,14 +557,22 @@ RC.Input = (function () {
   }
 
   function centerOn(x, y) {
-    g.camera.x = x - cv.width / 2;
-    g.camera.y = y - cv.height / 2;
+    const z = zoom();
+    g.camera.x = x - (cv.width / z) / 2;
+    g.camera.y = y - (cv.height / z) / 2;
     clampCam();
   }
 
   function clampCam() {
-    g.camera.x = Math.max(0, Math.min(CFG.WORLD_W - cv.width, g.camera.x));
-    g.camera.y = Math.max(0, Math.min(CFG.WORLD_H - cv.height, g.camera.y));
+    if (!g || !g.camera || !cv) return;
+    // The visible world is the canvas divided by the zoom. If it somehow exceeds
+    // the map (a very wide window on a small map) centre rather than pinning to 0,
+    // which would leave dead space hanging off one side.
+    const z = zoom();
+    const vw = cv.width / z, vh = cv.height / z;
+    const maxX = CFG.WORLD_W - vw, maxY = CFG.WORLD_H - vh;
+    g.camera.x = maxX <= 0 ? maxX / 2 : Math.max(0, Math.min(maxX, g.camera.x));
+    g.camera.y = maxY <= 0 ? maxY / 2 : Math.max(0, Math.min(maxY, g.camera.y));
   }
 
   // 카메라 이동 — 키보드 + 화면 가장자리 (마우스만, 터치는 두 손가락 드래그로 팬)
@@ -528,8 +611,11 @@ RC.Input = (function () {
     }
 
     if (dx || dy) {
-      g.camera.x += dx;
-      g.camera.y += dy;
+      // CAM_SPEED is a screen speed, so convert to world units at the current
+      // zoom — otherwise the map crawls when you zoom out and races when you zoom in.
+      const z = zoom();
+      g.camera.x += dx / z;
+      g.camera.y += dy / z;
       clampCam();
     }
   }
@@ -550,5 +636,6 @@ RC.Input = (function () {
   return {
     init, state, updateCamera, centerOn, centerOnGroup, clampCam,
     armAttackMove, getScheme, setScheme, toggleScheme,
+    zoom, setZoom, zoomBy, resetZoom, minZoom, toWorld,
   };
 })();

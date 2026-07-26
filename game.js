@@ -88,7 +88,10 @@ window.RC = window.RC || {};
       this.fx = [];
       this.selection = [];
       this.placing = null;
-      this.camera = { x: 0, y: 0 };
+      // z = zoom. Client-side only, exactly like x/y — the server never reads the
+      // camera, so it can never desync a match. Kept across reset() so a player's
+      // chosen zoom survives starting the next game.
+      this.camera = { x: 0, y: 0, z: (this.camera && this.camera.z) || 1 };
       this.speed = 1;
       this.paused = false;
       this.log = [];
