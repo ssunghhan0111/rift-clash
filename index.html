@@ -801,6 +801,24 @@
   }
   #rc-back.hidden { display: none; }
 
+  /* ── Quit-guard (accidental Back / navigate-away) ── */
+  #quitguard {
+    position: absolute; inset: 0; z-index: 70; display: flex; align-items: center;
+    justify-content: center; background: rgba(6, 10, 15, .82);
+  }
+  #quitguard.hidden { display: none; }
+  .qg-card {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--orange);
+    border-radius: 12px; padding: 24px 28px; text-align: center; max-width: 400px;
+  }
+  .qg-title { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .qg-sub { font-size: 12.5px; color: var(--dim); line-height: 1.5; margin-bottom: 18px; }
+  .qg-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  #quitguard button { padding: 10px 20px; font-size: 13px; font-weight: 700; border-radius: 6px; cursor: pointer; border: 1px solid var(--line); }
+  .qg-stay { background: var(--orange); color: #10151d; border-color: var(--orange) !important; }
+  .qg-quit { background: var(--panel-2); color: var(--text); }
+  #quitguard button:hover { filter: brightness(1.1); }
+
   /* ── Legal links ── */
   #ss-legal { font-size: 11px; color: var(--dim); margin-top: 2px; }
   #ss-legal a { color: var(--dim); text-decoration: underline; }
@@ -886,6 +904,19 @@
         <div id="rc-text">Connection lost — reconnecting…</div>
         <div class="rc-sub">Your army is being held for you. Stay on this screen.</div>
         <button id="rc-back" class="hidden">Back to menu</button>
+      </div>
+    </div>
+
+    <!-- Shown when the player hits Back (or a back gesture) mid-match, so an
+         accidental navigation doesn't silently throw away the game. -->
+    <div id="quitguard" class="hidden">
+      <div class="qg-card">
+        <div class="qg-title">Leave the match?</div>
+        <div class="qg-sub">You're in the middle of a game. If you leave now, the match ends. Online games hold your seat for 90 seconds if you come right back.</div>
+        <div class="qg-row">
+          <button id="qg-stay" class="qg-stay">Keep playing</button>
+          <button id="qg-quit" class="qg-quit">Quit to menu</button>
+        </div>
       </div>
     </div>
 

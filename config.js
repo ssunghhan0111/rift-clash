@@ -403,7 +403,7 @@ RC.UNITS = {
     hp: 600, dmg: 22, range: 30, cd: 1.0, speed: 80, r: 22, sight: 230,
     cost: 0, time: 0, supply: 0, armor: 3, energy: 200, key: 'H',
     grow: { hp: 70, dmg: 4, armor: 0.5 },
-    revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
+    revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
     // 3 skills; each ranks up with level. All effects are self-contained (no passive stat plumbing).
     skills: [
       { id: 'salvo', name: 'Seismic Slam', key: 'F', cost: 40, cd: 8, radius: 120, dmg: 45, dmgPerRank: 28,
@@ -428,7 +428,7 @@ RC.UNITS = {
     cost: 0, time: 0, supply: 0, armor: 1, energy: 220, key: 'H',
     acid: { dmg: 4, dur: 5, shred: 2, max: 6 },
     grow: { hp: 55, dmg: 4, armor: 0.4 },
-    revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
+    revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
     skills: [
       // Signature (LoL: Cassiopeia — Twin Fang): damages and corrodes nearby foes, and
       // the Matriarch feeds on each one she hits to heal — sustain built on her acid.
@@ -449,7 +449,7 @@ RC.UNITS = {
     hp: 420, dmg: 26, range: 95, cd: 0.95, speed: 88, r: 22, sight: 250,
     cost: 0, time: 0, supply: 0, armor: 2, energy: 220, shield: 320, key: 'H',
     grow: { hp: 45, dmg: 5, armor: 0.4, shield: 55 },
-    revive: { base: 55, perLevel: 9, cost: 80, costPerLevel: 22 },
+    revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
     skills: [
       { id: 'salvo', name: 'Psionic Storm', key: 'F', cost: 45, cd: 9, radius: 130, dmg: 42, dmgPerRank: 27,
         desc: 'Tears open a storm of psionic energy over an area.' },

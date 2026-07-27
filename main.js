@@ -607,6 +607,8 @@ window.RC = window.RC || {};
 
   function openMenu() {
     started = false;
+    disarmExitGuard();
+    hideQuitConfirm();
     if (guided) finishGuided(true);
     openGameChat(false);
     clearResume();
@@ -1107,6 +1109,39 @@ window.RC = window.RC || {};
     });
   })();
 
+  // ── Quit guard — don't lose a match to an accidental Back / navigate-away ──
+  // Two mechanisms, because no single one covers every device:
+  //   • history state + popstate  → catches the Back button / mobile back-gesture
+  //     (the ONLY thing that works on iOS Safari, our tablet audience) by absorbing
+  //     the navigation and asking in-page instead of leaving.
+  //   • beforeunload              → desktop tab-close / reload / typing a new URL,
+  //     where the browser shows its own native "Leave site?" confirmation.
+  // Both only fire during a live match, so the menu and finished games never nag.
+  let exitGuardArmed = false;
+  function inActiveMatch() { return started && game && !game.over; }
+  function armExitGuard() {
+    if (exitGuardArmed) return;
+    exitGuardArmed = true;
+    try { history.pushState({ rcMatch: true }, ''); } catch (e) {}
+  }
+  function disarmExitGuard() { exitGuardArmed = false; }
+  function qgBox() { return document.getElementById('quitguard'); }
+  function showQuitConfirm() { const b = qgBox(); if (b) b.classList.remove('hidden'); }
+  function hideQuitConfirm() { const b = qgBox(); if (b) b.classList.add('hidden'); }
+
+  window.addEventListener('popstate', () => {
+    if (!inActiveMatch()) return;                 // at the menu / after a match: let Back work normally
+    const b = qgBox();
+    const open = b && !b.classList.contains('hidden');
+    try { history.pushState({ rcMatch: true }, ''); } catch (e) {}   // re-absorb so we stay on the page
+    if (!open) showQuitConfirm();
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (inActiveMatch()) { e.preventDefault(); e.returnValue = ''; return ''; }
+  });
+  { const s = document.getElementById('qg-stay'); if (s) s.addEventListener('click', hideQuitConfirm); }
+  { const q = document.getElementById('qg-quit'); if (q) q.addEventListener('click', () => { hideQuitConfirm(); openMenu(); }); }
+
   function socketUrl() {
     return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
   }
@@ -1597,6 +1632,7 @@ window.RC = window.RC || {};
     if (dt > 0.1) dt = 0.1;
 
     if (started) {
+      if (!exitGuardArmed && game && !game.over) armExitGuard();   // arm Back/leave guard once per match
       RC.Input.updateCamera(dt);
       if (!RC.online) {
         game.update(dt);
