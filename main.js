@@ -417,7 +417,107 @@ window.RC = window.RC || {};
     selMap = 'basin'; selMode = '1v1';
     startGame();
     game.practice = true;
+    guided = null; renderGuideBanner();
     practiceHints = PRACTICE_HINTS.map(h => ({ t: h.t, msg: h.msg, done: false }));
+  }
+
+  // ── Guided Tutorial — an interactive, objective-driven walkthrough ──────
+  // Unlike the time-based Practice hints above, each step here watches the live
+  // game state and only advances once the player has actually DONE the thing.
+  // Forces Forge + an easy, passive bot so the lesson names/keys always match and
+  // nothing attacks while the player is learning.
+  let guided = null;
+  const GUIDED_STEPS = [
+    {
+      title: 'Move your units',
+      msg: 'Drag a selection box around your <b>Wrench Bots</b>, then <b>right-click</b> an open spot to move them there.',
+      init(g, c) { c.pos = {}; g.units.forEach(u => { if (u.owner === 1) c.pos[u.id] = { x: u.x, y: u.y }; }); },
+      check(g, c) { return g.units.some(u => u.owner === 1 && c.pos[u.id] && RC.dist(u.x, u.y, c.pos[u.id].x, c.pos[u.id].y) > 70); },
+    },
+    {
+      title: 'Collect shards',
+      msg: 'Select a worker and <b>right-click a glowing blue shard cluster</b> to mine. Watch your shard count (top-left) climb.',
+      init(g, c) { c.shard = ((g.res[1] || {}).shard) || 0; },
+      check(g, c) { return (((g.res[1] || {}).shard) || 0) > c.shard + 4; },
+    },
+    {
+      title: 'Raise your population',
+      msg: 'Every unit costs <b>population</b> (the pop counter, top bar). Select a worker, press <b>E</b>, and place a <b>Power Cell</b> to lift your cap.',
+      check(g) { return g.buildings.some(b => b.owner === 1 && b.type === 'cell'); },
+    },
+    {
+      title: 'Build a Bolt Factory',
+      msg: 'Now build production. Select a worker, press <b>R</b>, and place a <b>Bolt Factory</b> — it trains your army.',
+      check(g) { return g.buildings.some(b => b.owner === 1 && b.type === 'factory'); },
+    },
+    {
+      title: 'Train a Volt Trooper',
+      msg: 'Click your <b>Bolt Factory</b>, then press <b>Q</b> to train a Volt Trooper. Units cost shards and population.',
+      init(g, c) { c.n = g.units.filter(u => u.owner === 1 && u.type === 'volt').length; },
+      check(g, c) { return g.units.filter(u => u.owner === 1 && u.type === 'volt').length > c.n; },
+    },
+    {
+      title: 'Use your Hero',
+      msg: 'Press <b>H</b> to select your <b>Ironclad Warden</b>, then right-click to move it. Heroes are powerful and gain levels in battle.',
+      check(g, c) {
+        const h = g.heroOf && g.heroOf[1];
+        if (!h) return false;
+        if (g.selection && g.selection.indexOf(h) !== -1 && c.hp == null) c.hp = { x: h.x, y: h.y };
+        return c.hp != null && RC.dist(h.x, h.y, c.hp.x, c.hp.y) > 50;
+      },
+    },
+    {
+      title: 'Make a control group',
+      msg: 'Select a few units and press <b>Ctrl+1</b> to save them as a control group. Then press <b>1</b> anytime to reselect them instantly.',
+      check(g) { const gr = g.groups || {}; return Object.keys(gr).some(k => (gr[k] || []).filter(u => !u.dead).length > 0); },
+    },
+  ];
+
+  function startGuided() {
+    const snap = { map: selMap, mode: selMode, race: selRace, diff: selVsDiff };
+    selMap = 'earth'; selMode = '1v1'; selRace = 'forge'; selVsDiff = 'easy';
+    startGame();
+    // restore the player's menu picks — the tutorial forced its own only for setup
+    selMap = snap.map; selMode = snap.mode; selRace = snap.race; selVsDiff = snap.diff;
+    game.practice = true;
+    practiceHints = null;
+    guided = { idx: 0, inited: false, ctx: {} };
+    renderGuideBanner();
+    game.notify('🎓 Guided Tutorial — follow the objective at the top of the screen.');
+  }
+
+  function renderGuideBanner() {
+    const el = document.getElementById('tut-guide');
+    if (!el) return;
+    if (!guided) { el.classList.add('hidden'); return; }
+    const step = GUIDED_STEPS[guided.idx];
+    el.classList.remove('hidden');
+    document.getElementById('tg-step').textContent = 'Step ' + (guided.idx + 1) + ' / ' + GUIDED_STEPS.length;
+    document.getElementById('tg-title').textContent = step.title;
+    document.getElementById('tg-msg').innerHTML = step.msg;
+  }
+
+  function advanceGuided() {
+    guided.idx++; guided.inited = false; guided.ctx = {};
+    if (guided.idx >= GUIDED_STEPS.length) finishGuided();
+    else renderGuideBanner();
+  }
+
+  function finishGuided(quiet) {
+    guided = null;
+    const el = document.getElementById('tut-guide');
+    if (el) el.classList.add('hidden');
+    if (!quiet && game) game.notify('🎉 Tutorial complete! You know the basics — keep playing, or press ⏹ to return to the menu.');
+  }
+
+  function updateGuided() {
+    if (!guided) return;
+    const step = GUIDED_STEPS[guided.idx];
+    if (!guided.inited) { if (step.init) step.init(game, guided.ctx); guided.inited = true; }
+    if (step.check(game, guided.ctx)) {
+      game.notify('✅ ' + step.title + ' — done!');
+      advanceGuided();
+    }
   }
 
   // ── Tutorial: reference screens ──
@@ -507,6 +607,7 @@ window.RC = window.RC || {};
 
   function openMenu() {
     started = false;
+    if (guided) finishGuided(true);
     openGameChat(false);
     clearResume();
     if (RC.Voice && RC.Voice.joined) RC.Voice.leave(false);   // quitting to the menu hangs up, but keeps auto-join armed
@@ -673,7 +774,10 @@ window.RC = window.RC || {};
   }, 30000);
   document.getElementById('tut-learn').addEventListener('click', openTutorial);
   document.getElementById('tut-practice').addEventListener('click', startPractice);
+  document.getElementById('tut-guided').addEventListener('click', startGuided);
   document.getElementById('tut-close').addEventListener('click', () => document.getElementById('tutorial').classList.add('hidden'));
+  { const sk = document.getElementById('tg-skip'); if (sk) sk.addEventListener('click', () => { if (guided) advanceGuided(); }); }
+  { const ex = document.getElementById('tg-exit'); if (ex) ex.addEventListener('click', () => { finishGuided(true); if (game) game.notify('Tutorial ended — keep playing, or press ⏹ to return to the menu.'); }); }
   const btnMenu = document.getElementById('btn-menu');
   if (btnMenu) btnMenu.addEventListener('click', openMenu);
 
@@ -1498,8 +1602,11 @@ window.RC = window.RC || {};
         game.update(dt);
         // Dev/test mode cheats + fast-forward (offline only; no-op if dev.js is absent)
         if (RC.Dev) RC.Dev.tick(game, dt);
-        if (game.practice && practiceHints) {
-          for (const h of practiceHints) { if (!h.done && game.time >= h.t) { h.done = true; game.notify(h.msg); } }
+        if (game.practice) {
+          if (guided) updateGuided();
+          else if (practiceHints) {
+            for (const h of practiceHints) { if (!h.done && game.time >= h.t) { h.done = true; game.notify(h.msg); } }
+          }
         }
       } else {
         // online: server ticks the sim; here we just keep selection valid + recompute local fog
@@ -1513,6 +1620,7 @@ window.RC = window.RC || {};
 
       if (game.over && !overlayShown) {
         overlayShown = true;
+        if (guided) finishGuided(true);
         if (RC.Profile) RC.Profile.recordMatchEnd(game);   // update the local record once, at match end
         RC.UI.showOverlay(game.over);
         if (RC.Audio) RC.Audio.play(game.over === 'win' ? 'win' : 'lose');
