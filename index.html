@@ -452,6 +452,18 @@
   .tut-card .tc-stats { color: var(--dim); font-family: var(--mono); font-size: 11px; margin: 4px 0; }
   .tut-card .tc-desc { color: var(--text); font-size: 12.5px; }
   .tut-card .tc-abil { color: var(--cyan); font-size: 12px; margin-top: 4px; }
+  /* Crash guard (global error boundary) */
+  #crashguard { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
+    justify-content: center; background: rgba(6,10,15,.92); }
+  #crashguard.hidden { display: none; }
+  .cg-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--bad, #e0503f);
+    border-radius: 12px; padding: 26px 30px; text-align: center; max-width: 420px; }
+  .cg-title { font-size: 19px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .cg-sub { font-size: 13px; color: var(--dim); line-height: 1.5; margin-bottom: 18px; }
+  .cg-btn { padding: 10px 26px; font-size: 14px; font-weight: 700; border-radius: 6px; cursor: pointer;
+    background: var(--orange); color: #10151d; border: none; }
+  .cg-btn:hover { filter: brightness(1.1); }
+
   /* Guided tutorial in-game objective banner */
   #tut-guide { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 60;
     width: min(560px, 92vw); background: rgba(20,28,40,0.94); border: 1px solid var(--line);
@@ -1037,6 +1049,15 @@
     </div>
     <div id="tut-tabs"></div>
     <div id="tut-body"></div>
+  </div>
+</div>
+
+<!-- ── Crash guard: shown by the global error boundary ── -->
+<div id="crashguard" class="hidden">
+  <div class="cg-card">
+    <div class="cg-title">Something went wrong</div>
+    <div class="cg-sub">The game hit an unexpected error. Reloading fixes it — if you were in an online match, your seat is held for 90 seconds so you can rejoin.</div>
+    <button onclick="location.reload()" class="cg-btn">Reload</button>
   </div>
 </div>
 

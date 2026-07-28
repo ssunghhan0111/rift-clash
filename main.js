@@ -2,6 +2,23 @@
 window.RC = window.RC || {};
 
 (function () {
+  // ── Global error boundary ──────────────────────────────
+  // An uncaught exception mid-match used to freeze the canvas silently on a black
+  // screen. Catch it and show a friendly recover-by-reload overlay (once). This is
+  // registered first so it covers the rest of init too. Best-effort: never throws.
+  let _crashed = false;
+  function showCrash(where, err) {
+    try {
+      if (_crashed) return;
+      _crashed = true;
+      console.error('RIFT CLASH error [' + where + ']', err);
+      const box = document.getElementById('crashguard');
+      if (box) box.classList.remove('hidden');
+    } catch (e) { /* never let the handler throw */ }
+  }
+  window.addEventListener('error', (e) => showCrash('error', e && (e.error || e.message)));
+  window.addEventListener('unhandledrejection', (e) => showCrash('promise', e && e.reason));
+
   const cv = document.getElementById('screen');
   const mini = document.getElementById('minimap');
   const game = new RC.Game();
@@ -816,7 +833,7 @@ window.RC = window.RC || {};
       }
       const row = document.createElement('div');
       row.className = 'roomrow' + (full ? ' full' : '');
-      row.innerHTML = `<div><div class="rr-name">${r.name}</div><div class="rr-sub">${sub}</div></div>`;
+      row.innerHTML = `<div><div class="rr-name">${esc(r.name)}</div><div class="rr-sub">${sub}</div></div>`;
       const btn = document.createElement('button');
       btn.textContent = full ? 'Full' : 'Join';
       if (!full) btn.addEventListener('click', () => N.send({ t: 'join', roomId: r.id }));
@@ -1442,7 +1459,7 @@ window.RC = window.RC || {};
       const el = document.createElement('div');
       el.className = 'pchip' + (p.id === myId ? ' me' : '');
       const rn = RC.RACES[p.race] ? RC.RACES[p.race].name : p.race;
-      el.innerHTML = `<div class="pn">${p.name}${p.id === lobbyData.hostId ? ' 👑' : ''}</div><div class="pr">${rn}</div>`;
+      el.innerHTML = `<div class="pn">${esc(p.name)}${p.id === lobbyData.hostId ? ' 👑' : ''}</div><div class="pr">${esc(rn)}</div>`;
       pw.appendChild(el);
     });
     // my faction — 시작 화면과 같은 얼굴 카드

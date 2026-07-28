@@ -306,8 +306,9 @@ RC.UI = (function () {
       else el.dailyBox.style.display = 'none';
     }
 
-    // 알림
-    el.toast.innerHTML = g.log.map(l => `<div>${l.msg}</div>`).join('');
+    // 알림 — escape msg text (may include server-sent player names) before injecting
+    el.toast.innerHTML = g.log.map(l =>
+      `<div>${String(l.msg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`).join('');
 
     // 선택 패널 — 내용이 바뀔 때만 다시 그림
     const sel = g.selection;

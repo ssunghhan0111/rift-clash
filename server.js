@@ -566,10 +566,23 @@ function roomCap(room) {
   return (RC.MODES[room.lobby.modeId] || {}).count || 4;
 }
 
+// Names and room names are rendered in OTHER players' browsers, so they must never
+// carry markup. The client's cleanName already strips this, but a hand-rolled
+// WebSocket client can skip the client entirely — so we re-sanitize here, at the
+// trust boundary. Blocks stored XSS via nicknames / room names.
+function sanitizeName(s, max) {
+  return String(s || '')
+    .replace(/[<>&"'`\\]/g, '')                  // hard-block HTML/attribute delimiters
+    .replace(/[^\p{L}\p{N} _\-.!?]/gu, '')        // keep letters, numbers, basic punctuation
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max || 16);
+}
+
 function createRoom(host, name, isPublic, gameMode) {
   const room = {
     id: nextRoomId++, code: makeCode(),
-    name: (String(name || '').slice(0, 20) || (host.name + "'s Game")),
+    name: (sanitizeName(name, 20) || (host.name + "'s Game")),
     public: !!isPublic,
     clients: [],
     game: null, loop: null, tickN: 0, cmdQueue: [],
@@ -760,7 +773,7 @@ function onMsg(c, m) {
   if (!m || typeof m !== 'object') return;
   switch (m.t) {
     case 'setName':
-      c.name = String(m.name || '').slice(0, 16) || c.name;
+      c.name = sanitizeName(m.name, 16) || c.name;
       if (c.room) pushLobby(c.room);
       broadcastPresence();
       break;
