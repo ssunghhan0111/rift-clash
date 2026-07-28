@@ -235,10 +235,18 @@ RC.UI = (function () {
     });
 
     const muteBtn = document.getElementById('mute-btn');
+    const volSlider = document.getElementById('vol-slider');
+    if (volSlider && RC.Audio && RC.Audio.getVolume) volSlider.value = Math.round(RC.Audio.getVolume() * 100);
     if (muteBtn) muteBtn.addEventListener('click', () => {
       if (!RC.Audio) return;
       RC.Audio.init(); RC.Audio.resume();
       muteBtn.textContent = RC.Audio.toggle() ? '🔊' : '🔇';
+    });
+    if (volSlider) volSlider.addEventListener('input', () => {
+      if (!RC.Audio) return;
+      RC.Audio.init(); RC.Audio.resume();
+      RC.Audio.setVolume(volSlider.value / 100);
+      if (muteBtn) muteBtn.textContent = RC.Audio.enabled ? '🔊' : '🔇';
     });
 
     const amoveBtn = document.getElementById('tb-amove');
@@ -304,6 +312,25 @@ RC.UI = (function () {
     if (el.dailyBox) {
       if (g.daily) { el.dailyBox.style.display = ''; el.daily.textContent = g.daily.icon + ' ' + g.daily.name; }
       else el.dailyBox.style.display = 'none';
+    }
+
+    // 캠페인 미션 — 목표 추적기 (desc는 정적 설정 텍스트라 안전)
+    const mhud = document.getElementById('mission-hud');
+    if (mhud) {
+      if (g.mission && !g.over) {
+        mhud.classList.remove('hidden');
+        const nm = document.getElementById('mh-name');
+        if (nm) nm.textContent = (g.mission.def && g.mission.def.name) || 'Mission';
+        const list = document.getElementById('mh-list');
+        if (list) list.innerHTML = g.mission.objectives.map(o => {
+          const cls = o.done ? ' done' : (o.fail ? ' fail' : '');
+          const box = o.done ? '☑' : (o.fail ? '✖' : '☐');
+          const prog = o.progress ? `<span class="mh-prog">${o.progress}</span>` : '';
+          return `<div class="mh-obj${cls}"><span class="mh-box">${box}</span><span>${o.def.desc}</span>${prog}</div>`;
+        }).join('');
+      } else {
+        mhud.classList.add('hidden');
+      }
     }
 
     // 알림 — escape msg text (may include server-sent player names) before injecting

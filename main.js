@@ -202,6 +202,7 @@ window.RC = window.RC || {};
     }
 
     buildColorPicker();
+    buildCampaign();
     buildGameModes();
     buildSquad();
     buildDiff();
@@ -278,6 +279,7 @@ window.RC = window.RC || {};
   // ── Game-mode cards (Tutorial / Versus / Survival) ──
   const GAMEMODES = [
     { id: 'tutorial', ic: '🎓', name: 'Tutorial', sub: 'Learn the game, then a guided practice match.' },
+    { id: 'campaign', ic: '🎯', name: 'Campaign', sub: 'Scripted missions vs bots — a ladder into multiplayer.' },
     { id: 'vs', ic: '⚔️', name: 'Versus', sub: '1v1 or 2v2 vs bots — or online vs friends.' },
     { id: 'survival', ic: '🛡️', name: 'Survival', sub: 'Defend the Rift Crystal from endless waves.' },
   ];
@@ -321,13 +323,14 @@ window.RC = window.RC || {};
     document.querySelectorAll('#ss-gamemodes .gmcard').forEach(c => c.classList.toggle('sel', c.dataset.m === m));
     const show = (id, on, disp) => { const e = document.getElementById(id); if (e) e.style.display = on ? (disp || 'flex') : 'none'; };
     show('panel-tutorial', m === 'tutorial');
+    show('panel-campaign', m === 'campaign');
     show('sec-map', m === 'vs');
     show('sec-mode', m === 'vs');
     show('sec-aidiff', m === 'vs');
     show('sec-diff', m === 'survival');
     show('sec-squad', m === 'survival');
-    show('sec-race', m !== 'tutorial');
-    show('sec-color', m !== 'tutorial');
+    show('sec-race', m !== 'tutorial' && m !== 'campaign');
+    show('sec-color', m !== 'tutorial' && m !== 'campaign');
     show('act-vs', m === 'vs', 'flex');
     show('act-survival', m === 'survival', 'flex');
     show('ss-onlinehint', m === 'vs');
@@ -335,6 +338,54 @@ window.RC = window.RC || {};
     // Daily now lives in the always-visible front-page banner (rendered in buildStartScreen).
     const rh = document.getElementById('race-h');
     if (rh) rh.textContent = m === 'survival' ? 'Your faction' : 'Faction (enemy AI takes the other)';
+  }
+
+  // ── Campaign (scripted missions) ──────────────────────
+  function buildCampaign() {
+    const wrap = document.getElementById('ss-missions');
+    if (!wrap || !RC.MISSIONS || !RC.Missions) return;
+    wrap.innerHTML = '';
+    RC.MISSIONS.forEach((def, i) => {
+      const done = RC.Missions.isDone(def.id);
+      const unlocked = RC.Missions.isUnlocked(i);
+      const card = document.createElement('div');
+      card.className = 'misscard' + (unlocked ? '' : ' locked') + (done ? ' done' : '');
+      const planet = (RC.getMap(def.planet) || {}).name || def.planet;
+      const foe = (RC.RACES[def.enemy.race] || {}).name || def.enemy.race;
+      const status = done ? '✓ Cleared' : (unlocked ? '▶ Play' : '🔒 Locked');
+      card.innerHTML =
+        `<div class="mc-num">${i + 1}</div>` +
+        `<div class="mc-body"><div class="mc-name">${esc(def.name)}</div>` +
+        `<div class="mc-sub">${esc(planet)} · vs ${esc(foe)} · ${esc(def.enemy.diff)}</div></div>` +
+        `<div class="mc-status">${status}</div>`;
+      if (unlocked) card.addEventListener('click', () => openBrief(def));
+      wrap.appendChild(card);
+    });
+  }
+  function openBrief(def) {
+    const box = document.getElementById('mission-brief');
+    if (!box) return;
+    document.getElementById('mb-title').textContent = def.name;
+    document.getElementById('mb-planet').textContent =
+      ((RC.getMap(def.planet) || {}).name || def.planet) + '  ·  vs ' +
+      ((RC.RACES[def.enemy.race] || {}).name || def.enemy.race) + ' (' + def.enemy.diff + ')';
+    document.getElementById('mb-text').textContent = def.brief;
+    document.getElementById('mb-obj').innerHTML = (def.objectives || []).map(o => `<li>${esc(o.desc)}</li>`).join('');
+    box.dataset.mid = def.id;
+    box.classList.remove('hidden');
+  }
+  function closeBrief() { const b = document.getElementById('mission-brief'); if (b) b.classList.add('hidden'); }
+  function startMission(def) {
+    RC.online = false; game.practice = false; game.heroesEnabled = true;
+    goFullscreen(); audioGo();
+    game.playerColorId = selColor;
+    game.setupMission(def);
+    RC.AI.reset(); resize();
+    RC.Input.centerOn(game.spawn1.x, game.spawn1.y);
+    closeBrief();
+    ss.classList.add('hidden'); overlay.classList.add('hidden');
+    started = true;
+    game.notify('🎯 ' + def.name);
   }
 
   function audioGo() { if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); RC.Audio.startMusic(); } }
@@ -626,6 +677,7 @@ window.RC = window.RC || {};
     started = false;
     disarmExitGuard();
     hideQuitConfirm();
+    { const mh = document.getElementById('mission-hud'); if (mh) mh.classList.add('hidden'); }
     if (guided) finishGuided(true);
     openGameChat(false);
     clearResume();
@@ -794,6 +846,8 @@ window.RC = window.RC || {};
   document.getElementById('tut-learn').addEventListener('click', openTutorial);
   document.getElementById('tut-practice').addEventListener('click', startPractice);
   document.getElementById('tut-guided').addEventListener('click', startGuided);
+  { const s = document.getElementById('mb-start'); if (s) s.addEventListener('click', () => { const b = document.getElementById('mission-brief'); const def = RC.Missions && RC.Missions.get(b.dataset.mid); if (def) startMission(def); }); }
+  { const b = document.getElementById('mb-back'); if (b) b.addEventListener('click', closeBrief); }
   document.getElementById('tut-close').addEventListener('click', () => document.getElementById('tutorial').classList.add('hidden'));
   { const sk = document.getElementById('tg-skip'); if (sk) sk.addEventListener('click', () => { if (guided) advanceGuided(); }); }
   { const ex = document.getElementById('tg-exit'); if (ex) ex.addEventListener('click', () => { finishGuided(true); if (game) game.notify('Tutorial ended — keep playing, or press ⏹ to return to the menu.'); }); }
@@ -1674,6 +1728,8 @@ window.RC = window.RC || {};
       if (game.over && !overlayShown) {
         overlayShown = true;
         if (guided) finishGuided(true);
+        // Campaign: clear the mission on a win so the next one unlocks.
+        if (game.mission && game.over === 'win' && RC.Missions) RC.Missions.markDone(game.mission.def.id);
         if (RC.Profile) RC.Profile.recordMatchEnd(game);   // update the local record once, at match end
         RC.UI.showOverlay(game.over);
         if (RC.Audio) RC.Audio.play(game.over === 'win' ? 'win' : 'lose');

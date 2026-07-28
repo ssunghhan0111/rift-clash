@@ -78,9 +78,29 @@ window.RC = window.RC || {};
       this.reset();
     }
 
+    // 캠페인 미션 — 스크립트된 1v1 (맵/상대/목표 지정). setup()과 유사하게 주입.
+    setupMission(def) {
+      this.survival = false;
+      this.missionDef = def;
+      this.aiDiff = (def.enemy && def.enemy.diff) || 'normal';
+      const prace = def.race || 'forge';
+      const erace = (def.enemy && def.enemy.race) || RC.otherRace(prace);
+      this._racePick = { 1: prace, 2: erace };
+      this._personaPick = { 2: (def.enemy && def.enemy.persona) || null };
+      this.mapDef = RC.getMap(def.planet);
+      this.mode = RC.MODES['1v1'];
+      this.reset();
+      // Install the mission runtime AFTER reset (reset clears it for normal games).
+      this.mission = { def, objectives: (def.objectives || []).map(o => ({ def: o, done: false, fail: false, progress: null })) };
+      this.missionKills = 0;
+      if (def.rules && def.rules.startShards && this.res[1]) this.res[1].shard = def.rules.startShards;
+    }
+
     reset() {
       this.time = 0;
       this.over = null;              // null | 'win' | 'lose'
+      this.mission = null;           // 캠페인 미션 런타임 (setupMission이 reset 후 설정)
+      this.missionKills = 0;
       this.units = [];
       this.buildings = [];
       this.nodes = [];
@@ -147,6 +167,21 @@ window.RC = window.RC || {};
         });
       }
 
+      // ── 봇 성격 / Bot personalities ──
+      // Each ENEMY bot gets a personality (rusher/turtler/skylord/macro) so matches
+      // vary. Allied bots and the survival horde are left plain. A mission or the
+      // caller can force picks via this._personaPick before setup.
+      this.aiPersona = {};
+      const personaPick = this._personaPick || {};
+      const pPool = RC.AI_PERSONA_POOL || [];
+      this.players.forEach(p => {
+        if (!p.ai || p.waveEnemy) return;
+        if (this.playerOwner != null && !this.areEnemies(p.owner, this.playerOwner)) return;  // allies stay balanced
+        let pid = personaPick[p.owner];
+        if (!pid && pPool.length) pid = pPool[Math.floor(Math.random() * pPool.length)];
+        this.aiPersona[p.owner] = (RC.AI_PERSONA && RC.AI_PERSONA[pid]) || null;
+      });
+
       this.zones = this.zones || [];
       this.crystal = null;
       this.survivalWave = 0;
@@ -191,9 +226,24 @@ window.RC = window.RC || {};
     aiProfile(owner) {
       const D = RC.AI_DIFF || null;
       if (!D) return null;
-      const base = D[this.aiDiff] || D.normal;
+      // Allied bots always play plain Normal (never nerfed, never personality-flavored).
       if (this.playerOwner != null && !this.areEnemies(owner, this.playerOwner)) return D.normal;
-      return base;
+      const base = D[this.aiDiff] || D.normal;
+      const persona = this.aiPersona && this.aiPersona[owner];
+      if (!persona || persona.id === 'balanced') return base;
+      // Merge the personality's multipliers/flags onto a copy of the difficulty profile.
+      const P = Object.assign({}, base);
+      if (persona.firstWaveMul)   P.firstWave  = Math.round(base.firstWave * persona.firstWaveMul);
+      if (persona.waveSizeMul)    P.waveSize   = Math.max(2, Math.round(base.waveSize * persona.waveSizeMul));
+      if (persona.waveGapMul)     P.waveGap    = Math.round(base.waveGap * persona.waveGapMul);
+      if (persona.waveGrowthMul != null) P.waveGrowth = Math.max(1, Math.round((base.waveGrowth || 1) * persona.waveGrowthMul));
+      if (persona.workerCapMul)   P.workerCap  = Math.max(4, Math.round(base.workerCap * persona.workerCapMul));
+      if (persona.secondFactoryMul) P.secondFactory = Math.round(base.secondFactory * persona.secondFactoryMul);
+      if (persona.incomeMul)      P.income     = (base.income || 1) * persona.incomeMul;
+      if (persona.tower != null)  P.tower      = persona.tower;
+      if (persona.tech != null)   P.tech       = persona.tech;
+      P.bias = persona.bias; P.towerEarly = persona.towerEarly; P.persona = persona.id; P.label = persona.label;
+      return P;
     }
 
     // ── 업그레이드 / 연구 ─────────────────────────────
@@ -866,6 +916,7 @@ window.RC = window.RC || {};
         if (RC.Audio) RC.Audio.play('explode');
         this._awardKillXp(u);
         if (this.survival && !u.def.hero && this.areEnemies(u.owner, this.playerOwner)) this.survivalKills++;
+        if (this.mission && !u.def.hero && !u.def.worker && this.areEnemies(u.owner, this.playerOwner)) this.missionKills = (this.missionKills || 0) + 1;
         // 죽음 연출 — 순수 시각 이펙트. fx 스냅샷에 실려 온라인 클라이언트도 같은 폭발을 본다.
         // (영웅은 '전사' 상태로 남으므로 폭발 대신 별도 연출 없이 사라진다)
         if (!u.def.hero) {
@@ -905,7 +956,10 @@ window.RC = window.RC || {};
       }
 
       // 승패
-      if (this.survival) {
+      if (this.mission && RC.Missions) {
+        // 캠페인 — 미션 목표로 승패 판정 (기본 패배: 내 코어 파괴)
+        RC.Missions.evaluate(this);
+      } else if (this.survival) {
         // 생존 모드 — 크리스탈이 깨지면 종료(무한 모드라 '승리'는 없음)
         if (!this.crystal || this.crystal.dead) this.over = 'lose';
       } else {

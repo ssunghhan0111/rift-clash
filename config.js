@@ -152,6 +152,28 @@ RC.AI_DIFF = {
 RC.AI_RESEARCH_MIN = 140;
 RC.AI_DIFF_ORDER = ['easy', 'normal', 'hard'];
 
+// ── Bot personalities ─────────────────────────────────────────────────────
+// Layered ON TOP of the difficulty profile (see game.aiProfile). Difficulty sets
+// the overall strength; personality sets the STYLE, so two Hard bots can feel
+// completely different. `*Mul` scale the matching difficulty field; flags/bias are
+// read by ai.js to change build order. Only ever applied to the human's opponents.
+RC.AI_PERSONA = {
+  balanced: { id: 'balanced', name: 'Balanced', label: '' },
+  rusher:   { id: 'rusher',   name: 'Rusher',   label: '⚔ Rusher',
+              firstWaveMul: 0.42, waveSizeMul: 0.6, waveGapMul: 0.6, waveGrowthMul: 0.6,
+              workerCapMul: 0.85, tower: false, tech: false, bias: 'ground' },
+  turtler:  { id: 'turtler',  name: 'Turtler',  label: '🛡 Turtler',
+              firstWaveMul: 1.6, waveSizeMul: 1.7, waveGapMul: 1.25, workerCapMul: 1.15,
+              tower: true, tech: true, towerEarly: true },
+  skylord:  { id: 'skylord',  name: 'Skylord',  label: '✈ Skylord',
+              firstWaveMul: 1.15, waveSizeMul: 1.1, secondFactoryMul: 0.5, tech: true, bias: 'air' },
+  macro:    { id: 'macro',    name: 'Macro',    label: '📈 Macro',
+              firstWaveMul: 1.5, waveSizeMul: 1.6, workerCapMul: 1.3, incomeMul: 1.1, tech: true },
+};
+RC.AI_PERSONA_ORDER = ['balanced', 'rusher', 'turtler', 'skylord', 'macro'];
+// Personalities the game rolls for a random enemy (balanced excluded so matches vary).
+RC.AI_PERSONA_POOL = ['rusher', 'turtler', 'skylord', 'macro'];
+
 // 색상 — 플레이어 4명 각자 색
 RC.COLORS = {
   bg:        '#131a24',

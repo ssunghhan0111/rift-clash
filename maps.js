@@ -379,6 +379,100 @@ RC.MAPS = [
       { x: 2400, y: 1200, n: 3, rad: 95 },
     ],
   },
+
+  // ══ 7. 해왕성 — 메탄 바다, 폭풍의 두 갈래 협로 ══════════
+  // A twin-lane map: two frozen channels north and south split by a central mesa,
+  // so armies commit to a lane. The hot springs on the ridge are the pivot.
+  {
+    id: 'neptune',
+    biome: 'ice',
+    name: 'Neptune',
+    desc: 'A frozen ocean world. Two deep-snow channels split around a central ridge — pick a lane and the hot springs on top decide the fight.',
+    world: { w: 3400, h: 2400 },
+    bg: '#040a14', ground: '#0e1c30',
+    spawns: [
+      { x: 480, y: 1200 }, { x: 2920, y: 1200 },
+      { x: 1700, y: 460 }, { x: 1700, y: 1940 },
+    ],
+    terrain: [
+      { poly: blob(1700, 1200, 380, 801, 0.4), color: '#16304a' },
+      { poly: blob(700, 1200, 300, 802, 0.5), color: '#12263c' },
+      { poly: blob(2700, 1200, 300, 803, 0.5), color: '#12263c' },
+    ],
+    zones: [
+      // 중앙 능선 (고지) — 두 협로 사이의 요충지
+      { t: 'high', poly: blob(1700, 1200, 260, 811, 0.32) },
+      // 위/아래 두 갈래 눈길 (감속)
+      { t: 'mud', poly: ribbon([[-60, 620], [850, 560], [1700, 640], [2550, 560], [3460, 620]], 120, 812) },
+      { t: 'mud', poly: ribbon([[-60, 1780], [850, 1840], [1700, 1760], [2550, 1840], [3460, 1780]], 120, 813) },
+      // 측면 결정 첨탑 숲 (엄폐)
+      { t: 'forest', poly: blob(760, 1200, 230, 814, 0.44) },
+      { t: 'forest', poly: blob(2640, 1200, 230, 815, 0.44) },
+      // 저지 웅덩이
+      { t: 'low', poly: blob(1180, 620, 190, 816, 0.42) },
+      { t: 'low', poly: blob(2220, 1780, 190, 817, 0.42) },
+      // 능선 위 온천 (회복)
+      { t: 'vent', poly: blob(1700, 1200, 150, 818, 0.3) },
+    ],
+    obstacles: [].concat(
+      rocks(1700, 1200, 170, 4, 95, 831),
+      rocks(760, 1200, 140, 3, 90, 832),
+      rocks(2640, 1200, 140, 3, 90, 833),
+      rocks(1700, 560, 120, 3, 80, 834),
+      rocks(1700, 1840, 120, 3, 80, 835)
+    ),
+    midNodes: [
+      { x: 1700, y: 1200, n: 4, rad: 140 },
+      { x: 1180, y: 620, n: 3, rad: 95 },
+      { x: 2220, y: 1780, n: 3, rad: 95 },
+    ],
+  },
+
+  // ══ 8. 세레스 — 소행성대의 채석장, 사방의 협소 교전 ══════
+  // A small, tight four-corner brawl: little cover, a big central ore vein everyone
+  // wants, and rubble walls that funnel every push through the middle.
+  {
+    id: 'ceres',
+    biome: 'rust',
+    name: 'Ceres',
+    desc: 'A dwarf-planet quarry. Small and vicious — scarce cover, rubble walls that funnel every push through the middle, and one huge ore vein at the heart.',
+    world: { w: 3000, h: 3000 },
+    bg: '#180a06', ground: '#5a2c1a',
+    spawns: [
+      { x: 480, y: 480 }, { x: 2520, y: 2520 },
+      { x: 2520, y: 480 }, { x: 480, y: 2520 },
+    ],
+    terrain: [
+      { poly: blob(1500, 1500, 460, 901, 0.44), color: '#6b3620' },
+      { poly: blob(1500, 1500, 240, 902, 0.4), color: '#7a4128' },
+    ],
+    zones: [
+      // 중앙 노천 채굴장 (고지) — 사방에서 노리는 요지
+      { t: 'high', poly: blob(1500, 1500, 240, 911, 0.32) },
+      // 대각선 잔해 벽 사이의 좁은 협로 (저지 시야제한)
+      { t: 'low', poly: ribbon([[700, 1500], [1500, 1350], [2300, 1500]], 120, 912) },
+      { t: 'low', poly: ribbon([[1500, 700], [1350, 1500], [1500, 2300]], 120, 913) },
+      // 네 모서리의 엄폐 바위밭
+      { t: 'forest', poly: blob(820, 820, 200, 914, 0.46) },
+      { t: 'forest', poly: blob(2180, 2180, 200, 915, 0.46) },
+      { t: 'forest', poly: blob(2180, 820, 200, 916, 0.46) },
+      { t: 'forest', poly: blob(820, 2180, 200, 917, 0.46) },
+      // 중앙 광맥의 분출구 (회복)
+      { t: 'vent', poly: blob(1500, 1500, 150, 918, 0.3) },
+    ],
+    obstacles: [].concat(
+      rocks(1500, 900, 150, 4, 100, 931),
+      rocks(1500, 2100, 150, 4, 100, 932),
+      rocks(900, 1500, 150, 4, 100, 933),
+      rocks(2100, 1500, 150, 4, 100, 934),
+      rocks(1500, 1500, 120, 3, 80, 935)
+    ),
+    midNodes: [
+      { x: 1500, y: 1500, n: 5, rad: 150 },
+      { x: 900, y: 900, n: 3, rad: 90 },
+      { x: 2100, y: 2100, n: 3, rad: 90 },
+    ],
+  },
 ];
 
 RC.getMap = function (id) {
@@ -461,6 +555,8 @@ RC.MAP_DIMS = {
   mars:    { w: 4000, h: 2000 },   // widest — the great canyon runs across it
   jupiter: { w: 3000, h: 2800 },   // tall storm columns
   saturn:  { w: 4200, h: 1800 },   // ultra-wide ring belt
+  neptune: { w: 3800, h: 2200 },   // wide twin-lane ocean
+  ceres:   { w: 2600, h: 2600 },   // small, vicious square brawl
 };
 // { t: zone type to amplify, s: enlarge factor } — the planet's signature terrain.
 RC.MAP_SIGNATURE = {
@@ -470,6 +566,8 @@ RC.MAP_SIGNATURE = {
   mars:    { t: 'low', s: 1.32 },  // Valles Marineris — the canyon
   jupiter: { t: 'mud', s: 1.30 },  // the jet-stream bands
   saturn:  { t: 'mud', s: 1.28 },  // the debris arcs of the rings
+  neptune: { t: 'mud', s: 1.25 },  // the twin snow channels
+  ceres:   { t: 'high', s: 1.22 }, // the central ore mesa everyone fights for
 };
 
 (function reshapeMaps() {

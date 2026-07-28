@@ -800,6 +800,14 @@ window.RC = window.RC || {};
       let crit = false;
       if (critLvl > 0 && Math.random() < critLvl * RC.CFG.UP_CRIT_CHANCE) {
         dmg *= RC.CFG.UP_CRIT_MULT; crit = true; this.critFx = 0.25;
+        if (RC.Audio) RC.Audio.play('crit');
+        // A small screen "punch" on YOUR own crits — throttled so a crit-stacked
+        // army doesn't shake the camera to pieces.
+        if (game.playerOwner === this.owner) {
+          if (!game._lastCritShake || game.time - game._lastCritShake > 0.35) {
+            game.shake(0.12); game._lastCritShake = game.time;
+          }
+        }
       }
       const splash = this.effSplash(game);
       const hx = foe.x, hy = foe.y;           // 착탄 지점 (스플래시 중심)

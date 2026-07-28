@@ -170,8 +170,10 @@ RC.AI = (function () {
       if (spot) { g.placeBuilding(R.barracks, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
-    // 4.5) 공중 건물 (후반) — 역시 랩 자금은 남긴다
-    if (R.air && myBuildings(g, own, R.air).length === 0 && g.time > P.secondFactory && (shard - techReserve) >= 180 && workers.length >= 6) {
+    // 4.5) 공중 건물 — Skylord는 이른 시점에 공중부터 올린다 (bias 'air')
+    const airGate = P.bias === 'air' ? 0 : P.secondFactory;
+    const airWorkers = P.bias === 'air' ? 5 : 6;
+    if (R.air && myBuildings(g, own, R.air).length === 0 && g.time > airGate && (shard - techReserve) >= 180 && workers.length >= airWorkers) {
       const spot = findSpot(g, R.air, core, own);
       if (spot) { g.placeBuilding(R.air, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
@@ -182,8 +184,10 @@ RC.AI = (function () {
       if (spot) { g.placeBuilding(R.tech, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
 
-    // 4.7) 방어 타워 (본진 방어) — 랩 자금은 남긴다
-    if (R.tower && P.tower && g.time > K.AI_TOWER && myBuildings(g, own, R.tower).length < 2 && (shard - techReserve) >= 130 && workers.length >= 5) {
+    // 4.7) 방어 타워 (본진 방어) — Turtler는 일찍, 더 많이 짓는다 (towerEarly)
+    const towerGate = P.towerEarly ? 25 : K.AI_TOWER;
+    const towerCap  = P.towerEarly ? 4 : 2;
+    if (R.tower && P.tower && g.time > towerGate && myBuildings(g, own, R.tower).length < towerCap && (shard - techReserve) >= 130 && workers.length >= (P.towerEarly ? 4 : 5)) {
       const spot = findSpot(g, R.tower, core, own);
       if (spot) { g.placeBuilding(R.tower, spot.x, spot.y, own, [idleWorker()].filter(Boolean)); return; }
     }
@@ -222,7 +226,7 @@ RC.AI = (function () {
     const underCap = combatNow < armyCap;
     const hasAir = R.air && myBuildings(g, own, R.air).some(b => b.done);
     const hasTech = R.tech && (R.techUnits || []).length && myBuildings(g, own, R.tech).some(b => b.done);
-    const reserve = (hasAir ? 5 : 0) + (hasTech ? 4 : 0);
+    const reserve = (hasAir ? (P.bias === 'air' ? 12 : 5) : 0) + (hasTech ? 4 : 0);
     if (underCap) barracks.forEach(f => {
       if (sup.used >= sup.max - reserve) return;   // 공중/캐스터가 들어갈 인구 남겨둠
       trainFromList(g, own, f, R.barracksUnits, spendable);
@@ -251,7 +255,7 @@ RC.AI = (function () {
         });
         s.waveNum++;
         s.waveTimer = P.waveGap;
-        if (own !== g.playerOwner && g.areEnemies(own, g.playerOwner)) g.notify('Enemy forces incoming!');
+        if (own !== g.playerOwner && g.areEnemies(own, g.playerOwner)) g.notify((P.label ? P.label + ' — ' : '') + 'Enemy forces incoming!');
       } else {
         s.waveTimer = 12;
       }

@@ -6,6 +6,21 @@ window.RC = window.RC || {};
 RC.Audio = (function () {
   let ctx = null, master = null, enabled = true, musicTimer = null;
 
+  // ── Master volume (0..1), persisted ──
+  // The mute button toggles `enabled`; the slider scales BASE within that.
+  const BASE = 0.32;                       // design-reference master gain at volume 1.0
+  const VOL_KEY = 'rc_volume';
+  let vol = 1.0;
+  try { const v = parseFloat(window.localStorage.getItem(VOL_KEY)); if (isFinite(v)) vol = Math.max(0, Math.min(1, v)); } catch (e) {}
+  function applyGain() { if (master) master.gain.value = enabled ? BASE * vol : 0; }
+  function setVolume(v) {
+    vol = Math.max(0, Math.min(1, isFinite(v) ? v : 1));
+    try { window.localStorage.setItem(VOL_KEY, String(vol)); } catch (e) {}
+    if (vol > 0 && !enabled) setEnabled(true);   // nudging the slider up un-mutes
+    applyGain();
+  }
+  function getVolume() { return vol; }
+
   function init() {
     if (ctx) return;
     try {
@@ -13,7 +28,7 @@ RC.Audio = (function () {
       if (!AC) return;
       ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = enabled ? 0.32 : 0;
+      applyGain();
       master.connect(ctx.destination);
     } catch (e) { ctx = null; }
   }
@@ -173,6 +188,9 @@ RC.Audio = (function () {
     build:   () => seq([[500, 0.08, 'square', 0.18, 720, 0]]),
     ready:   () => seq([[680, 0.09, 'square', 0.18, null, 0], [900, 0.12, 'square', 0.18, null, 95]]),
     cast:    () => tone(420, 0.2, 'sine', 0.18, 920),
+    hit:     () => vnoise({ dur: 0.05, vol: 0.10, hp: 800, lp: 4200 }),                    // impact tick
+    crit:    () => { tone(1400, 0.05, 'square', 0.13, 900); vnoise({ dur: 0.06, vol: 0.12, hp: 1200, lp: 6000, delay: 0.01 }); }, // sharp metallic crit
+    ability: () => { vtone({ f: 300, to: 1200, dur: 0.22, type: 'sine', vol: 0.16, attack: 0.01 }); },   // ability whoosh
     levelup: () => seq([[600, 0.11, 'square', 0.2, null, 0], [760, 0.11, 'square', 0.2, null, 70], [920, 0.11, 'square', 0.2, null, 140], [1150, 0.16, 'square', 0.2, null, 210]]),
     wave:    () => seq([[400, 0.22, 'sawtooth', 0.22, 300, 0], [400, 0.22, 'sawtooth', 0.22, 300, 260]]),
     win:     () => seq([[523, 0.16, 'square', 0.22, null, 0], [659, 0.16, 'square', 0.22, null, 120], [784, 0.16, 'square', 0.22, null, 240], [1047, 0.24, 'square', 0.22, null, 360]]),
@@ -183,10 +201,11 @@ RC.Audio = (function () {
   function play(name) {
     if (!ctx || !enabled) return;
     // throttle spammy combat sounds so many units don't create a wall of noise
-    if (name === 'shoot' || name === 'explode' || name === 'attack' || name === 'move' || name === 'select') {
+    if (name === 'shoot' || name === 'explode' || name === 'attack' || name === 'move' || name === 'select' || name === 'hit' || name === 'crit') {
       const now = ctx.currentTime;
       // != null, not truthiness — currentTime is legitimately 0 on the very first sound
-      if (_last[name] != null && now - _last[name] < 0.06) return;
+      const gap = (name === 'crit') ? 0.10 : 0.06;
+      if (_last[name] != null && now - _last[name] < gap) return;
       _last[name] = now;
     }
     const f = SFX[name]; if (f) f();
@@ -221,11 +240,12 @@ RC.Audio = (function () {
 
   function setEnabled(v) {
     enabled = v;
-    if (master) master.gain.value = v ? 0.32 : 0;
+    applyGain();
     if (v) { resume(); startMusic(); } else stopMusic();
   }
   function toggle() { setEnabled(!enabled); return enabled; }
 
   return { init, resume, play, playRace, startMusic, stopMusic, setEnabled, toggle,
+           setVolume, getVolume,
            get enabled() { return enabled; } };
 })();
