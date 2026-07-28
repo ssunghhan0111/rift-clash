@@ -58,6 +58,13 @@ RC.Renderer = (function () {
   }
   // 'r,g,b' 문자열 → 중심 불투명, 가장자리 투명한 원형 글로우 스프라이트
   function softGlow(rgb, mid) {
+    // rgb is pasted raw into an rgba() string, so a missing palette key would otherwise
+    // reach addColorStop as 'rgba(undefined,1)' and throw. One unglowing sprite is a far
+    // better failure than a dead canvas.
+    if (!/^\s*\d+\s*,\s*\d+\s*,\s*\d+\s*$/.test(String(rgb))) {
+      console.warn('softGlow: bad rgb triplet', rgb);
+      rgb = '255,255,255';
+    }
     return glowSprite('g:' + rgb + (mid ? ':' + mid[0] + ',' + mid[1] : ''), (s) => {
       s.width = s.height = 64;
       const g2 = s.getContext('2d');
@@ -2783,6 +2790,16 @@ RC.Renderer = (function () {
   function raceFaceColors(raceId) {
     const r = RC.RACES[raceId] || RC.RACES.forge;
     const base = r.tint;
+    // Must carry EVERY key the sprite functions read, because these menu portraits go
+    // through the same drawUnitSprite() path as in-match units. Two were missing:
+    //   ink      — inkLine()'s outline colour. An undefined strokeStyle is silently
+    //              ignored by canvas, so outlines were drawn in whatever colour
+    //              happened to be left over from the previous shape.
+    //   opticRGB — softGlow() interpolates it straight into 'rgba(' + rgb + ',1)'.
+    //              Undefined produced the literal string 'rgba(undefined,1)', which
+    //              addColorStop rejects with a SyntaxError — and since these faces are
+    //              built during buildStartScreen(), that threw before the menu finished
+    //              wiring up and tripped the global error boundary on every load.
     const c = {
       body:  base,
       light: shade(base, 0.32),
@@ -2790,11 +2807,13 @@ RC.Renderer = (function () {
       trim:  shade(base, 0.55),
       steel: '#9fb1c6',
       eye:   C.node,
+      ink:   shade(base, -0.72),
+      opticRGB: '255,90,60',
       psi:   PSI,
     };
-    if (raceId === 'gloop')       { c.steel = mix(c.steel, GLOOP_TINT, 0.42);  c.eye = '#c9ff8f'; }
-    else if (raceId === 'aether') { c.steel = mix(c.steel, AETHER_TINT, 0.46); c.eye = PSI_HOT; }
-    else                          { c.steel = mix(c.steel, FORGE_TINT, 0.30); }
+    if (raceId === 'gloop')       { c.steel = mix(c.steel, GLOOP_TINT, 0.42);  c.eye = '#c9ff8f'; c.opticRGB = '150,255,90'; }
+    else if (raceId === 'aether') { c.steel = mix(c.steel, AETHER_TINT, 0.46); c.eye = PSI_HOT;   c.opticRGB = '210,170,255'; }
+    else                          { c.steel = mix(c.steel, FORGE_TINT, 0.30); c.opticRGB = '255,90,60'; }
     return c;
   }
 
