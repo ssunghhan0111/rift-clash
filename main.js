@@ -7,16 +7,54 @@ window.RC = window.RC || {};
   // screen. Catch it and show a friendly recover-by-reload overlay (once). This is
   // registered first so it covers the rest of init too. Best-effort: never throws.
   let _crashed = false;
-  function showCrash(where, err) {
+  // Render the error into the overlay's "Technical details" block. Without this the
+  // only copy of a crash lives in the console, which no player (and no bug report)
+  // ever includes — leaving a repro-less "it broke once" to chase.
+  function describe(where, err, extra) {
+    const lines = ['[' + where + '] ' + new Date().toISOString()];
+    if (err && err.stack) lines.push(String(err.stack));
+    else if (err && err.message) lines.push(err.name ? err.name + ': ' + err.message : String(err.message));
+    else lines.push(String(err));
+    if (extra && extra.filename) lines.push('at ' + extra.filename + ':' + extra.lineno + ':' + extra.colno);
+    lines.push('ua: ' + navigator.userAgent);
+    return lines.join('\n');
+  }
+  function showCrash(where, err, extra) {
     try {
       if (_crashed) return;
       _crashed = true;
       console.error('RIFT CLASH error [' + where + ']', err);
       const box = document.getElementById('crashguard');
       if (box) box.classList.remove('hidden');
+      const out = document.getElementById('cg-err');
+      const text = describe(where, err, extra);
+      if (out) out.textContent = text;
+      const copy = document.getElementById('cg-copy');
+      if (copy) copy.addEventListener('click', () => {
+        try {
+          navigator.clipboard.writeText(text).then(
+            () => { copy.textContent = 'Copied'; },
+            () => { copy.textContent = 'Press Ctrl+C'; }
+          );
+        } catch (e2) { copy.textContent = 'Press Ctrl+C'; }
+      });
     } catch (e) { /* never let the handler throw */ }
   }
-  window.addEventListener('error', (e) => showCrash('error', e && (e.error || e.message)));
+  // A browser can't show us the inside of a script from another origin, so anything
+  // that throws there arrives stripped to the bare string "Script error." with no
+  // file, no line and no error object. Every script this page loads is same-origin,
+  // which means such an event is never us — it's a browser extension's injected
+  // content script (ad blockers, password managers, coupon finders) blowing up on
+  // our page. Treating that as "the game crashed" put a full-screen overlay over a
+  // perfectly healthy menu. Log it and carry on.
+  function isForeign(e) {
+    return !!e && !e.error && !e.filename && !e.lineno &&
+           /^script error\.?$/i.test(String(e.message || '').trim());
+  }
+  window.addEventListener('error', (e) => {
+    if (isForeign(e)) { console.warn('RIFT CLASH: ignoring cross-origin script error (likely a browser extension)'); return; }
+    showCrash('error', e && (e.error || e.message), e);
+  });
   window.addEventListener('unhandledrejection', (e) => showCrash('promise', e && e.reason));
 
   const cv = document.getElementById('screen');
@@ -482,7 +520,7 @@ window.RC = window.RC || {};
     { t: 66, msg: 'Right-click the enemy to attack. Destroy their Core to win!' },
   ];
   function startPractice() {
-    selMap = 'basin'; selMode = '1v1';
+    selMap = 'earth'; selMode = '1v1';
     startGame();
     game.practice = true;
     guided = null; renderGuideBanner();
@@ -1029,7 +1067,9 @@ window.RC = window.RC || {};
   function maybeAutoVoice() {
     if (!RC.Voice) return;
     if (roomPublic || !voiceAllowed) { renderVoice(); return; }
-    RC.Voice.autoJoin().then(renderVoice);
+    // A denied/absent mic rejects here. That is a normal outcome, not a crash — swallow
+    // it and just redraw the panel, or the global boundary turns it into the error overlay.
+    RC.Voice.autoJoin().then(renderVoice, (e) => { console.warn('voice autoJoin failed', e); renderVoice(); });
   }
 
   function renderVoice() {
