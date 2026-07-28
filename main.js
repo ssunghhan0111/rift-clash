@@ -495,10 +495,30 @@ window.RC = window.RC || {};
   // Forces Forge + an easy, passive bot so the lesson names/keys always match and
   // nothing attacks while the player is learning.
   let guided = null;
+  // Touch device? (phone/tablet) — decides how the "move around the map" lesson reads.
+  function isTouchDevice() {
+    try {
+      return (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window ||
+             (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    } catch (e) { return false; }
+  }
+  const NAV_MSG_TOUCH =
+    'First, learn to look around. On a phone or tablet, drag with <b>TWO fingers</b> to move the map — ' +
+    '<b>one finger</b> selects and gives orders, <b>two fingers</b> pan. You can also drag the <b>minimap</b>. ' +
+    'Move the view now to continue. <i>(Pinch two fingers to zoom.)</i>';
+  const NAV_MSG_DESKTOP =
+    'First, learn to look around. Move the map by <b>dragging the minimap</b> (corner), pushing the mouse to a ' +
+    '<b>screen edge</b>, or using the <b>arrow keys</b>. Move the view now to continue. <i>(Mouse wheel zooms.)</i>';
   const GUIDED_STEPS = [
     {
+      title: 'Move around the map',
+      msg: NAV_MSG_DESKTOP,   // set per-device in startGuided()
+      init(g, c) { c.cam = { x: g.camera.x, y: g.camera.y }; },
+      check(g, c) { return c.cam && RC.dist(g.camera.x, g.camera.y, c.cam.x, c.cam.y) > 240; },
+    },
+    {
       title: 'Move your units',
-      msg: 'Drag a selection box around your <b>Wrench Bots</b>, then <b>right-click</b> an open spot to move them there.',
+      msg: 'Drag a selection box around your <b>Wrench Bots</b>, then <b>right-click</b> an open spot to move them there. <i>(On touch: one-finger drag to box-select, then tap where to go.)</i>',
       init(g, c) { c.pos = {}; g.units.forEach(u => { if (u.owner === 1) c.pos[u.id] = { x: u.x, y: u.y }; }); },
       check(g, c) { return g.units.some(u => u.owner === 1 && c.pos[u.id] && RC.dist(u.x, u.y, c.pos[u.id].x, c.pos[u.id].y) > 70); },
     },
@@ -549,6 +569,8 @@ window.RC = window.RC || {};
     selMap = snap.map; selMode = snap.mode; selRace = snap.race; selVsDiff = snap.diff;
     game.practice = true;
     practiceHints = null;
+    // Navigation lesson reads differently on touch vs mouse.
+    GUIDED_STEPS[0].msg = isTouchDevice() ? NAV_MSG_TOUCH : NAV_MSG_DESKTOP;
     guided = { idx: 0, inited: false, ctx: {} };
     renderGuideBanner();
     game.notify('🎓 Guided Tutorial — follow the objective at the top of the screen.');

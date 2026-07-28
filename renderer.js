@@ -820,21 +820,25 @@ RC.Renderer = (function () {
         // Aether — 각진 결정 구조 + 부유 파편 (보랏빛)
         aetherBody(b, p, x, y);
       } else {
-        // 포지 — 각진 금속 본체 + 리벳
-        const light = shade(p.body, 0.26), dk = shade(p.body, -0.4);
-        ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        rrect(x + 4, y + 6, b.w, b.h, 6); ctx.fill();
+        // 포지 — 각진 금속 본체 + 굵은 잉크 외곽선 + 셀 하이라이트 (메나싱 카툰)
+        const inkc = shade(p.body, -0.72), light = shade(p.body, 0.32), dk = shade(p.body, -0.4);
+        ctx.fillStyle = 'rgba(0,0,0,0.32)';
+        rrect(x + 4, y + 6, b.w, b.h, 7); ctx.fill();
         ctx.fillStyle = dk;
-        rrect(x, y, b.w, b.h, 6); ctx.fill();
+        rrect(x, y, b.w, b.h, 7); ctx.fill();
         ctx.fillStyle = p.body;
-        rrect(x, y, b.w, b.h * 0.82, 6); ctx.fill();
-        ctx.fillStyle = light;
-        rrect(x + 3, y + 3, b.w - 6, b.h * 0.28, 5); ctx.fill();
-        ctx.fillStyle = dk;
-        [[x + 7, y + 7], [x + b.w - 7, y + 7], [x + 7, y + b.h - 7], [x + b.w - 7, y + b.h - 7]].forEach(([rx, ry]) => {
-          ctx.beginPath(); ctx.arc(rx, ry, 2.6, 0, Math.PI * 2); ctx.fill();
+        rrect(x, y, b.w, b.h * 0.82, 7); ctx.fill();
+        ctx.fillStyle = light; ctx.globalAlpha = 0.6;
+        rrect(x + 4, y + 4, b.w - 8, b.h * 0.26, 5); ctx.fill(); ctx.globalAlpha = 1;
+        ctx.fillStyle = inkc;
+        [[x + 8, y + 8], [x + b.w - 8, y + 8], [x + 8, y + b.h - 8], [x + b.w - 8, y + b.h - 8]].forEach(([rx, ry]) => {
+          ctx.beginPath(); ctx.arc(rx, ry, 2.7, 0, Math.PI * 2); ctx.fill();
         });
-        ctx.strokeStyle = p.trim; ctx.lineWidth = 2.5;
+        // bold cartoon ink outline
+        ctx.lineJoin = 'round'; ctx.strokeStyle = inkc; ctx.lineWidth = Math.max(3, b.w * 0.045);
+        rrect(x, y, b.w, b.h, 7); ctx.stroke();
+        // trim accent
+        ctx.strokeStyle = p.trim; ctx.lineWidth = 2;
         rrect(x + 5, y + 5, b.w - 10, b.h - 10, 4); ctx.stroke();
       }
 
@@ -1207,11 +1211,13 @@ RC.Renderer = (function () {
     const p = pal(u.owner);
     const c = {
       body:  flash ? '#ffffff' : p.body,
-      light: flash ? '#ffffff' : shade(p.body, 0.30),
+      light: flash ? '#ffffff' : shade(p.body, 0.34),
       dark:  flash ? '#e6e6e6' : shade(p.body, -0.42),
       trim:  flash ? '#ffe6c0' : p.trim,
-      steel: flash ? '#ffffff' : '#9fb1c6',
-      eye:   C.node,
+      steel: flash ? '#ffffff' : '#b6c3d6',
+      eye:   flash ? '#ffffff' : '#ff5a3c',   // menacing red optic (Forge)
+      ink:   flash ? '#dfe6ef' : shade(p.body, -0.72),   // bold cartoon outline
+      opticRGB: '255,90,60',
     };
     // 종족 색조 — 글룹은 유기적 초록빛, 포지는 차가운 강철빛 (소유자 색은 유지)
     if (!flash) {
@@ -1221,19 +1227,40 @@ RC.Renderer = (function () {
       if (u.def.race === 'gloop') {
         c.body = mix(c.body, GLOOP_TINT, 0.14); c.light = mix(c.light, GLOOP_TINT, 0.16);
         c.dark = mix(c.dark, GLOOP_TINT, 0.14); c.steel = mix(c.steel, GLOOP_TINT, 0.30);
-        c.eye = '#c9ff8f';
+        c.eye = '#b6ff4a'; c.opticRGB = '150,255,90';   // toxic-green glare
       } else if (u.def.race === 'aether') {
         // Aether — 광택 있는 보랏빛 크리스탈 표면 + 하얗게 빛나는 사이오닉 코어
         c.body = mix(c.body, AETHER_TINT, 0.16); c.light = mix(c.light, PSI, 0.24);
         c.dark = mix(c.dark, AETHER_TINT, 0.18); c.steel = mix(c.steel, AETHER_TINT, 0.34);
-        c.eye = PSI_HOT;
-        c.psi = PSI;
+        c.eye = PSI_HOT; c.psi = PSI; c.opticRGB = '210,170,255';   // psionic glare
       } else {
         c.steel = mix(c.steel, FORGE_TINT, 0.22);
+        c.eye = '#ff5a3c'; c.opticRGB = '255,90,60';   // hostile red glare
       }
       if (!c.psi) c.psi = PSI;
     }
     return c;
+  }
+
+  // ── Menacing cartoon primitives (shared by every redesigned sprite) ──
+  // Bold ink outlines, hostile glowing optics, angled visor slits, cel highlights.
+  const TAU = Math.PI * 2;
+  function inkLine(c, w) { ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = c.ink; ctx.lineWidth = w; ctx.stroke(); }
+  function sglow(x, y, r, rgb, a) { blitGlow(softGlow(rgb), x, y, r, r, a); }
+  function celTop(c, x, y, w, h, r) { ctx.fillStyle = c.light; ctx.globalAlpha = 0.5; rrect(x, y, w, h, r); ctx.fill(); ctx.globalAlpha = 1; }
+  // single hostile eye
+  function optic(c, x, y, r) {
+    sglow(x, y, r * 2.1, c.opticRGB, 0.5);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = c.ink; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r * 0.64, 0, TAU); ctx.fillStyle = c.eye; ctx.fill();
+    ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.arc(x - r * 0.22, y - r * 0.24, r * 0.24, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill(); ctx.globalAlpha = 1;
+  }
+  // angled aggressive visor slit, pointing +x (forward)
+  function visorSlit(c, x, y, w, h) {
+    sglow(x + w * 0.5, y, w * 1.35, c.opticRGB, 0.5);
+    ctx.fillStyle = c.ink; rrect(x - w * 0.16, y - h * 0.95, w * 1.32, h * 1.9, h * 0.5); ctx.fill();
+    ctx.fillStyle = c.eye;
+    ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x + w, y - h * 0.2); ctx.lineTo(x + w, y + h * 0.2); ctx.lineTo(x, y + h * 0.5); ctx.closePath(); ctx.fill();
   }
 
   // 유닛 스프라이트 본체 — 원점 기준으로 그림(+x 방향을 바라봄). drawUnit / drawPortrait 공용
@@ -1495,27 +1522,17 @@ RC.Renderer = (function () {
   // ── 체인거너 (포지) — 쌍열 기관총 보병 ──
   // 실루엣 포인트: 넓은 어깨 + 앞으로 뻗은 두 개의 총열 + 옆구리 탄약 드럼.
   function drawChaingunner(R, c) {
-    ctx.fillStyle = c.dark; rrect(-R * 0.62, -R * 0.6, R * 1.2, R * 1.2, 4); ctx.fill();
-    ctx.fillStyle = c.body; rrect(-R * 0.52, -R * 0.52, R * 1.0, R * 1.04, 4); ctx.fill();
-    ctx.fillStyle = c.light; rrect(-R * 0.52, -R * 0.52, R * 1.0, R * 0.32, 4); ctx.fill();
-    // 어깨 패드 (위/아래로 크게 벌려 실루엣을 넓힌다)
-    ctx.fillStyle = c.dark;
-    rrect(-R * 0.34, -R * 0.98, R * 0.7, R * 0.42, 4); ctx.fill();
-    rrect(-R * 0.34, R * 0.56, R * 0.7, R * 0.42, 4); ctx.fill();
-    // 쌍열 총신
-    ctx.fillStyle = c.steel;
-    ctx.fillRect(R * 0.3, -R * 0.42, R * 1.15, R * 0.26);
-    ctx.fillRect(R * 0.3, R * 0.16, R * 1.15, R * 0.26);
-    ctx.fillStyle = c.trim;
-    ctx.fillRect(R * 1.38, -R * 0.48, R * 0.2, R * 0.38);
-    ctx.fillRect(R * 1.38, R * 0.1, R * 0.2, R * 0.38);
-    // 탄약 드럼
-    ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.arc(-R * 0.5, 0, R * 0.36, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = c.trim;
-    ctx.beginPath(); ctx.arc(-R * 0.5, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
-    // 바이저
-    ctx.fillStyle = c.eye; ctx.fillRect(R * 0.16, -R * 0.12, R * 0.3, R * 0.24);
+    ctx.fillStyle = c.dark; rrect(-R * 0.62, -R * 0.62, R * 1.2, R * 1.24, 5); ctx.fill(); inkLine(c, R * 0.2);
+    ctx.fillStyle = c.body; rrect(-R * 0.52, -R * 0.54, R * 1.0, R * 1.08, 4); ctx.fill(); inkLine(c, R * 0.16);
+    celTop(c, -R * 0.5, -R * 0.5, R * 0.9, R * 0.32, 4);
+    ctx.fillStyle = c.dark; rrect(-R * 0.34, -R * 1.0, R * 0.7, R * 0.42, 4); ctx.fill(); inkLine(c, R * 0.13);
+    rrect(-R * 0.34, R * 0.58, R * 0.7, R * 0.42, 4); ctx.fill(); inkLine(c, R * 0.13);
+    ctx.fillStyle = c.steel; rrect(R * 0.3, -R * 0.44, R * 1.2, R * 0.26, 3); ctx.fill(); inkLine(c, R * 0.12);
+    rrect(R * 0.3, R * 0.18, R * 1.2, R * 0.26, 3); ctx.fill(); inkLine(c, R * 0.12);
+    ctx.fillStyle = c.ink; ctx.fillRect(R * 1.44, -R * 0.48, R * 0.14, R * 0.34); ctx.fillRect(R * 1.44, R * 0.14, R * 0.14, R * 0.34);
+    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.arc(-R * 0.5, 0, R * 0.38, 0, Math.PI * 2); ctx.fill(); inkLine(c, R * 0.13);
+    ctx.fillStyle = c.trim; ctx.beginPath(); ctx.arc(-R * 0.5, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
+    visorSlit(c, R * 0.14, -R * 0.02, R * 0.34, R * 0.15);
   }
 
   // ── 베놈 하이드라 (글룹) — 세 개의 머리를 가진 독사 ──
@@ -1595,20 +1612,18 @@ RC.Renderer = (function () {
 
   // ── 영웅: 아이언클래드 워든 (포지) — 거대 전투 메카 ──
   function drawWarden(R, c) {
-    ctx.fillStyle = c.dark; rrect(-R * 0.72, -R * 0.5, R * 1.44, R * 1.1, 5); ctx.fill();
-    ctx.fillStyle = c.body; rrect(-R * 0.58, -R * 0.62, R * 1.15, R * 1.05, 5); ctx.fill();
-    ctx.fillStyle = c.light; rrect(-R * 0.58, -R * 0.62, R * 1.15, R * 0.34, 5); ctx.fill();
+    ctx.fillStyle = c.trim;
+    [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.moveTo(s * R * 0.82, -R * 0.6); ctx.lineTo(s * R * 1.32, -R * 1.02); ctx.lineTo(s * R * 0.98, -R * 0.48); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.1); });
+    ctx.fillStyle = c.dark; rrect(-R * 0.72, -R * 0.52, R * 1.44, R * 1.12, 5); ctx.fill(); inkLine(c, R * 0.16);
+    ctx.fillStyle = c.body; rrect(-R * 0.62, -R * 0.66, R * 1.24, R * 1.3, 6); ctx.fill(); inkLine(c, R * 0.24);
+    celTop(c, -R * 0.58, -R * 0.6, R * 1.14, R * 0.36, 5);
     ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.arc(-R * 0.12, -R * 0.68, R * 0.34, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(-R * 0.12, R * 0.68, R * 0.34, 0, Math.PI * 2); ctx.fill();
-    // 대형 팔포/해머 (앞으로)
-    ctx.fillStyle = c.steel; ctx.fillRect(R * 0.2, -R * 0.26, R * 1.2, R * 0.52);
-    ctx.fillStyle = c.trim; ctx.fillRect(R * 1.35, -R * 0.36, R * 0.28, R * 0.72);
-    // 머리 + 바이저
-    ctx.fillStyle = c.steel; ctx.beginPath(); ctx.arc(R * 0.22, 0, R * 0.36, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = c.eye; ctx.fillRect(R * 0.36, -R * 0.13, R * 0.18, R * 0.26);
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1.2;
-    rrect(-R * 0.58, -R * 0.62, R * 1.15, R * 1.05, 5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(-R * 0.12, -R * 0.74, R * 0.34, 0, Math.PI * 2); ctx.fill(); inkLine(c, R * 0.12);
+    ctx.beginPath(); ctx.arc(-R * 0.12, R * 0.74, R * 0.34, 0, Math.PI * 2); ctx.fill(); inkLine(c, R * 0.12);
+    ctx.fillStyle = c.steel; rrect(R * 0.2, -R * 0.26, R * 1.2, R * 0.52, 3); ctx.fill(); inkLine(c, R * 0.16);
+    ctx.fillStyle = c.ink; rrect(R * 1.38, -R * 0.3, R * 0.2, R * 0.6, 3); ctx.fill();
+    sglow(R * 1.5, 0, R * 0.55, c.opticRGB, 0.6);
+    visorSlit(c, R * 0.05, -R * 0.02, R * 0.5, R * 0.2);
   }
 
   // ── 영웅: 브루드 매트리아크 (글룹) — 거대 여왕 점액 ──
@@ -1858,62 +1873,27 @@ RC.Renderer = (function () {
 
   // ── 렌치봇 (일꾼) — 작은 정비 로봇, 집게팔 + 센서 눈 ──
   function drawWrench(R, c) {
-    // 캐터필러 (위/아래)
+    ctx.fillStyle = c.dark; rrect(-R * 0.9, -R * 1.0, R * 1.7, R * 0.32, 4); ctx.fill(); inkLine(c, R * 0.14);
+    rrect(-R * 0.9, R * 0.68, R * 1.7, R * 0.32, 4); ctx.fill(); inkLine(c, R * 0.14);
+    ctx.fillStyle = c.body; rrect(-R * 0.7, -R * 0.72, R * 1.35, R * 1.44, 5); ctx.fill(); inkLine(c, R * 0.2);
+    celTop(c, -R * 0.66, -R * 0.66, R * 1.25, R * 0.42, 4);
     ctx.fillStyle = c.dark;
-    rrect(-R * 0.85, -R * 0.98, R * 1.6, R * 0.34, 3); ctx.fill();
-    rrect(-R * 0.85,  R * 0.64, R * 1.6, R * 0.34, 3); ctx.fill();
-    // 몸체
-    ctx.fillStyle = c.body;
-    rrect(-R * 0.65, -R * 0.68, R * 1.3, R * 1.36, 4); ctx.fill();
-    // 상단 하이라이트
-    ctx.fillStyle = c.light;
-    rrect(-R * 0.65, -R * 0.68, R * 1.3, R * 0.4, 4); ctx.fill();
-    // 패널 라인
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1.3;
-    ctx.beginPath(); ctx.moveTo(-R * 0.15, -R * 0.55); ctx.lineTo(-R * 0.15, R * 0.55); ctx.stroke();
-    // 집게팔
-    ctx.fillStyle = c.trim;
-    ctx.fillRect(R * 0.55, -R * 0.13, R * 0.5, R * 0.26);
-    ctx.lineWidth = R * 0.15; ctx.strokeStyle = c.trim;
-    ctx.beginPath(); ctx.arc(R * 1.12, 0, R * 0.26, -Math.PI * 0.62, Math.PI * 0.62); ctx.stroke();
-    // 센서 눈
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.arc(R * 0.3, 0, R * 0.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.beginPath(); ctx.arc(R * 0.24, -R * 0.06, R * 0.08, 0, Math.PI * 2); ctx.fill();
-    // 외곽선
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1;
-    rrect(-R * 0.65, -R * 0.68, R * 1.3, R * 1.36, 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(R * 0.55, -R * 0.28); ctx.lineTo(R * 1.3, -R * 0.1); ctx.lineTo(R * 1.3, R * 0.1); ctx.lineTo(R * 0.55, R * 0.28); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.16);
+    ctx.strokeStyle = c.trim; ctx.lineWidth = R * 0.16; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(R * 1.34, 0, R * 0.24, -2, 2); ctx.stroke();
+    optic(c, R * 0.08, 0, R * 0.28);
   }
 
   // ── 볼트병 (보병) — 어깨 장갑 + 라이플 로봇 ──
   function drawVolt(R, c) {
-    // 후방 추진팩
-    ctx.fillStyle = c.dark;
-    rrect(-R * 0.92, -R * 0.5, R * 0.42, R * 1.0, 3); ctx.fill();
-    // 몸체
+    ctx.fillStyle = c.dark; rrect(-R * 0.95, -R * 0.5, R * 0.4, R * 1.0, 3); ctx.fill(); inkLine(c, R * 0.13);
     ctx.fillStyle = c.body;
-    rrect(-R * 0.6, -R * 0.6, R * 1.15, R * 1.2, 4); ctx.fill();
-    ctx.fillStyle = c.light;
-    rrect(-R * 0.6, -R * 0.6, R * 1.15, R * 0.36, 4); ctx.fill();
-    // 어깨 장갑
+    ctx.beginPath(); ctx.moveTo(-R * 0.62, -R * 0.66); ctx.lineTo(R * 0.5, -R * 0.6); ctx.lineTo(R * 0.66, 0); ctx.lineTo(R * 0.5, R * 0.6); ctx.lineTo(-R * 0.62, R * 0.66); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.2);
     ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.arc(-R * 0.15, -R * 0.68, R * 0.28, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(-R * 0.15,  R * 0.68, R * 0.28, 0, Math.PI * 2); ctx.fill();
-    // 라이플 (오른쪽 어깨에서 앞으로)
-    ctx.fillStyle = c.dark;
-    ctx.fillRect(R * 0.2, -R * 0.62, R * 1.1, R * 0.2);
-    ctx.fillStyle = c.trim;
-    ctx.fillRect(R * 1.18, -R * 0.62, R * 0.18, R * 0.2); // 총구
-    // 머리 돔
-    ctx.fillStyle = c.steel;
-    ctx.beginPath(); ctx.arc(R * 0.18, 0, R * 0.3, 0, Math.PI * 2); ctx.fill();
-    // 바이저
-    ctx.fillStyle = c.eye;
-    ctx.fillRect(R * 0.3, -R * 0.14, R * 0.14, R * 0.28);
-    // 외곽선
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1;
-    rrect(-R * 0.6, -R * 0.6, R * 1.15, R * 1.2, 4); ctx.stroke();
+    [-0.72, 0.72].forEach(function (s) { ctx.beginPath(); ctx.moveTo(-R * 0.35, s * R * 0.5); ctx.lineTo(R * 0.1, s * R * 0.95); ctx.lineTo(R * 0.35, s * R * 0.55); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.13); });
+    ctx.fillStyle = c.steel; rrect(R * 0.2, -R * 0.66, R * 1.35, R * 0.2, 3); ctx.fill(); inkLine(c, R * 0.13);
+    ctx.fillStyle = c.trim; ctx.fillRect(R * 1.4, -R * 0.68, R * 0.16, R * 0.24);
+    visorSlit(c, R * 0.3, -R * 0.05, R * 0.4, R * 0.2);
   }
 
   // ── 실드러 (방패 탱커) — 무거운 장갑 + 대형 방패 ──
@@ -1930,27 +1910,14 @@ RC.Renderer = (function () {
     }
     // 몸체
     ctx.fillStyle = c.body;
-    rrect(-R * 0.72, -R * 0.72, R * 1.34, R * 1.44, 5); ctx.fill();
-    ctx.fillStyle = c.light;
-    rrect(-R * 0.72, -R * 0.72, R * 1.34, R * 0.42, 5); ctx.fill();
-    // 바이저 슬릿
-    ctx.fillStyle = c.eye;
-    ctx.fillRect(R * 0.08, -R * 0.26, R * 0.14, R * 0.52);
-    // 대형 방패 (앞면)
+    rrect(-R * 0.75, -R * 0.78, R * 1.4, R * 1.56, 6); ctx.fill(); inkLine(c, R * 0.22);
+    celTop(c, -R * 0.7, -R * 0.72, R * 1.3, R * 0.44, 5);
+    // 대형 방패 (앞면, 각진 모서리)
     ctx.fillStyle = c.steel;
-    rrect(R * 0.5, -R * 0.98, R * 0.4, R * 1.96, 6); ctx.fill();
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1.2;
-    rrect(R * 0.5, -R * 0.98, R * 0.4, R * 1.96, 6); ctx.stroke();
-    // 방패 문양 + 리벳
+    ctx.beginPath(); ctx.moveTo(R * 0.45, -R * 1.05); ctx.lineTo(R * 1.05, -R * 0.85); ctx.lineTo(R * 1.05, R * 0.85); ctx.lineTo(R * 0.45, R * 1.05); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.22);
     ctx.fillStyle = c.trim;
-    ctx.beginPath(); ctx.arc(R * 0.7, 0, R * 0.24, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = c.dark;
-    [-0.7, -0.35, 0.35, 0.7].forEach(t => {
-      ctx.beginPath(); ctx.arc(R * 0.7, t * R, R * 0.06, 0, Math.PI * 2); ctx.fill();
-    });
-    // 외곽선
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1;
-    rrect(-R * 0.72, -R * 0.72, R * 1.34, R * 1.44, 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(R * 0.75, -R * 0.35); ctx.lineTo(R * 0.92, 0); ctx.lineTo(R * 0.75, R * 0.35); ctx.lineTo(R * 0.58, 0); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.1);
+    visorSlit(c, -R * 0.1, -R * 0.02, R * 0.42, R * 0.18);
   }
 
   // ── 스파크캐논 (공성) — 궤도 위 대형 포신 ──
@@ -1965,24 +1932,15 @@ RC.Renderer = (function () {
       ctx.beginPath(); ctx.arc(i * R * 0.26,  R * 0.75, R * 0.055, 0, Math.PI * 2); ctx.fill();
     }
     // 차체
-    ctx.fillStyle = c.body;
-    rrect(-R * 0.62, -R * 0.55, R * 1.05, R * 1.1, 4); ctx.fill();
-    ctx.fillStyle = c.light;
-    rrect(-R * 0.62, -R * 0.55, R * 1.05, R * 0.34, 4); ctx.fill();
+    ctx.fillStyle = c.body; rrect(-R * 0.66, -R * 0.58, R * 1.1, R * 1.16, 5); ctx.fill(); inkLine(c, R * 0.2);
+    celTop(c, -R * 0.62, -R * 0.52, R * 1.0, R * 0.36, 4);
     // 포탑 베이스
-    ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.36, 0, Math.PI * 2); ctx.fill();
-    // 대형 포신 (앞으로 길게)
-    ctx.fillStyle = shade(c.body, -0.2);
-    ctx.fillRect(R * 0.1, -R * 0.16, R * 1.4, R * 0.32);
-    ctx.fillStyle = c.trim;
-    ctx.fillRect(R * 1.4, -R * 0.2, R * 0.22, R * 0.4);   // 포구
-    // 에너지 코일 (포신 뿌리 발광)
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.arc(R * 0.12, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
-    // 외곽선
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1;
-    rrect(-R * 0.62, -R * 0.55, R * 1.05, R * 1.1, 4); ctx.stroke();
+    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.4, 0, Math.PI * 2); ctx.fill(); inkLine(c, R * 0.16);
+    // 대형 포신
+    ctx.fillStyle = c.steel; rrect(R * 0.1, -R * 0.19, R * 1.55, R * 0.38, 3); ctx.fill(); inkLine(c, R * 0.18);
+    ctx.fillStyle = c.ink; rrect(R * 1.5, -R * 0.24, R * 0.2, R * 0.48, 3); ctx.fill();   // 포구
+    sglow(R * 1.6, 0, R * 0.5, c.opticRGB, 0.6);
+    optic(c, 0, 0, R * 0.24);
   }
 
   // ── 호버윙 (공중) — 회전 로터 달린 비행체 ──
@@ -2007,209 +1965,80 @@ RC.Renderer = (function () {
     // 동체 (앞이 뾰족한 유선형)
     ctx.fillStyle = c.body;
     ctx.beginPath();
-    ctx.moveTo(R * 1.05, 0);
-    ctx.lineTo(R * 0.1, -R * 0.5);
-    ctx.lineTo(-R * 0.7, -R * 0.32);
-    ctx.lineTo(-R * 0.7, R * 0.32);
-    ctx.lineTo(R * 0.1, R * 0.5);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = c.light;
-    ctx.beginPath();
-    ctx.moveTo(R * 1.05, 0);
-    ctx.lineTo(R * 0.1, -R * 0.5);
-    ctx.lineTo(-R * 0.2, -R * 0.16);
-    ctx.lineTo(R * 0.3, 0);
-    ctx.closePath(); ctx.fill();
-    // 콕핏 (발광 눈)
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.arc(R * 0.4, 0, R * 0.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.beginPath(); ctx.arc(R * 0.44, -R * 0.05, R * 0.08, 0, Math.PI * 2); ctx.fill();
-    // 외곽선
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(R * 1.05, 0);
-    ctx.lineTo(R * 0.1, -R * 0.5);
-    ctx.lineTo(-R * 0.7, -R * 0.32);
-    ctx.lineTo(-R * 0.7, R * 0.32);
-    ctx.lineTo(R * 0.1, R * 0.5);
-    ctx.closePath(); ctx.stroke();
+    ctx.moveTo(R * 1.18, 0);
+    ctx.lineTo(R * 0.1, -R * 0.52);
+    ctx.lineTo(-R * 0.7, -R * 0.3);
+    ctx.lineTo(-R * 0.7, R * 0.3);
+    ctx.lineTo(R * 0.1, R * 0.52);
+    ctx.closePath(); ctx.fill(); inkLine(c, R * 0.2);
+    ctx.fillStyle = c.light; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(R * 1.1, 0); ctx.lineTo(R * 0.1, -R * 0.5); ctx.lineTo(-R * 0.2, -R * 0.14); ctx.lineTo(R * 0.3, 0); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    optic(c, R * 0.42, 0, R * 0.22);
   }
 
   // ── 패치봇 (정비 지원) — 둥근 몸체 + 십자 + 스프레이 노즐 ──
   function drawPatch(R, c) {
-    // 캐터필러
-    ctx.fillStyle = c.dark;
-    rrect(-R * 0.8, -R * 0.9, R * 1.5, R * 0.32, 3); ctx.fill();
-    rrect(-R * 0.8,  R * 0.58, R * 1.5, R * 0.32, 3); ctx.fill();
-    // 둥근 몸체
-    ctx.fillStyle = c.body;
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.78, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = c.light;
-    ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.24, R * 0.42, 0, Math.PI * 2); ctx.fill();
-    // 치유 십자 (흰 바탕 + 초록 십자)
-    ctx.fillStyle = '#eef6ff';
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.42, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = C.heal;
-    ctx.fillRect(-R * 0.1, -R * 0.32, R * 0.2, R * 0.64);
-    ctx.fillRect(-R * 0.32, -R * 0.1, R * 0.64, R * 0.2);
-    // 앞쪽 스프레이 노즐
-    ctx.fillStyle = c.trim;
-    ctx.fillRect(R * 0.68, -R * 0.12, R * 0.4, R * 0.24);
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.arc(R * 1.02, 0, R * 0.1, 0, Math.PI * 2); ctx.fill();
-    // 외곽선
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.78, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = c.dark; rrect(-R * 0.8, -R * 0.92, R * 1.5, R * 0.3, 3); ctx.fill(); inkLine(c, R * 0.13);
+    rrect(-R * 0.8, R * 0.62, R * 1.5, R * 0.3, 3); ctx.fill(); inkLine(c, R * 0.13);
+    ctx.fillStyle = c.body; ctx.beginPath(); ctx.arc(0, 0, R * 0.8, 0, Math.PI * 2); ctx.fill(); inkLine(c, R * 0.2);
+    ctx.fillStyle = c.light; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(-R * 0.22, -R * 0.24, R * 0.42, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#eef6ff'; ctx.beginPath(); ctx.arc(0, 0, R * 0.44, 0, Math.PI * 2); ctx.fill(); inkLine(c, R * 0.12);
+    ctx.fillStyle = C.heal; ctx.fillRect(-R * 0.1, -R * 0.34, R * 0.2, R * 0.68); ctx.fillRect(-R * 0.34, -R * 0.1, R * 0.68, R * 0.2);
+    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.moveTo(R * 0.6, -R * 0.16); ctx.lineTo(R * 1.15, -R * 0.05); ctx.lineTo(R * 1.15, R * 0.05); ctx.lineTo(R * 0.6, R * 0.16); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.13);
+    optic(c, R * 0.95, 0, R * 0.15);
   }
 
   // ── 펄스코일 (교란 캐스터) — 삼각 동체 + 상단 코일 안테나 ──
   function drawPulse(R, c) {
     const t = performance.now() / 1000;
-    // 캐터필러
-    ctx.fillStyle = c.dark;
-    rrect(-R * 0.75, -R * 0.88, R * 1.4, R * 0.3, 3); ctx.fill();
-    rrect(-R * 0.75,  R * 0.58, R * 1.4, R * 0.3, 3); ctx.fill();
-    // 삼각 동체
-    ctx.fillStyle = c.body;
-    ctx.beginPath();
-    ctx.moveTo(R * 0.95, 0);
-    ctx.lineTo(-R * 0.6, -R * 0.62);
-    ctx.lineTo(-R * 0.6, R * 0.62);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = c.light;
-    ctx.beginPath();
-    ctx.moveTo(R * 0.95, 0);
-    ctx.lineTo(-R * 0.6, -R * 0.62);
-    ctx.lineTo(-R * 0.2, -R * 0.12);
-    ctx.closePath(); ctx.fill();
-    // 상단 테슬라 코일 (발광 구슬 + 스파크)
-    ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.dark; rrect(-R * 0.75, -R * 0.9, R * 1.4, R * 0.3, 3); ctx.fill(); inkLine(c, R * 0.13);
+    rrect(-R * 0.75, R * 0.6, R * 1.4, R * 0.3, 3); ctx.fill(); inkLine(c, R * 0.13);
+    ctx.fillStyle = c.body; ctx.beginPath(); ctx.moveTo(R * 0.98, 0); ctx.lineTo(-R * 0.6, -R * 0.64); ctx.lineTo(-R * 0.6, R * 0.64); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.2);
+    ctx.fillStyle = c.light; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(R * 0.9, 0); ctx.lineTo(-R * 0.55, -R * 0.6); ctx.lineTo(-R * 0.2, -R * 0.12); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = c.ink; ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.28, 0, Math.PI * 2); ctx.fill();
     const pulse = 0.6 + 0.4 * Math.abs(Math.sin(t * 5));
-    ctx.globalAlpha = pulse;
-    ctx.fillStyle = '#8fe3ff';
-    ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = pulse; ctx.fillStyle = '#8fe3ff'; ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.6;
+    for (let k = 0; k < 4; k++) { const a = t * 2 + k * Math.PI / 2; ctx.beginPath(); ctx.moveTo(-R * 0.05, 0); ctx.lineTo(-R * 0.05 + Math.cos(a) * R * 0.55, Math.sin(a) * R * 0.55); ctx.stroke(); }
     ctx.globalAlpha = 1;
-    // 스파크 가지
-    ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.3; ctx.globalAlpha = pulse;
-    for (let k = 0; k < 4; k++) {
-      const a = t * 2 + k * Math.PI / 2;
-      ctx.beginPath();
-      ctx.moveTo(-R * 0.05, 0);
-      ctx.lineTo(-R * 0.05 + Math.cos(a) * R * 0.5, Math.sin(a) * R * 0.5);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-    // 콕핏 눈
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.arc(R * 0.5, 0, R * 0.13, 0, Math.PI * 2); ctx.fill();
+    optic(c, R * 0.52, 0, R * 0.15);
   }
 
   // ── 래틀러 헬기 — 로터 + 로켓 포드 ──
   function drawHeli(R, c) {
     const spin = performance.now() / 22;
-    // 꼬리 붐
-    ctx.fillStyle = c.dark;
-    rrect(-R * 1.15, -R * 0.12, R * 0.9, R * 0.24, 3); ctx.fill();
-    // 꼬리 로터
+    ctx.fillStyle = c.dark; rrect(-R * 1.15, -R * 0.12, R * 0.9, R * 0.24, 3); ctx.fill(); inkLine(c, R * 0.1);
     ctx.save(); ctx.translate(-R * 1.15, 0); ctx.rotate(spin * 1.4);
-    ctx.strokeStyle = c.trim; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, -R * 0.3); ctx.lineTo(0, R * 0.3); ctx.stroke();
-    ctx.restore();
-    // 동체
-    ctx.fillStyle = c.body;
-    ctx.beginPath();
-    ctx.moveTo(R * 0.95, 0);
-    ctx.lineTo(R * 0.2, -R * 0.55);
-    ctx.lineTo(-R * 0.55, -R * 0.4);
-    ctx.lineTo(-R * 0.55, R * 0.4);
-    ctx.lineTo(R * 0.2, R * 0.55);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = c.light;
-    ctx.beginPath(); ctx.arc(R * 0.35, 0, R * 0.24, 0, Math.PI * 2); ctx.fill();
-    // 로켓 포드 (양옆)
-    ctx.fillStyle = c.dark;
-    rrect(-R * 0.1, -R * 0.66, R * 0.5, R * 0.18, 2); ctx.fill();
-    rrect(-R * 0.1,  R * 0.48, R * 0.5, R * 0.18, 2); ctx.fill();
-    // 콕핏
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.arc(R * 0.5, 0, R * 0.14, 0, Math.PI * 2); ctx.fill();
-    // 메인 로터 (머리 위, 회전)
+    ctx.strokeStyle = c.trim; ctx.lineWidth = R * 0.1; ctx.beginPath(); ctx.moveTo(0, -R * 0.3); ctx.lineTo(0, R * 0.3); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = c.body; ctx.beginPath(); ctx.moveTo(R * 1.0, 0); ctx.lineTo(R * 0.2, -R * 0.56); ctx.lineTo(-R * 0.55, -R * 0.4); ctx.lineTo(-R * 0.55, R * 0.4); ctx.lineTo(R * 0.2, R * 0.56); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.2);
+    ctx.fillStyle = c.dark; rrect(-R * 0.1, -R * 0.68, R * 0.5, R * 0.18, 2); ctx.fill(); inkLine(c, R * 0.11);
+    rrect(-R * 0.1, R * 0.5, R * 0.5, R * 0.18, 2); ctx.fill(); inkLine(c, R * 0.11);
+    optic(c, R * 0.4, 0, R * 0.18);
     ctx.save(); ctx.rotate(spin);
-    ctx.strokeStyle = shade(c.light, 0.1); ctx.lineWidth = 2.4;
+    ctx.strokeStyle = shade(c.light, 0.1); ctx.lineWidth = R * 0.09;
     ctx.beginPath(); ctx.moveTo(-R * 1.1, 0); ctx.lineTo(R * 1.1, 0); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, -R * 1.1); ctx.lineTo(0, R * 1.1); ctx.stroke();
-    ctx.restore();
-    ctx.fillStyle = c.trim;
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, -R * 1.1); ctx.lineTo(0, R * 1.1); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = c.trim; ctx.beginPath(); ctx.arc(0, 0, R * 0.12, 0, Math.PI * 2); ctx.fill();
   }
 
   // ── 팰컨 제트 — 날카로운 화살형 전투기 ──
   function drawJet(R, c) {
-    // 날개
-    ctx.fillStyle = c.dark;
-    ctx.beginPath();
-    ctx.moveTo(-R * 0.1, 0);
-    ctx.lineTo(-R * 0.6, -R * 0.9);
-    ctx.lineTo(-R * 0.2, -R * 0.15);
-    ctx.lineTo(-R * 0.2, R * 0.15);
-    ctx.lineTo(-R * 0.6, R * 0.9);
-    ctx.closePath(); ctx.fill();
-    // 동체 (뾰족)
-    ctx.fillStyle = c.body;
-    ctx.beginPath();
-    ctx.moveTo(R * 1.2, 0);
-    ctx.lineTo(-R * 0.2, -R * 0.28);
-    ctx.lineTo(-R * 0.7, -R * 0.16);
-    ctx.lineTo(-R * 0.7, R * 0.16);
-    ctx.lineTo(-R * 0.2, R * 0.28);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = c.light;
-    ctx.beginPath();
-    ctx.moveTo(R * 1.2, 0);
-    ctx.lineTo(-R * 0.2, -R * 0.28);
-    ctx.lineTo(R * 0.2, 0);
-    ctx.closePath(); ctx.fill();
-    // 콕핏
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.ellipse(R * 0.45, 0, R * 0.18, R * 0.1, 0, 0, Math.PI * 2); ctx.fill();
-    // 엔진 불꽃
-    ctx.fillStyle = c.trim;
-    ctx.beginPath();
-    ctx.moveTo(-R * 0.7, -R * 0.1);
-    ctx.lineTo(-R * 1.0, 0);
-    ctx.lineTo(-R * 0.7, R * 0.1);
-    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.moveTo(-R * 0.1, 0); ctx.lineTo(-R * 0.6, -R * 0.9); ctx.lineTo(-R * 0.2, -R * 0.15); ctx.lineTo(-R * 0.2, R * 0.15); ctx.lineTo(-R * 0.6, R * 0.9); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.13);
+    ctx.fillStyle = c.body; ctx.beginPath(); ctx.moveTo(R * 1.28, 0); ctx.lineTo(-R * 0.2, -R * 0.28); ctx.lineTo(-R * 0.7, -R * 0.16); ctx.lineTo(-R * 0.7, R * 0.16); ctx.lineTo(-R * 0.2, R * 0.28); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.2);
+    ctx.fillStyle = c.light; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(R * 1.2, 0); ctx.lineTo(-R * 0.2, -R * 0.26); ctx.lineTo(R * 0.2, 0); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    optic(c, R * 0.5, 0, R * 0.16);
+    ctx.fillStyle = c.trim; ctx.beginPath(); ctx.moveTo(-R * 0.7, -R * 0.1); ctx.lineTo(-R * 1.05, 0); ctx.lineTo(-R * 0.7, R * 0.1); ctx.closePath(); ctx.fill();
   }
 
   // ── 페리 수송선 — 넓적한 화물 왕복선 ──
   function drawDropship(R, c) {
-    // 하부 그림자 동체
-    ctx.fillStyle = c.dark;
-    rrect(-R * 0.85, -R * 0.6, R * 1.7, R * 1.2, 8); ctx.fill();
-    // 본체
-    ctx.fillStyle = c.body;
-    rrect(-R * 0.75, -R * 0.5, R * 1.55, R * 1.0, 7); ctx.fill();
-    ctx.fillStyle = c.light;
-    rrect(-R * 0.75, -R * 0.5, R * 1.55, R * 0.34, 7); ctx.fill();
-    // 앞쪽 조종석
-    ctx.fillStyle = c.dark;
-    ctx.beginPath();
-    ctx.moveTo(R * 0.8, -R * 0.4);
-    ctx.lineTo(R * 1.15, 0);
-    ctx.lineTo(R * 0.8, R * 0.4);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.arc(R * 0.8, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
-    // 엔진 포드 (양옆)
-    ctx.fillStyle = c.trim;
-    rrect(-R * 0.5, -R * 0.72, R * 0.5, R * 0.2, 3); ctx.fill();
-    rrect(-R * 0.5,  R * 0.52, R * 0.5, R * 0.2, 3); ctx.fill();
-    // 화물칸 라인
-    ctx.strokeStyle = c.dark; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(-R * 0.4, -R * 0.5); ctx.lineTo(-R * 0.4, R * 0.5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(R * 0.1, -R * 0.5); ctx.lineTo(R * 0.1, R * 0.5); ctx.stroke();
+    ctx.fillStyle = c.dark; rrect(-R * 0.85, -R * 0.6, R * 1.7, R * 1.2, 8); ctx.fill(); inkLine(c, R * 0.2);
+    ctx.fillStyle = c.body; rrect(-R * 0.75, -R * 0.5, R * 1.5, R * 1.0, 7); ctx.fill(); inkLine(c, R * 0.16);
+    celTop(c, -R * 0.75, -R * 0.5, R * 1.5, R * 0.34, 7);
+    ctx.fillStyle = c.dark; ctx.beginPath(); ctx.moveTo(R * 0.75, -R * 0.42); ctx.lineTo(R * 1.15, 0); ctx.lineTo(R * 0.75, R * 0.42); ctx.closePath(); ctx.fill(); inkLine(c, R * 0.14);
+    optic(c, R * 0.82, 0, R * 0.16);
+    ctx.fillStyle = c.trim; rrect(-R * 0.5, -R * 0.74, R * 0.5, R * 0.2, 3); ctx.fill(); inkLine(c, R * 0.11);
+    rrect(-R * 0.5, R * 0.54, R * 0.5, R * 0.2, 3); ctx.fill(); inkLine(c, R * 0.11);
   }
 
   // ══ 글룹(Gloop) — 산성 점액 유닛 ═══════════════════
