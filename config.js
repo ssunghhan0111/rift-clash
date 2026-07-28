@@ -142,11 +142,19 @@ RC.CFG = {
 // never teched). That made every match end before the mid/late game existed. Normal
 // and Hard now run a REAL economy — more workers, research reserved up front — so the
 // pop cap, upgrades, air tier and hero levels get used. Easy is deliberately shallow.
+// `income` is a straight multiplier on everything the bot mines (see game.addShard).
+// The human is always 1.00, so anything above that is the bot mining shards that were
+// never in the ground — it compounds into more workers, more production and a bigger
+// army, and it is by far the strongest knob in this table. Keep it close to 1.
 RC.AI_DIFF = {
   easy:   { id: 'easy',   name: 'Easy',   income: 0.70, workerCap: 5,  firstWave: 240, waveSize: 3, waveGrowth: 1, waveGap: 160, armyCap: 6,   maxBarracks: 1, secondFactory: 400, tower: false, tech: false },
-  normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 13, firstWave: 210, waveSize: 5, waveGrowth: 2, waveGap: 120, armyCap: 999, maxBarracks: 2, secondFactory: 280, tower: true,  tech: true  },
-  hard:   { id: 'hard',   name: 'Hard',   income: 1.30, workerCap: 18, firstWave: 120, waveSize: 4, waveGrowth: 2, waveGap: 75,  armyCap: 999, maxBarracks: 3, secondFactory: 180, tower: true,  tech: true  },
+  normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 12, firstWave: 240, waveSize: 4, waveGrowth: 2, waveGap: 135, armyCap: 999, maxBarracks: 2, secondFactory: 300, tower: true,  tech: true  },
+  hard:   { id: 'hard',   name: 'Hard',   income: 1.08, workerCap: 14, firstWave: 165, waveSize: 4, waveGrowth: 2, waveGap: 110, armyCap: 999, maxBarracks: 3, secondFactory: 240, tower: true,  tech: true  },
 };
+// Hard ceiling on the mined-shard multiplier after difficulty and personality have both
+// been applied. Without it a Macro bot on Hard stacked 1.30 × 1.10 = 1.43× income, which
+// no amount of good play on the human's side can trade against.
+RC.AI_INCOME_CAP = 1.15;
 // Minimum shards the bot keeps in reserve to guarantee it can afford research when a
 // lab is up (the old economy never saved this, so it never teched).
 RC.AI_RESEARCH_MIN = 140;
@@ -159,20 +167,26 @@ RC.AI_DIFF_ORDER = ['easy', 'normal', 'hard'];
 // read by ai.js to change build order. Only ever applied to the human's opponents.
 RC.AI_PERSONA = {
   balanced: { id: 'balanced', name: 'Balanced', label: '' },
+  // A personality is meant to change the SHAPE of the pressure, not add more of it, so
+  // each one pays for what it gains: the Rusher hits early but with a smaller, slower-
+  // growing army, the Turtler masses more but arrives much later. Multipliers that were
+  // pure upside (Macro's extra income on top of an already larger worker count) are gone.
   rusher:   { id: 'rusher',   name: 'Rusher',   label: '⚔ Rusher',
-              firstWaveMul: 0.42, waveSizeMul: 0.6, waveGapMul: 0.6, waveGrowthMul: 0.6,
+              firstWaveMul: 0.55, waveSizeMul: 0.65, waveGapMul: 0.7, waveGrowthMul: 0.6,
               workerCapMul: 0.85, tower: false, tech: false, bias: 'ground' },
   turtler:  { id: 'turtler',  name: 'Turtler',  label: '🛡 Turtler',
-              firstWaveMul: 1.6, waveSizeMul: 1.7, waveGapMul: 1.25, workerCapMul: 1.15,
+              firstWaveMul: 1.6, waveSizeMul: 1.45, waveGapMul: 1.25, workerCapMul: 1.1,
               tower: true, tech: true, towerEarly: true },
   skylord:  { id: 'skylord',  name: 'Skylord',  label: '✈ Skylord',
               firstWaveMul: 1.15, waveSizeMul: 1.1, secondFactoryMul: 0.5, tech: true, bias: 'air' },
   macro:    { id: 'macro',    name: 'Macro',    label: '📈 Macro',
-              firstWaveMul: 1.5, waveSizeMul: 1.6, workerCapMul: 1.3, incomeMul: 1.1, tech: true },
+              firstWaveMul: 1.5, waveSizeMul: 1.6, workerCapMul: 1.15, tech: true },
 };
 RC.AI_PERSONA_ORDER = ['balanced', 'rusher', 'turtler', 'skylord', 'macro'];
-// Personalities the game rolls for a random enemy (balanced excluded so matches vary).
-RC.AI_PERSONA_POOL = ['rusher', 'turtler', 'skylord', 'macro'];
+// Personalities the game rolls for a random enemy. `balanced` is in the pool: leaving it
+// out meant every single match was against a bot carrying personality multipliers, so the
+// plain difficulty profile the numbers above are tuned around was never actually played.
+RC.AI_PERSONA_POOL = ['balanced', 'rusher', 'turtler', 'skylord', 'macro'];
 
 // 색상 — 플레이어 4명 각자 색
 RC.COLORS = {

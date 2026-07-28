@@ -226,8 +226,14 @@ window.RC = window.RC || {};
     aiProfile(owner) {
       const D = RC.AI_DIFF || null;
       if (!D) return null;
-      // Allied bots always play plain Normal (never nerfed, never personality-flavored).
-      if (this.playerOwner != null && !this.areEnemies(owner, this.playerOwner)) return D.normal;
+      // Allied bots never take a personality and are never nerfed below Normal, so picking
+      // Easy can't saddle you with a useless partner. They DO scale up with difficulty
+      // though: leaving a 2v2 ally on Normal while both opponents played Hard meant your
+      // side was quietly outnumbered in economy before the first shot was fired.
+      if (this.playerOwner != null && !this.areEnemies(owner, this.playerOwner)) {
+        const chosen = D[this.aiDiff] || D.normal;
+        return (chosen.income || 1) > (D.normal.income || 1) ? chosen : D.normal;
+      }
       const base = D[this.aiDiff] || D.normal;
       const persona = this.aiPersona && this.aiPersona[owner];
       if (!persona || persona.id === 'balanced') return base;
@@ -240,6 +246,8 @@ window.RC = window.RC || {};
       if (persona.workerCapMul)   P.workerCap  = Math.max(4, Math.round(base.workerCap * persona.workerCapMul));
       if (persona.secondFactoryMul) P.secondFactory = Math.round(base.secondFactory * persona.secondFactoryMul);
       if (persona.incomeMul)      P.income     = (base.income || 1) * persona.incomeMul;
+      // Difficulty and personality must never compound into a runaway economy.
+      if (RC.AI_INCOME_CAP) P.income = Math.min(P.income || 1, RC.AI_INCOME_CAP);
       if (persona.tower != null)  P.tower      = persona.tower;
       if (persona.tech != null)   P.tech       = persona.tech;
       P.bias = persona.bias; P.towerEarly = persona.towerEarly; P.persona = persona.id; P.label = persona.label;

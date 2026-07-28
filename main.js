@@ -919,6 +919,7 @@ window.RC = window.RC || {};
   const browserEl = document.getElementById('browser');
   const N = RC.NetClient;
   let myId = null, isHost = false, lobbyData = null, myRace = 'forge', myTeam = null, firstSnap = false;
+  let myReady = false;                  // this client's Ready flag (guests only)
   let roomCode = '', roomPublic = true;
   // Which kind of online game the browser is currently creating ('vs' | 'survival').
   // Set when you press Online from either the Versus or the Survival panel.
@@ -1374,7 +1375,7 @@ window.RC = window.RC || {};
     if (title) title.innerHTML = kind === 'survival'
       ? 'RIFT<b>CLASH</b> · Online Co-op'
       : 'RIFT<b>CLASH</b> · Online';
-    showBrowser(); setBrowserStatus('Connecting…');
+    showBrowser(); setBrowserTab('public', true); setBrowserStatus('Connecting…');
     presence = []; renderPresence();
     RC.online = false;
     if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); }
@@ -1383,6 +1384,25 @@ window.RC = window.RC || {};
   document.getElementById('ss-online').addEventListener('click', () => openBrowser('vs'));
   const svOnlineBtn = document.getElementById('ss-survival-online');
   if (svOnlineBtn) svOnlineBtn.addEventListener('click', () => openBrowser('survival'));
+
+  // ── Public / Private tabs ──────────────────────────────
+  // Joining a stranger's game and setting up a game with one friend are different
+  // errands; showing both sets of controls at once made the screen read as a single
+  // confusing form. One tab is visible at a time.
+  let browserTab = 'public';
+  function setBrowserTab(tab, quiet) {
+    browserTab = (tab === 'private') ? 'private' : 'public';
+    const on = (id, yes) => { const e = document.getElementById(id); if (e) e.classList.toggle('sel', yes); };
+    const pane = (id, yes) => { const e = document.getElementById(id); if (e) e.classList.toggle('hidden', !yes); };
+    on('tab-public', browserTab === 'public');
+    on('tab-private', browserTab === 'private');
+    pane('pane-public', browserTab === 'public');
+    pane('pane-private', browserTab === 'private');
+    if (browserTab === 'private') { const f = document.getElementById('join-code'); if (f) f.focus(); }
+    else if (!quiet) N.send({ t: 'list' });   // returning to the list should show current games
+  }
+  document.getElementById('tab-public').addEventListener('click', () => setBrowserTab('public'));
+  document.getElementById('tab-private').addEventListener('click', () => setBrowserTab('private'));
 
   document.getElementById('create-public').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: true, gameMode: onlineKind }));
   document.getElementById('create-private').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: false, gameMode: onlineKind }));
@@ -1404,7 +1424,17 @@ window.RC = window.RC || {};
     N.send({ t: 'leave' });
     lobbyEl.classList.add('hidden'); showBrowser(); setBrowserStatus('Pick or create a game.');
   });
-  document.getElementById('lobby-start').addEventListener('click', () => { goFullscreen(); N.send({ t: 'start' }); });
+  document.getElementById('lobby-start').addEventListener('click', () => {
+    if (document.getElementById('lobby-start').disabled) return;
+    goFullscreen(); N.send({ t: 'start' });
+  });
+  // Guests arm the host's Start button. Optimistically flip the label so the click
+  // feels instant; the authoritative value arrives with the next lobby push.
+  document.getElementById('lobby-ready').addEventListener('click', () => {
+    myReady = !myReady;
+    N.send({ t: 'ready', ready: myReady });
+    renderLobby();
+  });
 
   // ── Invite link ────────────────────────────────────────
   // One link that drops a friend straight into THIS game. Pasting a room code and
@@ -1511,7 +1541,7 @@ window.RC = window.RC || {};
   N.on('inviteDeclined', m => setBrowserStatus(m.name + ' declined the invite.'));
   N.on('inviteError', m => setBrowserStatus(m.msg || 'That invite could not be sent.'));
   N.on('joined', m => {
-    roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null;
+    roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null; myReady = false;
     voiceAllowed = m.voiceAllowed !== false;
     chatClear();
     showLobby();
@@ -1520,8 +1550,13 @@ window.RC = window.RC || {};
     renderVoice();
   });
   N.on('joinError', m => setBrowserStatus(m.msg || 'Could not join that game.'));
+  N.on('startDenied', m => { const g = document.getElementById('lobby-gate'); if (g) g.textContent = m.msg || 'Not everyone is ready yet.'; });
   N.on('lobby', m => {
     lobbyData = m; isHost = (m.hostId === myId); RC.isHost = isHost;
+    // The server is the authority on readiness — it clears everyone's flag when the
+    // host changes the map, so trust its value over our optimistic local one.
+    const me = (m.players || []).find(p => p.id === myId);
+    myReady = !!(me && me.ready);
     if (m.code) roomCode = m.code;
     roomPublic = m.public;
     if (m.voiceAllowed != null) voiceAllowed = !!m.voiceAllowed;
@@ -1573,9 +1608,15 @@ window.RC = window.RC || {};
     pw.innerHTML = '';
     (lobbyData.players || []).forEach(p => {
       const el = document.createElement('div');
-      el.className = 'pchip' + (p.id === myId ? ' me' : '');
+      const host = p.id === lobbyData.hostId;
+      el.className = 'pchip' + (p.id === myId ? ' me' : '') + (!host && p.ready ? ' rdy' : '');
       const rn = RC.RACES[p.race] ? RC.RACES[p.race].name : p.race;
-      el.innerHTML = `<div class="pn">${esc(p.name)}${p.id === lobbyData.hostId ? ' 👑' : ''}</div><div class="pr">${esc(rn)}</div>`;
+      // The host has no Ready flag — pressing Start is their consent — so their chip
+      // says what they're for instead of showing a tick that can never turn green.
+      const stat = host
+        ? '<div class="pstat n">Starts the game</div>'
+        : (p.ready ? '<div class="pstat y">✓ Ready</div>' : '<div class="pstat n">Not ready</div>');
+      el.innerHTML = `<div class="pn">${esc(p.name)}${host ? ' 👑' : ''}</div><div class="pr">${esc(rn)}</div>` + stat;
       pw.appendChild(el);
     });
     // my faction — 시작 화면과 같은 얼굴 카드
@@ -1648,6 +1689,43 @@ window.RC = window.RC || {};
     } else {
       hostBox.classList.add('hidden'); startBtn.classList.add('hidden');
       setStatus(isSurvival ? 'Waiting for the host to start the run…' : 'Waiting for the host to start…');
+    }
+    renderReady(isSurvival);
+  }
+
+  // ── Ready gate ─────────────────────────────────────────
+  // Guests get a Ready toggle; the host gets a Start button that stays disabled, with
+  // a line saying exactly who it's waiting on, until every guest has armed it. The
+  // server enforces the same rule (see case 'start'), so this is only the explanation.
+  function renderReady(isSurvival) {
+    const readyBtn = document.getElementById('lobby-ready');
+    const startBtn = document.getElementById('lobby-start');
+    const gate = document.getElementById('lobby-gate');
+    if (!readyBtn || !startBtn || !gate) return;
+    const players = (lobbyData && lobbyData.players) || [];
+    const guests = players.filter(p => p.id !== (lobbyData && lobbyData.hostId));
+    const waiting = guests.filter(p => !p.ready);
+
+    readyBtn.classList.toggle('hidden', isHost);
+    if (!isHost) {
+      readyBtn.classList.toggle('on', myReady);
+      readyBtn.textContent = myReady ? '✓ Ready — waiting for host' : "✓ I'm Ready";
+      gate.textContent = myReady
+        ? 'The host can start whenever everyone is ready.'
+        : 'Press Ready when you want to play — the host can only start once everyone has.';
+      return;
+    }
+    const can = guests.length > 0 && waiting.length === 0;
+    startBtn.disabled = !can;
+    if (!guests.length) {
+      gate.textContent = isSurvival
+        ? 'Waiting for other defenders to join…'
+        : 'Waiting for another player to join…';
+    } else if (waiting.length) {
+      const who = waiting.map(p => p.name).join(', ');
+      gate.textContent = `Waiting on ${who} to press Ready (${guests.length - waiting.length}/${guests.length} ready).`;
+    } else {
+      gate.textContent = `Everyone's ready — ${guests.length === 1 ? 'your opponent is' : 'they are'} waiting on you.`;
     }
   }
 

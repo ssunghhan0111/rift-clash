@@ -603,10 +603,29 @@ function createRoom(host, name, isPublic, gameMode) {
   return room;
 }
 
+// ── Readiness ──────────────────────────────────────────────────────────────
+// Only the host can start a match (see isHost / case 'start'), but the host used to
+// be able to do it the instant someone appeared — before they had picked a faction,
+// or while they were still reading the map. Guests now arm the start explicitly.
+// The host is exempt: pressing Start *is* their consent, so asking them to also tick
+// Ready would just be an extra click every single match.
+function isReadyToStart(room) {
+  if (!room || room.clients.length < 2) return false;      // nobody to play against yet
+  return room.clients.slice(1).every(g => g.ready);
+}
+// Anything that changes what game you agreed to play invalidates that agreement.
+// Faction is deliberately excluded — that's each player's own business and resetting
+// on it would make a 4-player co-op lobby almost impossible to ever start.
+function clearReady(room) {
+  if (!room) return;
+  room.clients.forEach(g => { g.ready = false; });
+}
+
 function joinRoom(c, room) {
   if (c.room) leaveRoom(c);
   c.room = room;
   c.voice = false;                       // voice never starts live for a new arrival
+  c.ready = false;                       // every arrival starts un-readied
   room.clients.push(c);
   send(c, {
     t: 'joined', roomId: room.id, code: room.code, name: room.name, public: room.public,
@@ -623,6 +642,7 @@ function leaveRoom(c) {
   if (!room) return;
   c.room = null;
   c.voice = false;                       // leaving the room leaves the call
+  c.ready = false;                       // and un-arms them, so a re-join starts clean
   room.clients = room.clients.filter(x => x !== c);
   if (room.lobby.started && room.game) {
     const owner = room.ownerOf.get(c.socket);
@@ -691,7 +711,8 @@ function lobbyState(room) {
     gameMode: room.lobby.gameMode, diff: room.lobby.diff, cap: roomCap(room),
     voiceAllowed: room.lobby.voice,
     hostId: room.clients.length ? room.clients[0].id : null,
-    players: room.clients.map(c => ({ id: c.id, name: c.name, race: c.race, voice: c.voice })),
+    canStart: isReadyToStart(room),
+    players: room.clients.map(c => ({ id: c.id, name: c.name, race: c.race, voice: c.voice, ready: !!c.ready })),
   };
 }
 function pushLobby(room) { if (!room.lobby.started) roomBroadcast(room, lobbyState(room)); }
@@ -946,14 +967,24 @@ function onMsg(c, m) {
 
     // in-room actions
     case 'race': if (c.room && RC.RACES[m.race]) { c.race = m.race; pushLobby(c.room); } break;
-    case 'map': if (isHost(c) && RC.getMap(m.mapId)) { c.room.lobby.mapId = m.mapId; pushLobby(c.room); broadcastRoomList(); } break;
-    case 'mode': if (isHost(c) && RC.MODES[m.modeId]) { c.room.lobby.modeId = m.modeId; pushLobby(c.room); broadcastRoomList(); } break;
+    // A guest arming/disarming the start. The host has no ready flag to set.
+    case 'ready': {
+      if (!c.room || c.room.lobby.started || isHost(c)) break;
+      const want = !!m.ready;
+      if (c.ready === want) break;
+      c.ready = want;
+      pushLobby(c.room);
+      break;
+    }
+    case 'map': if (isHost(c) && RC.getMap(m.mapId)) { c.room.lobby.mapId = m.mapId; clearReady(c.room); pushLobby(c.room); broadcastRoomList(); } break;
+    case 'mode': if (isHost(c) && RC.MODES[m.modeId]) { c.room.lobby.modeId = m.modeId; clearReady(c.room); pushLobby(c.room); broadcastRoomList(); } break;
     // Survival co-op: host picks the difficulty instead of a map/mode.
-    case 'diff': if (isHost(c) && ['easy', 'medium', 'insane'].includes(m.diff)) { c.room.lobby.diff = m.diff; pushLobby(c.room); broadcastRoomList(); } break;
+    case 'diff': if (isHost(c) && ['easy', 'medium', 'insane'].includes(m.diff)) { c.room.lobby.diff = m.diff; clearReady(c.room); pushLobby(c.room); broadcastRoomList(); } break;
     case 'gamemode': {
       if (!isHost(c) || c.room.lobby.started) break;
       const gm = (m.gameMode === 'survival') ? 'survival' : 'vs';
       c.room.lobby.gameMode = gm;
+      clearReady(c.room);
       // switching to a tighter cap could leave the room over-full — drop the newest joiners
       while (c.room.clients.length > roomCap(c.room)) {
         const evicted = c.room.clients[c.room.clients.length - 1];
@@ -963,7 +994,20 @@ function onMsg(c, m) {
       pushLobby(c.room); broadcastRoomList();
       break;
     }
-    case 'start': if (isHost(c) && c.room && !c.room.lobby.started) { startMatch(c.room); } break;
+    // Authoritative on both counts: a non-host is ignored outright, and even the host
+    // is refused until every guest has readied. The client greys its own button out
+    // too, but that is a courtesy — this is the check that actually holds.
+    case 'start': {
+      if (!isHost(c) || !c.room || c.room.lobby.started) break;
+      if (!isReadyToStart(c.room)) {
+        send(c, { t: 'startDenied', msg: c.room.clients.length < 2
+          ? 'Wait for another player to join.'
+          : 'Everyone needs to press Ready first.' });
+        break;
+      }
+      startMatch(c.room);
+      break;
+    }
     case 'cmd': {
       const room = c.room;
       if (!room || !room.game || room.game.over) break;

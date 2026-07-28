@@ -495,6 +495,36 @@
   #mission-hud .mh-obj.fail { color: var(--bad, #e0503f); }
   #mission-hud .mh-prog { margin-left: auto; color: var(--dim); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
 
+  /* Online browser: Public / Private tabs */
+  #browser-tabs { display: flex; gap: 6px; margin: 4px 0 18px; background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 9px; padding: 5px; }
+  .btab { background: transparent; color: var(--dim); border: none; border-radius: 6px;
+    padding: 9px 26px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .btab:hover { color: var(--text); }
+  .btab.sel { background: var(--orange); color: #10151d; }
+  #pane-public, #pane-private { display: flex; flex-direction: column; align-items: center; width: 100%; }
+  #pane-public.hidden, #pane-private.hidden { display: none; }
+  .pane-lead { color: var(--dim); font-size: 12.5px; line-height: 1.5; max-width: 480px;
+    text-align: center; margin-bottom: 16px; }
+  #priv-cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .priv-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px 22px; width: min(280px, 90vw); display: flex; flex-direction: column;
+    align-items: center; gap: 7px; }
+  .pc-step { font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--orange); }
+  .pc-title { font-size: 15px; font-weight: 700; color: #fff; }
+  .pc-sub { font-size: 12px; color: var(--dim); line-height: 1.45; text-align: center; margin-bottom: 6px; min-height: 34px; }
+
+  /* Lobby readiness */
+  #lobby-ready { padding: 11px 30px; font-size: 15px; font-weight: 700; border-radius: 6px;
+    cursor: pointer; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+  #lobby-ready.on { background: var(--good, #35c46a); color: #08120b; border-color: transparent; }
+  #lobby-start:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.6); }
+  #lobby-gate { font-size: 12px; color: var(--dim); margin-top: 9px; text-align: center; min-height: 16px; }
+  .pchip.rdy { border-color: var(--good, #35c46a); }
+  .pchip .pstat { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-top: 3px; }
+  .pchip .pstat.y { color: var(--good, #35c46a); }
+  .pchip .pstat.n { color: var(--dim); }
+
   /* Crash guard (global error boundary) */
   #crashguard { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
     justify-content: center; background: rgba(6,10,15,.92); }
@@ -1169,28 +1199,55 @@
   <div id="browser-who" style="font-size:12.5px; color:var(--dim); margin-bottom:2px;">Playing as <span id="browser-name" style="color:var(--cyan); font-weight:700;">—</span></div>
   <div id="browser-status" style="color:var(--dim); font-size:12.5px; margin-bottom:14px;">Connecting…</div>
 
-  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center;">
-    <input id="room-name" placeholder="Game name (optional)" maxlength="20"
-           style="background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:11px 14px; border-radius:6px; font-size:14px; width:220px;">
-    <button id="create-public" class="ss-btn2 hl">➕ Create Public</button>
-    <button id="create-private" class="ss-btn2">🔒 Create Private</button>
+  <!-- Public and Private are two different intentions — playing with strangers vs
+       playing with one specific friend — so they get one tab each instead of being
+       stacked into a single wall of controls. -->
+  <div id="browser-tabs">
+    <button id="tab-public" class="btab sel">🌐 Public</button>
+    <button id="tab-private" class="btab">🔒 Private</button>
   </div>
 
-  <div class="ss-h" style="display:flex; align-items:center; gap:10px;">Players Online
-    <span id="online-count" style="font-size:11px; color:var(--dim); font-weight:400;"></span>
-  </div>
-  <div id="online-list"></div>
+  <!-- ── Public: open games anyone can join ── -->
+  <div id="pane-public">
+    <div class="pane-lead">Play against whoever's around. Your game is listed publicly and anyone can join it.</div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center;">
+      <input id="room-name" placeholder="Game name (optional)" maxlength="20"
+             style="background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:11px 14px; border-radius:6px; font-size:14px; width:220px;">
+      <button id="create-public" class="ss-btn2 hl">➕ Create Public Game</button>
+    </div>
 
-  <div class="ss-h" style="display:flex; align-items:center; gap:10px;">Public Games
-    <button id="refresh-rooms" style="background:var(--panel-2); color:var(--cyan); border:1px solid var(--line); border-radius:5px; padding:3px 10px; font-size:11px; cursor:pointer;">Refresh</button>
-  </div>
-  <div id="room-list" style="display:flex; flex-direction:column; gap:8px; width:min(560px,92vw);"></div>
+    <div class="ss-h" style="display:flex; align-items:center; gap:10px;">Players Online
+      <span id="online-count" style="font-size:11px; color:var(--dim); font-weight:400;"></span>
+    </div>
+    <div id="online-list"></div>
 
-  <div class="ss-h">Join a Private Game</div>
-  <div style="display:flex; gap:8px; align-items:center;">
-    <input id="join-code" placeholder="CODE" maxlength="4"
-           style="background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:11px 14px; border-radius:6px; font-size:16px; width:120px; text-transform:uppercase; letter-spacing:.2em; text-align:center; font-family:var(--mono);">
-    <button id="join-code-btn" class="ss-btn2">Join</button>
+    <div class="ss-h" style="display:flex; align-items:center; gap:10px;">Open Games
+      <button id="refresh-rooms" style="background:var(--panel-2); color:var(--cyan); border:1px solid var(--line); border-radius:5px; padding:3px 10px; font-size:11px; cursor:pointer;">Refresh</button>
+    </div>
+    <div id="room-list" style="display:flex; flex-direction:column; gap:8px; width:min(560px,92vw);"></div>
+  </div>
+
+  <!-- ── Private: two paths, create one or join one. Nothing else on screen. ── -->
+  <div id="pane-private" class="hidden">
+    <div class="pane-lead">Play with a friend. Private games are hidden from the list — you get a 4-letter code to share.</div>
+    <div id="priv-cards">
+      <div class="priv-card">
+        <div class="pc-step">1 · Start one</div>
+        <div class="pc-title">Create a private game</div>
+        <div class="pc-sub">You'll get a code and an invite link to send your friend.</div>
+        <button id="create-private" class="ss-btn2 hl">🔒 Create Private Game</button>
+      </div>
+      <div class="priv-card">
+        <div class="pc-step">or · Join one</div>
+        <div class="pc-title">Got a code?</div>
+        <div class="pc-sub">Type the 4 letters your friend sent you.</div>
+        <div style="display:flex; gap:8px; align-items:center; justify-content:center;">
+          <input id="join-code" placeholder="CODE" maxlength="4"
+                 style="background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:11px 14px; border-radius:6px; font-size:18px; width:132px; text-transform:uppercase; letter-spacing:.2em; text-align:center; font-family:var(--mono);">
+          <button id="join-code-btn" class="ss-btn2">Join</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <button id="browser-back" style="margin-top:22px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); padding:11px 24px; font-size:14px; font-weight:700; border-radius:6px; cursor:pointer;">Back</button>
@@ -1261,9 +1318,11 @@
   <div id="lobby-online"></div>
 
   <div style="display:flex; gap:12px; margin-top:22px;">
+    <button id="lobby-ready" class="hidden">✓ I'm Ready</button>
     <button id="lobby-start" class="hidden">Start Match</button>
     <button id="btn-menu2">Leave</button>
   </div>
+  <div id="lobby-gate"></div>
 </div>
 
 <!-- ── Nickname (first launch) ───────────────────── -->
