@@ -90,8 +90,12 @@ RC.Renderer = (function () {
   }
 
   // 둥근 사각형 경로
+  // Corner radius is deliberately generous — softer corners are most of what separates
+  // a cartoon shape from a technical one. The clamp keeps it safe: a radius larger than
+  // half the box simply becomes a capsule rather than breaking the path.
+  const RRECT_ROUND = 1.9;
   function rrect(x, y, w, h, r) {
-    r = Math.min(r, w / 2, h / 2);
+    r = Math.min(r * RRECT_ROUND, w / 2, h / 2);
     ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -664,21 +668,10 @@ RC.Renderer = (function () {
       else if (p.w) { ctx.fillRect(p.x - p.w / 2, p.y - p.h / 2, p.w, p.h); }
     });
 
-    const t = CFG.TILE;
-    const x0 = Math.floor(g.camera.x / t) * t;
-    const y0 = Math.floor(g.camera.y / t) * t;
-    // 격자선은 행성 땅색에서 파생 — 고정 파란 격자는 붉은 사막에서 튄다
-    ctx.strokeStyle = (g.mapDef && g.mapDef.ground) ? shade(g.mapDef.ground, -0.28) : C.grid;
-    ctx.globalAlpha = 0.55;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let x = x0; x < g.camera.x + W + t; x += t) {
-      ctx.moveTo(x + 0.5, g.camera.y); ctx.lineTo(x + 0.5, g.camera.y + H);
-    }
-    for (let y = y0; y < g.camera.y + H + t; y += t) {
-      ctx.moveTo(g.camera.x, y + 0.5); ctx.lineTo(g.camera.x + W, y + 0.5);
-    }
-    ctx.stroke();
+    // The tile grid used to be drawn here. It read as a spreadsheet under the art and
+    // fought the cartoon look — terrain zones, the rift and the map border already
+    // give the ground all the structure it needs, and building placement snaps on its
+    // own without a visible lattice to line up against.
 
     // 맵 경계
     ctx.strokeStyle = '#2b3a4d';
@@ -836,25 +829,34 @@ RC.Renderer = (function () {
         aetherBody(b, p, x, y);
       } else {
         // 포지 — 각진 금속 본체 + 굵은 잉크 외곽선 + 셀 하이라이트 (메나싱 카툰)
+        // Cartoon pass: softer corners, a heavier outline, a wider flat top-light and
+        // chunkier rivets, so buildings sit in the same drawn world as the units rather
+        // than looking like technical boxes the units happen to stand next to.
         const inkc = shade(p.body, -0.72), light = shade(p.body, 0.32), dk = shade(p.body, -0.4);
+        const rad = Math.max(9, Math.min(b.w, b.h) * 0.22);
         ctx.fillStyle = 'rgba(0,0,0,0.32)';
-        rrect(x + 4, y + 6, b.w, b.h, 7); ctx.fill();
+        rrect(x + 4, y + 7, b.w, b.h, rad); ctx.fill();
         ctx.fillStyle = dk;
-        rrect(x, y, b.w, b.h, 7); ctx.fill();
+        rrect(x, y, b.w, b.h, rad); ctx.fill();
         ctx.fillStyle = p.body;
-        rrect(x, y, b.w, b.h * 0.82, 7); ctx.fill();
-        ctx.fillStyle = light; ctx.globalAlpha = 0.6;
-        rrect(x + 4, y + 4, b.w - 8, b.h * 0.26, 5); ctx.fill(); ctx.globalAlpha = 1;
-        ctx.fillStyle = inkc;
-        [[x + 8, y + 8], [x + b.w - 8, y + 8], [x + 8, y + b.h - 8], [x + b.w - 8, y + b.h - 8]].forEach(([rx, ry]) => {
-          ctx.beginPath(); ctx.arc(rx, ry, 2.7, 0, Math.PI * 2); ctx.fill();
+        rrect(x, y, b.w, b.h * 0.8, rad); ctx.fill();
+        // flat top-light — one broad band, not a gradient. Cel shading, not realism.
+        ctx.fillStyle = light; ctx.globalAlpha = 0.66;
+        rrect(x + 5, y + 5, b.w - 10, b.h * 0.3, rad * 0.7); ctx.fill(); ctx.globalAlpha = 1;
+        // fat rivets with a tiny highlight each
+        const rv = Math.max(3.2, b.w * 0.045);
+        [[x + 10, y + 10], [x + b.w - 10, y + 10], [x + 10, y + b.h - 10], [x + b.w - 10, y + b.h - 10]].forEach(([rx, ry]) => {
+          ctx.fillStyle = inkc; ctx.beginPath(); ctx.arc(rx, ry, rv, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = light; ctx.globalAlpha = 0.6;
+          ctx.beginPath(); ctx.arc(rx - rv * 0.3, ry - rv * 0.3, rv * 0.38, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
         });
         // bold cartoon ink outline
-        ctx.lineJoin = 'round'; ctx.strokeStyle = inkc; ctx.lineWidth = Math.max(3, b.w * 0.045);
-        rrect(x, y, b.w, b.h, 7); ctx.stroke();
+        ctx.lineJoin = 'round'; ctx.strokeStyle = inkc; ctx.lineWidth = Math.max(4, b.w * 0.07);
+        rrect(x, y, b.w, b.h, rad); ctx.stroke();
         // trim accent
-        ctx.strokeStyle = p.trim; ctx.lineWidth = 2;
-        rrect(x + 5, y + 5, b.w - 10, b.h - 10, 4); ctx.stroke();
+        ctx.strokeStyle = p.trim; ctx.lineWidth = 2.4;
+        rrect(x + 6, y + 6, b.w - 12, b.h - 12, rad * 0.6); ctx.stroke();
       }
 
       // 타입별 표식
@@ -1260,29 +1262,68 @@ RC.Renderer = (function () {
   // ── Menacing cartoon primitives (shared by every redesigned sprite) ──
   // Bold ink outlines, hostile glowing optics, angled visor slits, cel highlights.
   const TAU = Math.PI * 2;
-  function inkLine(c, w) { ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = c.ink; ctx.lineWidth = w; ctx.stroke(); }
+
+  // ── Cartoon dials ──────────────────────────────────────────────────────────
+  // Every one of the 20-plus unit sprites is drawn from these same few primitives,
+  // so the whole roster can be pushed toward a chunkier, friendlier read by tuning
+  // them in one place instead of hand-editing every draw function. Raising INK is
+  // what does most of the work: a heavy, even outline is the single strongest cue
+  // that something is drawn rather than rendered.
+  const INK = 1.65;          // outline weight multiplier
+  const EYE = 1.34;          // optic / visor scale — bigger eyes read younger and cuter
+  const ROUND = 1.9;         // corner-radius multiplier on every rounded rectangle
+  const CEL = 0.62;          // strength of the flat top-light
+
+  function inkLine(c, w) {
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = c.ink; ctx.lineWidth = w * INK; ctx.stroke();
+  }
   function sglow(x, y, r, rgb, a) { blitGlow(softGlow(rgb), x, y, r, r, a); }
-  function celTop(c, x, y, w, h, r) { ctx.fillStyle = c.light; ctx.globalAlpha = 0.5; rrect(x, y, w, h, r); ctx.fill(); ctx.globalAlpha = 1; }
-  // single hostile eye
+  function celTop(c, x, y, w, h, r) {
+    ctx.fillStyle = c.light; ctx.globalAlpha = CEL; rrect(x, y, w, h, r * ROUND); ctx.fill(); ctx.globalAlpha = 1;
+  }
+  // Big rounded eye with a fat catch-light. The catch-light is the cartoon tell —
+  // without it an optic is a lamp; with it, the thing looks alive and is looking AT you.
   function optic(c, x, y, r) {
+    r *= EYE;
     sglow(x, y, r * 2.1, c.opticRGB, 0.5);
     ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = c.ink; ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, r * 0.64, 0, TAU); ctx.fillStyle = c.eye; ctx.fill();
-    ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.arc(x - r * 0.22, y - r * 0.24, r * 0.24, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(x, y, r * 0.7, 0, TAU); ctx.fillStyle = c.eye; ctx.fill();
+    // main catch-light, upper left
+    ctx.globalAlpha = 0.95;
+    ctx.beginPath(); ctx.arc(x - r * 0.24, y - r * 0.27, r * 0.32, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
+    // tiny secondary spark, lower right — sells the glassy dome
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.arc(x + r * 0.3, y + r * 0.28, r * 0.13, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
   }
-  // angled aggressive visor slit, pointing +x (forward)
+  // Forward-pointing visor. Kept angled so it still reads as a fighter, but taller and
+  // softer-cornered than before so it looks like a helmet rather than a razor slot.
   function visorSlit(c, x, y, w, h) {
+    h *= EYE;
     sglow(x + w * 0.5, y, w * 1.35, c.opticRGB, 0.5);
-    ctx.fillStyle = c.ink; rrect(x - w * 0.16, y - h * 0.95, w * 1.32, h * 1.9, h * 0.5); ctx.fill();
+    ctx.fillStyle = c.ink; rrect(x - w * 0.18, y - h * 1.0, w * 1.36, h * 2.0, h); ctx.fill();
     ctx.fillStyle = c.eye;
-    ctx.beginPath(); ctx.moveTo(x, y - h * 0.5); ctx.lineTo(x + w, y - h * 0.2); ctx.lineTo(x + w, y + h * 0.2); ctx.lineTo(x, y + h * 0.5); ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x, y - h * 0.52); ctx.lineTo(x + w, y - h * 0.26);
+    ctx.lineTo(x + w, y + h * 0.26); ctx.lineTo(x, y + h * 0.52);
+    ctx.closePath(); ctx.fill();
+    // glass highlight along the top edge
+    ctx.globalAlpha = 0.5; ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.08, y - h * 0.38); ctx.lineTo(x + w * 0.92, y - h * 0.18);
+    ctx.lineTo(x + w * 0.92, y - h * 0.06); ctx.lineTo(x + w * 0.08, y - h * 0.22);
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   // 유닛 스프라이트 본체 — 원점 기준으로 그림(+x 방향을 바라봄). drawUnit / drawPortrait 공용
   function drawUnitSprite(u, c) {
-    // Draw the body slightly larger than the collision radius so units read as solid
-    // shapes rather than small blobs sitting on their owner disc. Purely cosmetic.
-    const R = u.r * 1.18;
+    // Draw the body larger than the collision radius so units read as solid shapes
+    // rather than small blobs sitting on their owner disc. Pushed up from 1.18 for the
+    // cartoon pass: a chunkier body over the same footprint is what gives the roster
+    // its stubby hero proportions without touching collision or pathing.
+    const R = u.r * 1.30;
     if (u.type === 'wrench') drawWrench(R, c);
     else if (u.type === 'volt') drawVolt(R, c);
     else if (u.type === 'shielder') drawShielder(R, c);
@@ -1513,7 +1554,12 @@ RC.Renderer = (function () {
       ctx.closePath();
     };
     ctx.fillStyle = dk; oct(x, y, b.w, b.h, 0); ctx.fill();
-    ctx.fillStyle = body; oct(x + 4, y + 4, b.w - 8, b.h - 8, 0.3); ctx.fill();
+    // Heavy ink around the crystal silhouette, to match the units' outlines.
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = mix(AETHER_TINT, '#0a0714', 0.55);
+    ctx.lineWidth = Math.max(4, b.w * 0.065);
+    oct(x, y, b.w, b.h, 0); ctx.stroke();
+    ctx.fillStyle = body; oct(x + 5, y + 5, b.w - 10, b.h - 10, 0.3); ctx.fill();
     // 상단 결정면
     ctx.fillStyle = lt;
     ctx.beginPath();
@@ -2125,9 +2171,12 @@ RC.Renderer = (function () {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    // 얇은 테두리
-    ctx.strokeStyle = mix(GLOOP_TINT, '#0a1410', 0.15); ctx.lineWidth = 2;
-    rrect(x + 2, y + 2, b.w - 4, b.h - 4, rad - 2); ctx.stroke();
+    // 굵은 잉크 외곽선 — the thin 2px rim read as a technical stroke next to the
+    // heavy outlines the units now carry. Gloop keeps a darker, organic ink.
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = mix(GLOOP_TINT, '#050c09', 0.55);
+    ctx.lineWidth = Math.max(4, b.w * 0.065);
+    rrect(x, y, b.w, b.h, rad); ctx.stroke();
   }
   // 울렁이는 블롭 외곽 (n개 정점을 시간에 따라 흔든다)
   function blob(R, wob, seed) {
