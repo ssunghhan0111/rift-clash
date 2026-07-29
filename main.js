@@ -160,31 +160,27 @@ window.RC = window.RC || {};
     }
   }
 
+  // Map cards show the planet as a turning globe rather than a flat top-down thumbnail.
+  // The old preview was accurate but unreadable at card size — eight dark rectangles
+  // with dots on them, none of which said "this is Mars". Canvases that are on screen
+  // are collected here so the menu loop can spin them.
+  const mapGlobes = [];
   function drawMapPreview(canvas, map) {
-    const g2 = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-    const sx = W / map.world.w, sy = H / map.world.h;
-    g2.fillStyle = map.ground || '#152029';
-    g2.fillRect(0, 0, W, H);
-    (map.terrain || []).forEach(t => {
-      g2.fillStyle = t.color;
-      if (t.r) { g2.beginPath(); g2.arc(t.x * sx, t.y * sy, t.r * sx, 0, Math.PI * 2); g2.fill(); }
-    });
-    g2.fillStyle = RC.COLORS.obstacleDark;
-    (map.obstacles || []).forEach(o => g2.fillRect((o.x - o.w / 2) * sx, (o.y - o.h / 2) * sy, o.w * sx, o.h * sy));
-    g2.fillStyle = RC.COLORS.node;
-    (map.midNodes || []).forEach(m => { g2.beginPath(); g2.arc(m.x * sx, m.y * sy, 2.5, 0, Math.PI * 2); g2.fill(); });
-    // 시작 지점 (4개 색)
-    const cols = [RC.COLORS.p1_body, RC.COLORS.p2_body, RC.COLORS.p3_body, RC.COLORS.p4_body];
-    map.spawns.forEach((s, i) => {
-      g2.fillStyle = cols[i % 4];
-      g2.fillRect(s.x * sx - 4, s.y * sy - 4, 8, 8);
-    });
+    if (RC.Renderer && RC.Renderer.drawPlanet) RC.Renderer.drawPlanet(canvas, map, 0);
+  }
+  function drawMapGlobes() {
+    if (!RC.Renderer || !RC.Renderer.drawPlanet) return;
+    const t = performance.now() / 1000;
+    for (const gl of mapGlobes) {
+      if (!gl.cv || !gl.cv.isConnected) continue;   // card was replaced — skip it
+      RC.Renderer.drawPlanet(gl.cv, gl.map, t);
+    }
   }
 
   function buildStartScreen() {
     const mapWrap = document.getElementById('ss-maps');
     mapWrap.innerHTML = '';
+    mapGlobes.length = 0;
     RC.MAPS.forEach(map => {
       const card = document.createElement('div');
       card.className = 'mapcard' + (map.id === selMap ? ' sel' : '');
@@ -197,7 +193,9 @@ window.RC = window.RC || {};
         card.classList.add('sel');
       });
       mapWrap.appendChild(card);
-      drawMapPreview(card.querySelector('canvas'), map);
+      const cv2 = card.querySelector('canvas');
+      mapGlobes.push({ cv: cv2, map });
+      drawMapPreview(cv2, map);
     });
 
     const modeWrap = document.getElementById('ss-modes');
@@ -1733,12 +1731,17 @@ window.RC = window.RC || {};
         setStatus('You are the host. Pick a difficulty and press Start. Everyone defends one shared crystal.');
       } else {
         const mw = document.getElementById('lobby-maps'); mw.innerHTML = '';
+        mapGlobes.length = 0;                      // the start-screen cards are gone now
         RC.MAPS.forEach(map => {
           const c = document.createElement('div');
-          c.className = 'modebtn' + (map.id === lobbyData.mapId ? ' sel' : '');
-          c.innerHTML = `<div class="mb-name">${map.name}</div>`;
+          c.className = 'modebtn mapbtn' + (map.id === lobbyData.mapId ? ' sel' : '');
+          c.innerHTML = `<canvas class="map-globe" width="96" height="96"></canvas>` +
+                        `<div class="mb-name">${map.name}</div>`;
           c.addEventListener('click', () => N.send({ t: 'map', mapId: map.id }));
           mw.appendChild(c);
+          const gcv = c.querySelector('canvas');
+          mapGlobes.push({ cv: gcv, map });
+          drawMapPreview(gcv, map);
         });
         const mo = document.getElementById('lobby-modes'); mo.innerHTML = '';
         Object.values(RC.MODES).forEach(mm => {
@@ -1950,7 +1953,7 @@ window.RC = window.RC || {};
     } else {
       // 메뉴 화면 — 종족 얼굴만 가볍게 애니메이션 (초당 ~20프레임)
       faceAcc += dt;
-      if (faceAcc >= 0.05) { faceAcc = 0; drawRaceFaces(); }
+      if (faceAcc >= 0.05) { faceAcc = 0; drawRaceFaces(); drawMapGlobes(); }
     }
 
     requestAnimationFrame(frame);

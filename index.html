@@ -307,7 +307,10 @@
   }
   .mapcard:hover { transform: translateY(-2px); }
   .mapcard.sel { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
-  .mapcard canvas { display: block; width: 224px; height: 150px; background: #0d131b; }
+  .mapcard canvas { display: block; width: 224px; height: 150px; background: #05080f; }
+  /* Lobby map buttons carry the same globe, small */
+  .mapbtn { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .map-globe { display: block; width: 76px; height: 76px; border-radius: 6px; background: #05080f; }
   .mapcard .mc-name { font-size: 14px; font-weight: 700; color: #fff; padding: 8px 10px 2px; }
   .mapcard .mc-desc { font-size: 11px; color: var(--dim); padding: 0 10px 10px; line-height: 1.4; min-height: 44px; }
 

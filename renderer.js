@@ -2985,6 +2985,229 @@ RC.Renderer = (function () {
     return c;
   }
 
+  // ── 행성 지구본 (맵 선택용) ─────────────────────────
+  // The map picker used to show a flat top-down thumbnail of the playfield. It was
+  // honest but unreadable at 224x150 — eight dark rectangles with dots on them, none
+  // of which said "this is Mars". A lit globe makes each map instantly recognisable
+  // from across the room, which is what a picker is actually for. The tactical layout
+  // is still one click away on the map itself.
+  //
+  // Everything is seeded off the map id, so a planet looks identical on every visit
+  // and never shimmers between frames.
+  function seedRnd(seed) {
+    let s = 0;
+    for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0;
+    return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  }
+
+  // Per-planet identity. Falls back to the map's own ground/bg colours for anything
+  // not listed, so a new map still gets a sensible globe with no extra work.
+  const PLANET = {
+    earth:   { base: '#1d4e78', land: '#2f7a45', land2: '#245f36', cap: '#dceaf2', air: '#7fc4ff', look: 'continents', spin: 0.10 },
+    venus:   { base: '#b8792c', land: '#d8a34a', land2: '#8f5520', cap: null,      air: '#ffd08a', look: 'swirl',      spin: 0.05 },
+    mars:    { base: '#9c4526', land: '#7d3419', land2: '#c2683a', cap: '#f0e6dc', air: '#ff9c6b', look: 'craters',    spin: 0.11 },
+    jupiter: { base: '#b98a5e', land: '#8d6340', land2: '#dcb98a', cap: null,      air: '#ffca94', look: 'bands',      spin: 0.16 },
+    saturn:  { base: '#c9a870', land: '#a8874f', land2: '#e3ca9a', cap: null,      air: '#ffe0aa', look: 'bands',      spin: 0.14, ring: true },
+    neptune: { base: '#2a4f9e', land: '#1e3b78', land2: '#4a74c6', cap: null,      air: '#8fb6ff', look: 'bands',      spin: 0.12 },
+    pluto:   { base: '#8a7d70', land: '#6d6055', land2: '#cbbfae', cap: '#e8e2d8', air: '#cfd8e4', look: 'patches',    spin: 0.07 },
+    ceres:   { base: '#6d6a66', land: '#565350', land2: '#8b8783', cap: null,      air: '#b8bec6', look: 'craters',    spin: 0.09 },
+  };
+
+  function planetStyle(map) {
+    const p = PLANET[map.id];
+    if (p) return p;
+    const base = map.ground || '#3a4757';
+    return { base, land: shade(base, -0.28), land2: shade(base, 0.26), cap: null,
+             air: shade(base, 0.5), look: 'patches', spin: 0.09 };
+  }
+
+  // canvas: any 2D canvas. t: seconds (drives the spin). Safe to call every frame.
+  function drawPlanet(canvas, map, t) {
+    if (!canvas || !map) return;
+    const c2 = canvas.getContext('2d');
+    if (!c2) return;
+    const W = canvas.width, H = canvas.height;
+    const S = planetStyle(map);
+    const rnd = seedRnd(map.id || 'x');
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) * (S.ring ? 0.33 : 0.40);
+    const spin = (t || 0) * S.spin;
+
+    c2.clearRect(0, 0, W, H);
+    // ── space + stars ──
+    c2.fillStyle = '#05080f';
+    c2.fillRect(0, 0, W, H);
+    for (let i = 0; i < 46; i++) {
+      const x = rnd() * W, y = rnd() * H, a = 0.18 + rnd() * 0.62, s = rnd() < 0.85 ? 0.8 : 1.5;
+      c2.globalAlpha = a; c2.fillStyle = '#dfe9ff';
+      c2.beginPath(); c2.arc(x, y, s, 0, Math.PI * 2); c2.fill();
+    }
+    c2.globalAlpha = 1;
+
+    // ── ring, back half (behind the planet) ──
+    if (S.ring) drawRing(c2, cx, cy, R, S, true);
+
+    // ── globe body ──
+    c2.save();
+    c2.beginPath(); c2.arc(cx, cy, R, 0, Math.PI * 2); c2.clip();
+    c2.fillStyle = S.base;
+    c2.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+    // Surface features live in a band of longitudes; drawing each twice, one wrap
+    // apart, makes the surface scroll seamlessly as the planet turns.
+    const span = R * 2.6;
+    const off = ((spin * span) % span);
+    for (const pass of [0, 1]) {
+      const dx = off - pass * span;
+      c2.save(); c2.translate(dx, 0);
+      surface(c2, cx, cy, R, S, seedRnd((map.id || 'x') + pass));
+      c2.restore();
+    }
+
+    // polar caps sit still — they don't rotate with the surface
+    if (S.cap) {
+      c2.fillStyle = S.cap; c2.globalAlpha = 0.9;
+      c2.beginPath(); c2.ellipse(cx, cy - R * 0.98, R * 0.62, R * 0.24, 0, 0, Math.PI * 2); c2.fill();
+      c2.beginPath(); c2.ellipse(cx, cy + R * 1.0, R * 0.54, R * 0.2, 0, 0, Math.PI * 2); c2.fill();
+      c2.globalAlpha = 1;
+    }
+
+    // ── lighting: lit from upper-left, hard terminator on the lower-right limb ──
+    const lit = c2.createRadialGradient(cx - R * 0.42, cy - R * 0.44, R * 0.1, cx, cy, R * 1.16);
+    lit.addColorStop(0, 'rgba(255,255,255,0.30)');
+    lit.addColorStop(0.42, 'rgba(255,255,255,0.02)');
+    lit.addColorStop(0.72, 'rgba(0,0,0,0.34)');
+    lit.addColorStop(1, 'rgba(0,0,0,0.80)');
+    c2.fillStyle = lit;
+    c2.fillRect(cx - R, cy - R, R * 2, R * 2);
+    c2.restore();
+
+    // ── atmosphere rim ──
+    c2.save();
+    c2.globalAlpha = 0.55;
+    c2.strokeStyle = S.air; c2.lineWidth = Math.max(1.5, R * 0.05);
+    c2.beginPath(); c2.arc(cx, cy, R - c2.lineWidth * 0.3, 0, Math.PI * 2); c2.stroke();
+    c2.globalAlpha = 0.18;
+    c2.lineWidth = Math.max(2, R * 0.13);
+    c2.beginPath(); c2.arc(cx, cy, R + c2.lineWidth * 0.4, 0, Math.PI * 2); c2.stroke();
+    c2.restore();
+
+    // ── ring, front half ──
+    if (S.ring) drawRing(c2, cx, cy, R, S, false);
+
+    // ── start positions — still the one piece of tactical information worth keeping ──
+    const cols = [C.p1_body, C.p2_body, C.p3_body, C.p4_body];
+    const sp = map.spawns || [];
+    const wsz = (map.world && map.world.w) || 3200, hsz = (map.world && map.world.h) || 2400;
+    sp.slice(0, 4).forEach((s, i) => {
+      // place each spawn on the visible face, keeping its rough quadrant
+      const u = (s.x / wsz - 0.5) * 1.35, v = (s.y / hsz - 0.5) * 1.35;
+      const x = cx + u * R, y = cy + v * R;
+      c2.fillStyle = cols[i % 4];
+      c2.globalAlpha = 0.95;
+      c2.beginPath(); c2.arc(x, y, Math.max(2.6, R * 0.075), 0, Math.PI * 2); c2.fill();
+      c2.globalAlpha = 0.35;
+      c2.beginPath(); c2.arc(x, y, Math.max(4.5, R * 0.13), 0, Math.PI * 2); c2.fill();
+      c2.globalAlpha = 1;
+    });
+  }
+
+  // Surface detail, clipped to the globe by the caller.
+  function surface(c2, cx, cy, R, S, rnd) {
+    if (S.look === 'bands') {
+      // Horizontal cloud belts, thickest at the equator like a real gas giant.
+      for (let i = 0; i < 9; i++) {
+        const yy = cy - R + (i + 0.5) * (R * 2 / 9);
+        const h = R * (0.09 + rnd() * 0.11);
+        c2.fillStyle = i % 2 ? S.land : S.land2;
+        c2.globalAlpha = 0.5 + rnd() * 0.3;
+        c2.beginPath(); c2.ellipse(cx, yy, R * 1.25, h, 0, 0, Math.PI * 2); c2.fill();
+      }
+      // the storm
+      c2.globalAlpha = 0.85; c2.fillStyle = shade(S.land, -0.25);
+      c2.beginPath(); c2.ellipse(cx + R * 0.28, cy + R * 0.24, R * 0.3, R * 0.16, 0, 0, Math.PI * 2); c2.fill();
+      c2.globalAlpha = 1;
+    } else if (S.look === 'swirl') {
+      for (let i = 0; i < 7; i++) {
+        c2.globalAlpha = 0.28 + rnd() * 0.3;
+        c2.fillStyle = i % 2 ? S.land : S.land2;
+        const yy = cy - R + rnd() * R * 2;
+        c2.beginPath();
+        c2.ellipse(cx + (rnd() - 0.5) * R, yy, R * (0.5 + rnd() * 0.7), R * (0.07 + rnd() * 0.1),
+                   (rnd() - 0.5) * 0.5, 0, Math.PI * 2);
+        c2.fill();
+      }
+      c2.globalAlpha = 1;
+    } else if (S.look === 'craters') {
+      c2.globalAlpha = 0.5;
+      for (let i = 0; i < 7; i++) {
+        c2.fillStyle = S.land;
+        const x = cx + (rnd() - 0.5) * R * 1.7, y = cy + (rnd() - 0.5) * R * 1.7;
+        const r = R * (0.1 + rnd() * 0.2);
+        c2.beginPath(); c2.arc(x, y, r, 0, Math.PI * 2); c2.fill();
+        c2.fillStyle = S.land2; c2.globalAlpha = 0.35;
+        c2.beginPath(); c2.arc(x - r * 0.18, y - r * 0.2, r * 0.62, 0, Math.PI * 2); c2.fill();
+        c2.globalAlpha = 0.5;
+      }
+      c2.globalAlpha = 1;
+    } else if (S.look === 'continents') {
+      // lumpy landmasses built from overlapping discs, then a few cloud streaks
+      c2.fillStyle = S.land;
+      for (let i = 0; i < 5; i++) {
+        const bx = cx + (rnd() - 0.5) * R * 1.6, by = cy + (rnd() - 0.5) * R * 1.5;
+        c2.globalAlpha = 0.92;
+        for (let k = 0; k < 5; k++) {
+          c2.beginPath();
+          c2.arc(bx + (rnd() - 0.5) * R * 0.6, by + (rnd() - 0.5) * R * 0.5, R * (0.12 + rnd() * 0.17), 0, Math.PI * 2);
+          c2.fill();
+        }
+      }
+      c2.fillStyle = S.land2; c2.globalAlpha = 0.5;
+      for (let i = 0; i < 3; i++) {
+        c2.beginPath();
+        c2.arc(cx + (rnd() - 0.5) * R * 1.4, cy + (rnd() - 0.5) * R * 1.4, R * (0.08 + rnd() * 0.12), 0, Math.PI * 2);
+        c2.fill();
+      }
+      c2.fillStyle = '#ffffff'; c2.globalAlpha = 0.22;
+      for (let i = 0; i < 4; i++) {
+        c2.beginPath();
+        c2.ellipse(cx + (rnd() - 0.5) * R * 1.6, cy + (rnd() - 0.5) * R * 1.6,
+                   R * (0.24 + rnd() * 0.3), R * 0.07, (rnd() - 0.5) * 0.6, 0, Math.PI * 2);
+        c2.fill();
+      }
+      c2.globalAlpha = 1;
+    } else {
+      c2.globalAlpha = 0.55;
+      for (let i = 0; i < 8; i++) {
+        c2.fillStyle = i % 2 ? S.land : S.land2;
+        c2.beginPath();
+        c2.ellipse(cx + (rnd() - 0.5) * R * 1.6, cy + (rnd() - 0.5) * R * 1.6,
+                   R * (0.14 + rnd() * 0.22), R * (0.1 + rnd() * 0.16), rnd() * 3, 0, Math.PI * 2);
+        c2.fill();
+      }
+      c2.globalAlpha = 1;
+    }
+  }
+
+  // Saturn's rings, split so the planet sits between the far and near halves.
+  function drawRing(c2, cx, cy, R, S, back) {
+    const rx = R * 2.05, ry = R * 0.52, tilt = -0.34;
+    c2.save();
+    c2.translate(cx, cy); c2.rotate(tilt);
+    c2.beginPath();
+    c2.rect(-rx * 1.2, back ? -ry * 1.4 : 0, rx * 2.4, ry * 1.4);
+    c2.clip();
+    const bands = [[1.00, 0.55, S.land2], [0.90, 0.30, S.base], [0.80, 0.5, S.land], [0.70, 0.22, S.land2]];
+    for (const [k, a, col] of bands) {
+      c2.strokeStyle = col;
+      c2.globalAlpha = back ? a * 0.55 : a;
+      c2.lineWidth = R * 0.12;
+      c2.beginPath(); c2.ellipse(0, 0, rx * k, ry * k, 0, 0, Math.PI * 2); c2.stroke();
+    }
+    c2.globalAlpha = 1;
+    c2.restore();
+  }
+
   function drawRaceFace(canvas, raceId) {
     const r = RC.RACES[raceId];
     if (!canvas || !r) return;
@@ -3024,5 +3247,5 @@ RC.Renderer = (function () {
     }
   }
 
-  return { init, draw, drawPortrait, drawRaceFace };
+  return { init, draw, drawPortrait, drawRaceFace, drawPlanet };
 })();
