@@ -249,8 +249,15 @@ RC.AI = (function () {
       const need = Math.min(armyCap, P.waveSize + s.waveNum * (P.waveGrowth != null ? P.waveGrowth : K.AI_WAVE_GROWTH));
       if (army.length >= need) {
         const target = nearestEnemyCore(g, own, core) || { x: core.x, y: core.y };
-        army.forEach((u, i) => {
-          const a = (i / army.length) * Math.PI * 2;
+        // Send the WAVE, not the whole army. `need` used to be only a gate: once the bot
+        // had enough units it threw every single one at you, so waveSize described when
+        // the attack came but never how big it was. On Normal that meant a first knock at
+        // 4 minutes with everything the bot owned — unanswerable if you were still setting
+        // up. The remainder now stays home as a garrison, so waves are the size the
+        // difficulty table says and grow wave over wave the way waveGrowth intends.
+        const strike = army.slice(0, need);
+        strike.forEach((u, i) => {
+          const a = (i / strike.length) * Math.PI * 2;
           u.attackMoveTo(target.x + Math.cos(a) * 70, target.y + Math.sin(a) * 70);   // engage defenders on the way
         });
         s.waveNum++;
