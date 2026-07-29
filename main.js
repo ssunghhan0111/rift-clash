@@ -1779,12 +1779,15 @@ window.RC = window.RC || {};
         : 'Press Ready when you want to play — the host can only start once everyone has.';
       return;
     }
-    const can = guests.length > 0 && waiting.length === 0;
+    // Alone in the room is a legitimate way to play — the server fills the empty seats
+    // with bots — so Start stays live and simply says what it will do.
+    const can = waiting.length === 0;
     startBtn.disabled = !can;
     if (!guests.length) {
+      startBtn.textContent = isSurvival ? 'Start Survival' : 'Start vs AI';
       gate.textContent = isSurvival
-        ? 'Waiting for other defenders to join…'
-        : 'Waiting for another player to join…';
+        ? 'You can start now and defend alone, or wait for others to join.'
+        : 'Nobody else here yet — start now and the empty seats are filled by bots, or share the invite link.';
     } else if (waiting.length) {
       const who = waiting.map(p => p.name).join(', ');
       gate.textContent = `Waiting on ${who} to press Ready (${guests.length - waiting.length}/${guests.length} ready).`;

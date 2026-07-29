@@ -610,7 +610,13 @@ function createRoom(host, name, isPublic, gameMode) {
 // The host is exempt: pressing Start *is* their consent, so asking them to also tick
 // Ready would just be an extra click every single match.
 function isReadyToStart(room) {
-  if (!room || room.clients.length < 2) return false;      // nobody to play against yet
+  if (!room || !room.clients.length) return false;
+  // A host ALONE in the room may start: startMatch() fills every empty seat with a bot
+  // (seat.ai = !human), so a solo online game is a real, supported match. Requiring a
+  // second human here was wrong — with nobody else online it left the only available
+  // path, "create a game", at a lobby that could never be started.
+  // The gate exists to stop a host starting before HUMANS who are present have agreed,
+  // and slice(1) is vacuously true when there is nobody else, which is exactly right.
   return room.clients.slice(1).every(g => g.ready);
 }
 // Anything that changes what game you agreed to play invalidates that agreement.
@@ -1000,9 +1006,7 @@ function onMsg(c, m) {
     case 'start': {
       if (!isHost(c) || !c.room || c.room.lobby.started) break;
       if (!isReadyToStart(c.room)) {
-        send(c, { t: 'startDenied', msg: c.room.clients.length < 2
-          ? 'Wait for another player to join.'
-          : 'Everyone needs to press Ready first.' });
+        send(c, { t: 'startDenied', msg: 'Everyone needs to press Ready first.' });
         break;
       }
       startMatch(c.room);
