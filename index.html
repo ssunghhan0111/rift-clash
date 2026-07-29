@@ -495,6 +495,47 @@
   #mission-hud .mh-obj.fail { color: var(--bad, #e0503f); }
   #mission-hud .mh-prog { margin-left: auto; color: var(--dim); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
 
+  /* Commander rank + goals */
+  #rank-strip { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; flex-wrap: wrap; justify-content: center; }
+  #rank-strip:empty { display: none; }
+  .rk-badge { display: flex; align-items: center; gap: 7px; background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px 5px 6px; }
+  .rk-lv { background: var(--orange); color: #10151d; font-family: var(--mono); font-weight: 700;
+    font-size: 12px; border-radius: 999px; padding: 3px 9px; }
+  .rk-name { font-size: 13px; font-weight: 700; color: #fff; }
+  .rk-bar { width: 170px; height: 7px; background: #0d131c; border: 1px solid var(--line);
+    border-radius: 999px; overflow: hidden; }
+  .rk-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--orange)); }
+  .rk-xp { font-size: 11px; color: var(--dim); font-family: var(--mono); }
+
+  #goals-wrap { display: flex; flex-direction: column; align-items: center; margin-top: 10px; }
+  #goals-toggle { background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 16px; font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  #goals-toggle:hover { color: #fff; }
+  #goals-count { color: var(--dim); font-weight: 400; font-family: var(--mono); }
+  #goals-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+    gap: 8px; width: min(720px, 92vw); margin-top: 12px; }
+  #goals-list.hidden { display: none; }
+  .goal { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; text-align: left; }
+  .goal.done { border-color: var(--good, #35c46a); }
+  .goal .gi { font-size: 18px; line-height: 1.1; filter: grayscale(1); opacity: .5; }
+  .goal.done .gi { filter: none; opacity: 1; }
+  .goal .gn { font-size: 12.5px; font-weight: 700; color: #fff; }
+  .goal.done .gn { color: var(--good, #35c46a); }
+  .goal .gd { font-size: 11px; color: var(--dim); line-height: 1.4; margin: 2px 0 6px; }
+  .goal .gbar { height: 5px; background: #0d131c; border-radius: 999px; overflow: hidden; }
+  .goal .gfill { height: 100%; background: var(--cyan); }
+  .goal.done .gfill { background: var(--good, #35c46a); }
+  .goal .gnum { font-size: 10px; color: var(--dim); font-family: var(--mono); margin-top: 3px; }
+
+  /* Match-end rewards */
+  #ov-rewards { margin-top: 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  #ov-rewards:empty { display: none; }
+  .ov-xp { font-size: 13px; color: var(--cyan); font-family: var(--mono); }
+  .ov-lvup { font-size: 14px; font-weight: 700; color: var(--orange); }
+  .ov-unlock { font-size: 12.5px; color: var(--good, #35c46a); }
+
   /* Online browser: Public / Private tabs */
   #browser-tabs { display: flex; gap: 6px; margin: 4px 0 18px; background: var(--panel-2);
     border: 1px solid var(--line); border-radius: 9px; padding: 5px; }
@@ -962,6 +1003,7 @@
     <div id="overlay" class="hidden">
       <div>
         <div id="overlay-text"></div>
+        <div id="ov-rewards"></div>
         <div class="ov-btns">
           <button id="btn-restart">Restart</button>
           <button id="btn-menu">Menu</button>
@@ -1062,7 +1104,12 @@
     </div>
   </div>
   <!-- Your local record — matches, W/L per faction, best Survival waves -->
+  <div id="rank-strip"></div>
   <div id="profile-strip"></div>
+  <div id="goals-wrap">
+    <button id="goals-toggle">🎯 Goals <span id="goals-count"></span></button>
+    <div id="goals-list" class="hidden"></div>
+  </div>
 
   <div class="ss-h">Game Mode</div>
   <div id="ss-gamemodes"></div>
@@ -1368,6 +1415,7 @@
 <script src="fullscreen.js"></script>
 <script src="survival.js"></script>
 <script src="leaderboard.js"></script>
+<script src="progress.js"></script>
 <script src="profile.js"></script>
 <script src="dev.js"></script>
 <script src="net_core.js"></script>

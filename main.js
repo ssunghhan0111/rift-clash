@@ -882,6 +882,9 @@ window.RC = window.RC || {};
     const el = document.getElementById('profile-strip');
     if (!el || !RC.Profile) return;
     const p = RC.Profile.get();
+    // Rank and goals render from the very first launch; only the stats line waits
+    // until there is actually a record to show.
+    renderRank(p); renderGoals(p);
     if (!p.matches) { el.innerHTML = ''; return; }
     const bw = p.bestWave || {};
     const bestSurv = Math.max(bw.easy || 0, bw.medium || 0, bw.insane || 0);
@@ -893,6 +896,67 @@ window.RC = window.RC || {};
     for (const r of (RC.RACE_ORDER || [])) { const f = p.faction[r] || { w: 0 }; if ((f.w || 0) > bestW) { bestW = f.w; bestRace = r; } }
     if (bestRace) { const rr = RC.RACES[bestRace]; parts.push('<span class="ps-item">Top faction <b style="color:' + rr.tint + '">' + rr.name + '</b></span>'); }
     el.innerHTML = parts.join('<span class="ps-sep">·</span>');
+  }
+
+  // ── Commander rank + goals ─────────────────────────────
+  // Shown from the very first launch, unlike the stats strip: a brand-new player
+  // should see level 1 and a list of things to go and do, not an empty menu.
+  function renderRank(p) {
+    const el = document.getElementById('rank-strip');
+    if (!el || !RC.Progress) return;
+    const s = RC.Progress.summary(p);
+    el.innerHTML =
+      `<div class="rk-badge"><span class="rk-lv">LV ${s.level}</span><span class="rk-name">${esc(s.rank)}</span></div>` +
+      `<div class="rk-bar"><div class="rk-fill" style="width:${Math.round(s.pct * 100)}%"></div></div>` +
+      `<span class="rk-xp">${s.max ? 'MAX' : s.into + ' / ' + s.need + ' xp'}</span>`;
+  }
+
+  function renderGoals(p) {
+    const wrap = document.getElementById('goals-list');
+    const cnt = document.getElementById('goals-count');
+    if (!wrap || !RC.Progress) return;
+    const s = RC.Progress.summary(p);
+    if (cnt) cnt.textContent = `${s.done}/${s.total}`;
+    // Unfinished first — the point of the panel is what to do next, not a trophy case.
+    const list = s.list.slice().sort((a, b) => (a.done === b.done) ? 0 : (a.done ? 1 : -1));
+    wrap.innerHTML = list.map(a => `
+      <div class="goal${a.done ? ' done' : ''}">
+        <div class="gi">${a.icon}</div>
+        <div style="flex:1; min-width:0">
+          <div class="gn">${esc(a.name)}${a.done ? ' ✓' : ''}</div>
+          <div class="gd">${esc(a.desc)}</div>
+          <div class="gbar"><div class="gfill" style="width:${Math.round(a.pct * 100)}%"></div></div>
+          <div class="gnum">${a.have} / ${a.goal}${a.done ? '' : '  ·  +' + a.xp + ' xp'}</div>
+        </div>
+      </div>`).join('');
+  }
+  const goalsBtn = document.getElementById('goals-toggle');
+  if (goalsBtn) goalsBtn.addEventListener('click', () => {
+    document.getElementById('goals-list').classList.toggle('hidden');
+  });
+
+  // What the match just paid, on the victory/defeat screen. Practice and tutorial
+  // matches record nothing, so `earned` is null and the block stays empty.
+  function showRewards(earned) {
+    const box = document.getElementById('ov-rewards');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!earned || !RC.Progress) return;
+    const rows = [];
+    if (earned.xpGained > 0) rows.push(`<div class="ov-xp">+${earned.xpGained} xp</div>`);
+    if (earned.levelUp) {
+      rows.push(`<div class="ov-lvup">⭐ Level ${earned.levelUp} — ${esc(RC.Progress.rankOf(earned.levelUp))}</div>`);
+      if (RC.Audio && RC.Audio.play) RC.Audio.play('levelup');
+    }
+    (earned.unlocked || []).forEach(a => {
+      rows.push(`<div class="ov-unlock">${a.icon} Goal complete — ${esc(a.name)}</div>`);
+    });
+    // Nudge toward the nearest unfinished goal, so a defeat still ends with a next step.
+    const next = RC.Progress.summary(earned.profile).list
+      .filter(a => !a.done && a.have > 0)
+      .sort((a, b) => b.pct - a.pct)[0];
+    if (next) rows.push(`<div class="ov-xp" style="color:var(--dim)">Next: ${esc(next.name)} — ${next.have}/${next.goal}</div>`);
+    box.innerHTML = rows.join('');
   }
   const dailyBtn = document.getElementById('ss-daily-start');
   if (dailyBtn) dailyBtn.addEventListener('click', startDaily);
@@ -1870,8 +1934,13 @@ window.RC = window.RC || {};
         if (guided) finishGuided(true);
         // Campaign: clear the mission on a win so the next one unlocks.
         if (game.mission && game.over === 'win' && RC.Missions) RC.Missions.markDone(game.mission.def.id);
-        if (RC.Profile) RC.Profile.recordMatchEnd(game);   // update the local record once, at match end
+        // Update the local record once, at match end — and show what the match was
+        // worth. A result screen that says only "Defeat" gives a player no reason to
+        // press Restart; one that says "+35 xp, 2 of 4 planets" gives them a thread.
+        const earned = RC.Profile ? RC.Profile.recordMatchEnd(game) : null;
+        renderProfile();
         RC.UI.showOverlay(game.over);
+        showRewards(earned);
         if (RC.Audio) RC.Audio.play(game.over === 'win' ? 'win' : 'lose');
       }
       if (!game.over) overlayShown = false;
