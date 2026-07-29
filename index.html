@@ -498,6 +498,9 @@
   #mission-hud .mh-obj.fail { color: var(--bad, #e0503f); }
   #mission-hud .mh-prog { margin-left: auto; color: var(--dim); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
 
+  #res-weather-eff { color: var(--dim); font-size: 11px; margin-left: 7px; font-family: var(--mono); }
+  #weather-box.bad #res-weather { color: #ffb15c; }
+
   /* Under-attack banner */
   #attack-alert { position: absolute; left: 50%; transform: translateX(-50%); top: 62px; z-index: 40;
     background: rgba(180, 34, 20, .94); color: #fff; border: 1px solid #ff7a5c; border-radius: 7px;
@@ -986,6 +989,7 @@
     <div class="res">Pop <span class="val" id="res-pop">0 / 0</span></div>
     <div class="res">Time <span class="val" id="res-clock">0:00</span></div>
     <div class="res" id="wave-box" style="display:none">Wave <span class="val" id="res-wave" style="color:var(--cyan)">0</span></div>
+    <div class="res" id="weather-box" style="display:none" title="Weather changes on a timer and affects both sides equally"><span class="val" id="res-weather">—</span><span id="res-weather-eff"></span></div>
     <div class="res" id="daily-box" style="display:none; color:#ffc857" title="Daily Challenge — the same run for every player today"><span class="val" id="res-daily" style="color:#ffe9a8">—</span></div>
     <div id="hint">Middle-drag or two fingers to move the map · arrows and screen edges pan (mouse only) · drag to box-select · right-click to command · A = attack-move</div>
     <button id="fs-btn" title="Fullscreen" style="margin-left:10px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); width:36px; height:30px; border-radius:6px; cursor:pointer; font-size:15px;">⛶</button>
@@ -1420,6 +1424,7 @@
 
 <script src="config.js"></script>
 <script src="maps.js"></script>
+<script src="weather.js"></script>
 <script src="pathfind.js"></script>
 <script src="audio.js"></script>
 <script src="entities.js"></script>

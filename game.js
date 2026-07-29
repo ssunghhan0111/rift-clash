@@ -344,6 +344,33 @@ window.RC = window.RC || {};
       }
     }
 
+    // ── Wind ──────────────────────────────────────────────────────────────
+    // A steady shove on everything standing on the ground. Applied after movement so
+    // a unit under orders still reaches its destination — it just crabs sideways on
+    // the way, which is the whole feeling of fighting inside Jupiter's jet stream.
+    // Pure function of game.time and the map, so the server and every client compute
+    // the same push and nothing goes on the wire.
+    //
+    // Deliberately does NOT move buildings, flyers, or units mid-warp, and never
+    // pushes anything through terrain — the clamp is the same one movement uses.
+    _applyWind(dt) {
+      if (!RC.Weather || !RC.Weather.wind) return;
+      const w = RC.Weather.wind(this, false);
+      if (!w) return;
+      const dx = w[0] * dt, dy = w[1] * dt;
+      if (!dx && !dy) return;
+      const pad = 24;
+      for (const u of this.units) {
+        if (u.dead || u.downed || u.boarded || u.def.flying) continue;
+        const nx = Math.max(pad, Math.min(CFG.WORLD_W - pad, u.x + dx));
+        const ny = Math.max(pad, Math.min(CFG.WORLD_H - pad, u.y + dy));
+        // Never shove a unit into a wall — reuse pathfinding's own line-of-walk test
+        // so wind obeys exactly the same geometry movement does.
+        if (RC.Path && RC.Path.clear && !RC.Path.clear(this, u.x, u.y, nx, ny)) continue;
+        u.x = nx; u.y = ny;
+      }
+    }
+
     // ── "You are under attack" ────────────────────────────────────────────
     // The game used to say nothing at all when your things were being killed. notify()
     // fired for finished upgrades and "not enough shards", but never once for combat —
@@ -646,7 +673,12 @@ window.RC = window.RC || {};
     // 하나는 안개를, 다른 하나는 자동 교전 거리를 결정하므로 어긋나면
     // "보이는데 안 쏜다"가 된다.
     _sightOf(e) {
-      return this._baseSight(e) * this._sightTerrainMul(e);
+      // Weather is applied HERE, at the single shared source of sight, precisely so
+      // fog reveal and auto-engagement range can never disagree — a blizzard that
+      // shrank the fog but not the aggro range would read as "I can see it, why
+      // won't my army shoot it".
+      const w = RC.Weather ? RC.Weather.sightMul(this) : 1;
+      return this._baseSight(e) * this._sightTerrainMul(e) * w;
     }
     // 고지대에 서면 더 멀리 본다 (공중 유닛은 해당 없음)
     _sightTerrainMul(e) {
@@ -961,6 +993,7 @@ window.RC = window.RC || {};
       });
 
       RC.AI.update(dt, this);
+      this._applyWind(dt);
       this._ageAlerts(dt);
       if (this.survival && RC.Survival) RC.Survival.update(dt, this);
       this.separate();

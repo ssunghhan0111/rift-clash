@@ -607,6 +607,9 @@ window.RC = window.RC || {};
       const t = this.terr(game);                               // 늪 = 진창에 발이 묶인다
       if (t && t.mud) s *= (RC.CFG.TERRAIN.mud.speed || 1);
       if (this.speedMul) s *= this.speedMul;                   // 데일리 챌린지 변형 (스프린터 등)
+      // 행성 중력 + 날씨 — 순수하게 game.time과 맵 id에서 나오므로 서버/클라 동일.
+      // Ceres scoots, Jupiter crawls, and a blizzard slows everyone equally.
+      if (RC.Weather) s *= RC.Weather.speedMul(game, this.def.flying);
       return s;
     }
     effMaxEnergy(game) { return this.maxEnergy + this._up(game, 'eng') * RC.CFG.UP_ENG_MAXE; }

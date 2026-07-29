@@ -25,6 +25,7 @@ const os = require('os');
 global.window = global;
 require('./config.js');
 require('./maps.js');
+require('./weather.js');        // planet feel + weather — must match the client exactly
 require('./pathfind.js');
 require('./entities.js');
 require('./game.js');

@@ -170,6 +170,7 @@ RC.Renderer = (function () {
     drawAmbient(g, W, H);          // 대기 입자 (꽃가루 / 불티 / 눈발)
     drawIllusion(g, W, H);         // 행성 고유 착시 (토성 고리 / 목성 밴드 / 화성 아지랑이)
     drawGrade(g, W, H);            // 비네트 + 바이옴 색 보정 (영화적 톤)
+    drawWeather(g, W, H);          // 날씨 — 비/눈/재/모래폭풍/번개 (HUD 아래, 월드 위)
     if (shk) ctx.restore();        // HUD 요소는 흔들리지 않는다
     drawDragBox(input);
     drawAlertArrows(g, W, H);
@@ -2889,6 +2890,217 @@ RC.Renderer = (function () {
     // 뷰포트 사각형 — 확대/축소하면 보이는 월드 크기가 달라진다
     const z = camZoom(g);
     mctx.strokeRect(g.camera.x * sx, g.camera.y * sy, (W / z) * sx, (H / z) * sy);
+  }
+
+  // ── 날씨 / Weather ─────────────────────────────────────
+  // Drawn in SCREEN space over the finished world. Everything is a pure function of
+  // game.time, so what you see matches the sight and speed penalties the simulation
+  // is applying — the storm on screen IS the storm in the rules.
+  //
+  // Particles drift with the camera at a fraction of its speed, which is what makes
+  // falling snow feel like it is in the world rather than stuck to the glass.
+  function wRnd(i, salt) {                    // cheap deterministic hash → 0..1
+    let h = (i * 374761393 + salt * 668265263) | 0;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  // Falling particles: n of them, given colour/size/speed/slant.
+  function fall(g, W, H, t, k, o) {
+    const camX = g.camera.x || 0, camY = g.camera.y || 0;
+    const par = o.par == null ? 0.35 : o.par;
+    ctx.globalAlpha = o.alpha * k;
+    ctx.fillStyle = o.color;
+    ctx.strokeStyle = o.color;
+    ctx.lineWidth = o.wide || 1;
+    const span = H + 120;
+    for (let i = 0; i < o.n; i++) {
+      const sx = wRnd(i, 1) * (W + 200) - 100;
+      const speed = o.speed * (0.7 + wRnd(i, 2) * 0.6);
+      const y = ((wRnd(i, 3) * span + t * speed) % span) - 60;
+      const x = sx + (y * (o.slant || 0)) - (camX * par) % (W + 200);
+      const px = ((x % (W + 200)) + (W + 200)) % (W + 200) - 100;
+      const py = y - (camY * par * 0.25) % span;
+      const yy = ((py % span) + span) % span - 60;
+      if (o.streak) {
+        ctx.beginPath(); ctx.moveTo(px, yy); ctx.lineTo(px + o.streak * (o.slant || 0.2), yy + o.streak); ctx.stroke();
+      } else {
+        const r = o.size * (0.6 + wRnd(i, 4) * 0.8);
+        ctx.beginPath(); ctx.arc(px, yy, r, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  // A moving veil of haze — bands that slide across the screen.
+  function veil(g, W, H, t, k, col, bands, speed, alpha) {
+    ctx.globalAlpha = alpha * k;
+    ctx.fillStyle = col;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = alpha * k * 0.55;
+    for (let i = 0; i < bands; i++) {
+      const h = H * (0.14 + wRnd(i, 7) * 0.2);
+      const y = ((wRnd(i, 8) * H + t * speed * (0.5 + wRnd(i, 9))) % (H + h * 2)) - h;
+      ctx.beginPath();
+      ctx.ellipse(W / 2 + Math.sin(t * 0.3 + i) * W * 0.2, y, W * 0.75, h * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawWeather(g, W, H) {
+    if (REDUCED || !RC.Weather || !g || g.over) return;
+    const w = RC.Weather.at(g);
+    const k = w.intensity;
+    if (!k || k < 0.02) return;
+    const vis = w.ev.vis;
+    if (!vis) return;
+    const t = g.time || 0;
+    ctx.save();
+    switch (vis) {
+      case 'rain':
+        fall(g, W, H, t, k, { n: 150, color: '#9fd4ff', alpha: 0.5, speed: 900, slant: 0.22, streak: 16, wide: 1.4 });
+        veil(g, W, H, t, k, 'rgba(40,70,100,0.16)', 2, 20, 0.5);
+        break;
+      case 'mist':
+        veil(g, W, H, t, k, 'rgba(196,214,226,0.20)', 5, 9, 0.85);
+        break;
+      case 'sun': {
+        const gr = ctx.createLinearGradient(0, 0, W * 0.7, H);
+        gr.addColorStop(0, 'rgba(255,240,190,' + (0.20 * k).toFixed(3) + ')');
+        gr.addColorStop(1, 'rgba(255,240,190,0)');
+        ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+        break;
+      }
+      case 'heat': {
+        // rising shimmer bars — cheap stand-in for refraction
+        ctx.globalAlpha = 0.10 * k; ctx.fillStyle = '#ffd9a0';
+        for (let i = 0; i < 26; i++) {
+          const x = (i / 26) * W + Math.sin(t * 1.6 + i) * 10;
+          const h = H * (0.2 + wRnd(i, 11) * 0.5);
+          ctx.fillRect(x, H - h - ((t * 26 + i * 40) % H) * 0.2, 3, h);
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'ash':
+        veil(g, W, H, t, k, 'rgba(60,50,46,0.26)', 3, 16, 0.8);
+        fall(g, W, H, t, k, { n: 130, color: '#c9bfb4', alpha: 0.55, speed: 120, slant: 0.35, size: 1.8 });
+        break;
+      case 'ember':
+        fall(g, W, H, t, k, { n: 90, color: '#ff9a4a', alpha: 0.65, speed: 260, slant: -0.9, size: 1.9 });
+        veil(g, W, H, t, k, 'rgba(120,40,10,0.12)', 2, 26, 0.6);
+        break;
+      case 'snow':
+        fall(g, W, H, t, k, { n: 140, color: '#eef6ff', alpha: 0.75, speed: 150, slant: 0.25, size: 2.1 });
+        break;
+      case 'blizzard':
+        veil(g, W, H, t, k, 'rgba(226,238,250,0.30)', 4, 46, 0.9);
+        fall(g, W, H, t, k, { n: 240, color: '#ffffff', alpha: 0.85, speed: 520, slant: -0.85, streak: 12, wide: 1.6 });
+        break;
+      case 'aurora': {
+        for (let i = 0; i < 3; i++) {
+          const gr = ctx.createLinearGradient(0, H * (0.05 + i * 0.12), 0, H * (0.42 + i * 0.12));
+          gr.addColorStop(0, 'rgba(120,255,200,0)');
+          gr.addColorStop(0.5, 'rgba(120,255,200,' + (0.13 * k).toFixed(3) + ')');
+          gr.addColorStop(1, 'rgba(150,180,255,0)');
+          ctx.fillStyle = gr;
+          ctx.save();
+          ctx.translate(Math.sin(t * 0.22 + i) * W * 0.12, 0);
+          ctx.fillRect(-W * 0.2, 0, W * 1.4, H);
+          ctx.restore();
+        }
+        break;
+      }
+      case 'devils': {
+        ctx.globalAlpha = 0.30 * k; ctx.fillStyle = '#c89a6a';
+        for (let i = 0; i < 4; i++) {
+          const cx2 = ((wRnd(i, 21) * W + t * (30 + i * 12)) % (W + 200)) - 100;
+          const cy2 = H * (0.3 + wRnd(i, 22) * 0.5);
+          for (let s = 0; s < 9; s++) {
+            const rr = 6 + s * 4.5;
+            ctx.beginPath();
+            ctx.ellipse(cx2 + Math.sin(t * 3 + s * 0.7 + i) * s * 2.2, cy2 - s * 13, rr, rr * 0.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'duststorm':
+        veil(g, W, H, t, k, 'rgba(160,104,54,0.38)', 5, 60, 0.95);
+        fall(g, W, H, t, k, { n: 170, color: '#e0b184', alpha: 0.5, speed: 700, slant: 0.9, streak: 22, wide: 1.2 });
+        break;
+      case 'frost':
+        fall(g, W, H, t, k, { n: 110, color: '#dfeaf2', alpha: 0.55, speed: 110, slant: 0.1, size: 1.5 });
+        break;
+      case 'lightning': {
+        veil(g, W, H, t, k, 'rgba(40,44,72,0.26)', 3, 34, 0.7);
+        // strikes on a fixed cadence — same moment for everyone watching
+        const beat = Math.floor(t * 0.7);
+        const f = t * 0.7 - beat;
+        if (wRnd(beat, 31) > 0.45 && f < 0.16) {
+          const flash = (1 - f / 0.16);
+          ctx.globalAlpha = 0.5 * flash * k; ctx.fillStyle = '#e8f0ff';
+          ctx.fillRect(0, 0, W, H);
+          ctx.globalAlpha = 0.9 * flash * k;
+          ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.4; ctx.lineJoin = 'round';
+          const bx = wRnd(beat, 32) * W;
+          ctx.beginPath(); ctx.moveTo(bx, 0);
+          let yy = 0, xx = bx;
+          while (yy < H * 0.7) { yy += H * 0.13; xx += (wRnd(beat + yy, 33) - 0.5) * 70; ctx.lineTo(xx, yy); }
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+        break;
+      }
+      case 'shear': {
+        ctx.globalAlpha = 0.22 * k; ctx.strokeStyle = '#dbe6ff'; ctx.lineWidth = 2;
+        for (let i = 0; i < 34; i++) {
+          const y = wRnd(i, 41) * H;
+          const len = 70 + wRnd(i, 42) * 190;
+          const x = ((wRnd(i, 43) * W + t * (420 + wRnd(i, 44) * 260)) % (W + 300)) - 150;
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + len, y + 5); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'spot':
+        veil(g, W, H, t, k, 'rgba(150,52,40,0.30)', 4, 40, 0.85);
+        fall(g, W, H, t, k, { n: 120, color: '#ffb890', alpha: 0.4, speed: 560, slant: -0.7, streak: 18, wide: 1.3 });
+        break;
+      case 'meteor': {
+        ctx.globalAlpha = 0.9 * k; ctx.strokeStyle = '#ffe9c0'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+        for (let i = 0; i < 7; i++) {
+          const per = 3.4 + wRnd(i, 51) * 3;
+          const f = ((t + wRnd(i, 52) * per) % per) / per;
+          if (f > 0.55) continue;
+          const a = f / 0.55;
+          const x = -120 + a * (W + 260) + wRnd(i, 53) * 120;
+          const y = wRnd(i, 54) * H * 0.7 + a * 130;
+          ctx.globalAlpha = 0.9 * k * Math.sin(a * Math.PI);
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 46, y - 26); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'ringshadow': {
+        // hard-edged bands of shade, as if the rings were between you and the sun
+        ctx.globalAlpha = 0.30 * k; ctx.fillStyle = '#0a1020';
+        for (let i = 0; i < 5; i++) {
+          const h = H * (0.05 + wRnd(i, 61) * 0.07);
+          const y = ((wRnd(i, 62) * H + t * 7) % (H + h * 2)) - h;
+          ctx.save(); ctx.translate(W / 2, y); ctx.rotate(-0.22);
+          ctx.fillRect(-W, 0, W * 2, h);
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'icefog':
+        veil(g, W, H, t, k, 'rgba(198,224,240,0.24)', 4, 14, 0.85);
+        fall(g, W, H, t, k, { n: 80, color: '#eaf6ff', alpha: 0.5, speed: 90, slant: 0.05, size: 1.4 });
+        break;
+    }
+    ctx.restore();
   }
 
   // ── Death pop ─────────────────────────────────────────

@@ -146,6 +146,28 @@ RC.CFG = {
 // The human is always 1.00, so anything above that is the bot mining shards that were
 // never in the ground — it compounds into more workers, more production and a bigger
 // army, and it is by far the strongest knob in this table. Keep it close to 1.
+// ── 행성별 감각 / Planet feel ──────────────────────────────────────────────
+// The permanent character of each world, independent of its weather. This is the
+// thing a player should notice within five seconds of landing: Ceres is a pebble
+// with almost no gravity so everything scoots, Jupiter is crushing and slow.
+// `speed` multiplies ground AND air movement. Keep the spread modest — this is
+// flavour that must never make a planet strictly better to fight on, and both
+// sides always play under the same sky.
+RC.PLANET_FEEL = {
+  _default: { speed: 1.00, grav: 'Standard gravity' },
+  earth:    { speed: 1.00, grav: 'Standard gravity' },
+  venus:    { speed: 0.96, grav: 'Thick, heavy air' },
+  mars:     { speed: 1.06, grav: 'Low gravity' },
+  jupiter:  { speed: 0.92, grav: 'Crushing gravity' },
+  saturn:   { speed: 1.04, grav: 'Light gravity' },
+  neptune:  { speed: 0.98, grav: 'Dense cold air' },
+  pluto:    { speed: 1.08, grav: 'Barely any gravity' },
+  ceres:    { speed: 1.12, grav: 'Almost no gravity' },
+};
+// 날씨 주기 / Weather cycle. Derived from game.time, never sent over the wire.
+RC.WEATHER = { cycle: 105, ramp: 0.16 };
+RC.WEATHER_ENABLED = true;
+
 RC.AI_DIFF = {
   easy:   { id: 'easy',   name: 'Easy',   income: 0.70, workerCap: 5,  firstWave: 240, waveSize: 3, waveGrowth: 1, waveGap: 160, armyCap: 6,   maxBarracks: 1, secondFactory: 400, tower: false, tech: false },
   normal: { id: 'normal', name: 'Normal', income: 1.00, workerCap: 12, firstWave: 240, waveSize: 4, waveGrowth: 2, waveGap: 135, armyCap: 999, maxBarracks: 2, secondFactory: 300, tower: true,  tech: true  },

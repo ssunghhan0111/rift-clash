@@ -295,6 +295,7 @@ RC.UI = (function () {
     syncPause();
     syncVoice();
     syncAttackAlert();
+    syncWeather();
     const me = g.playerOwner;
     if (!g.res[me]) return;                 // online: state not received yet
     const s = g.supply(me);
@@ -744,6 +745,29 @@ RC.UI = (function () {
       }[how] || '';
       btn.disabled = false;
     });
+  }
+
+  // ── Weather readout ────────────────────────────────────
+  // Weather takes sight and speed away from the player, so it is never allowed to be
+  // invisible: the HUD always names the current event and spells out what it is doing.
+  // A player losing a fight should be able to see the reason, not guess at it.
+  let lastWeatherId = null;
+  function syncWeather() {
+    const box = document.getElementById('weather-box');
+    if (!box) return;
+    if (!RC.Weather || !g || !g.mapDef) { box.style.display = 'none'; return; }
+    const w = RC.Weather.at(g);
+    box.style.display = '';
+    const nameEl = document.getElementById('res-weather');
+    const effEl = document.getElementById('res-weather-eff');
+    if (nameEl) nameEl.textContent = RC.Weather.label(g);
+    if (effEl) effEl.textContent = RC.Weather.effectLine(g);
+    box.classList.toggle('bad', RC.Weather.notable(g));
+    // Announce each change once, in the log the player already watches.
+    if (w.ev.id !== lastWeatherId) {
+      if (lastWeatherId !== null && g.notify) g.notify(w.ev.icon + ' ' + w.ev.name + ' — ' + w.ev.desc);
+      lastWeatherId = w.ev.id;
+    }
   }
 
   // ── Under-attack banner ────────────────────────────────
