@@ -506,6 +506,11 @@ RC.Input = (function () {
     if (k === '0') { e.preventDefault(); resetZoom(); return; }
     if (k === ' ') {
       e.preventDefault();
+      // Space jumps to the newest attack on your stuff if there is one, and otherwise
+      // falls back to its old behaviour of recentring on your core. That ordering is
+      // the point: the one moment you urgently need the camera somewhere else is when
+      // something of yours is being killed off-screen.
+      if (RC.UI && RC.UI.jumpToAlert && RC.UI.jumpToAlert()) return;
       const c = g.core(me);
       if (c) centerOn(c.x, c.y);
       return;

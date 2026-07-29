@@ -161,6 +161,7 @@ RC.Renderer = (function () {
     drawGrade(g, W, H);            // 비네트 + 바이옴 색 보정 (영화적 톤)
     if (shk) ctx.restore();        // HUD 요소는 흔들리지 않는다
     drawDragBox(input);
+    drawAlertArrows(g, W, H);
     drawMinimap(g, W, H);
   }
 
@@ -2776,11 +2777,53 @@ RC.Renderer = (function () {
       mctx.restore();
     }
 
+    // ── Under-attack markers ──
+    // Drawn ON TOP of the fog overlay on purpose: you are told that something of yours
+    // is being killed even where you currently have no vision, because losing a mineral
+    // line silently is exactly the failure this exists to prevent.
+    (g.alerts || []).forEach(a => {
+      const age = g.time - a.born;
+      const pulse = 0.5 + 0.5 * Math.sin(age * 7);
+      const r = 4 + pulse * 5;
+      mctx.strokeStyle = 'rgba(255,80,60,' + (0.55 + pulse * 0.45) + ')';
+      mctx.lineWidth = 2;
+      mctx.beginPath(); mctx.arc(a.x * sx, a.y * sy, r, 0, Math.PI * 2); mctx.stroke();
+    });
+
     mctx.strokeStyle = '#ffffff';
     mctx.lineWidth = 1;
     // 뷰포트 사각형 — 확대/축소하면 보이는 월드 크기가 달라진다
     const z = camZoom(g);
     mctx.strokeRect(g.camera.x * sx, g.camera.y * sy, (W / z) * sx, (H / z) * sy);
+  }
+
+  // ── Off-screen attack arrows ──────────────────────────
+  // A minimap ring only helps a player who is looking at the minimap. When the fight is
+  // outside the viewport, put a red chevron on the screen edge pointing at it, so the
+  // information reaches someone whose eyes are on their own base.
+  function drawAlertArrows(g, W, H) {
+    if (!g.alerts || !g.alerts.length) return;
+    const z = camZoom(g);
+    const vw = W / z, vh = H / z, pad = 46;
+    ctx.save();
+    for (const a of g.alerts) {
+      const sxp = (a.x - g.camera.x) * z, syp = (a.y - g.camera.y) * z;
+      if (sxp >= 0 && sxp <= W && syp >= 0 && syp <= H) continue;   // already on screen
+      const cx = W / 2, cy = H / 2;
+      let dx = sxp - cx, dy = syp - cy;
+      const len = Math.hypot(dx, dy) || 1;
+      dx /= len; dy /= len;
+      const ex = Math.max(pad, Math.min(W - pad, cx + dx * (W / 2 - pad)));
+      const ey = Math.max(pad, Math.min(H - pad, cy + dy * (H / 2 - pad)));
+      const pulse = 0.5 + 0.5 * Math.sin((g.time - a.born) * 7);
+      ctx.globalAlpha = 0.55 + pulse * 0.45;
+      ctx.translate(ex, ey); ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = '#ff5a3c';
+      ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-10, -11); ctx.lineTo(-10, 11); ctx.closePath(); ctx.fill();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   // ── 종족 얼굴 (시작 화면 종족 선택용) ────────────────

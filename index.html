@@ -495,6 +495,17 @@
   #mission-hud .mh-obj.fail { color: var(--bad, #e0503f); }
   #mission-hud .mh-prog { margin-left: auto; color: var(--dim); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
 
+  /* Under-attack banner */
+  #attack-alert { position: absolute; left: 50%; transform: translateX(-50%); top: 62px; z-index: 40;
+    background: rgba(180, 34, 20, .94); color: #fff; border: 1px solid #ff7a5c; border-radius: 7px;
+    padding: 9px 20px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer;
+    box-shadow: 0 4px 18px rgba(0,0,0,.45); animation: alertPulse 1s ease-in-out infinite; }
+  #attack-alert.hidden { display: none; }
+  #attack-alert b { font-family: var(--mono); }
+  #attack-alert:hover { background: rgba(212, 44, 26, .98); }
+  @keyframes alertPulse { 0%,100% { opacity: 1; } 50% { opacity: .62; } }
+  @media (prefers-reduced-motion: reduce) { #attack-alert { animation: none; } }
+
   /* Commander rank + goals */
   #rank-strip { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; flex-wrap: wrap; justify-content: center; }
   #rank-strip:empty { display: none; }
@@ -1000,6 +1011,9 @@
       </div>
     </div>
     <canvas id="minimap" width="200" height="150"></canvas>
+    <!-- ⚠ Under attack — click (or press Space) to jump to the fight. -->
+    <button id="attack-alert" class="hidden">⚠ Under attack — press <b>Space</b> to jump</button>
+
     <div id="overlay" class="hidden">
       <div>
         <div id="overlay-text"></div>

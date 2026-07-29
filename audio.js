@@ -193,6 +193,10 @@ RC.Audio = (function () {
     ability: () => { vtone({ f: 300, to: 1200, dur: 0.22, type: 'sine', vol: 0.16, attack: 0.01 }); },   // ability whoosh
     levelup: () => seq([[600, 0.11, 'square', 0.2, null, 0], [760, 0.11, 'square', 0.2, null, 70], [920, 0.11, 'square', 0.2, null, 140], [1150, 0.16, 'square', 0.2, null, 210]]),
     wave:    () => seq([[400, 0.22, 'sawtooth', 0.22, 300, 0], [400, 0.22, 'sawtooth', 0.22, 300, 260]]),
+    // Two-tone klaxon for "your base is under attack". Deliberately unlike any other
+    // cue in the game and a touch louder — it has to cut through a battle you are
+    // already in and read as bad news, not as feedback for something you just did.
+    alarm:   () => seq([[880, 0.16, 'square', 0.26, 660, 0], [660, 0.22, 'square', 0.26, 500, 170]]),
     win:     () => seq([[523, 0.16, 'square', 0.22, null, 0], [659, 0.16, 'square', 0.22, null, 120], [784, 0.16, 'square', 0.22, null, 240], [1047, 0.24, 'square', 0.22, null, 360]]),
     lose:    () => seq([[400, 0.24, 'sawtooth', 0.2, 320, 0], [330, 0.24, 'sawtooth', 0.2, 264, 160], [262, 0.34, 'sawtooth', 0.2, 200, 320]]),
   };

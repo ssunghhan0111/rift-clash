@@ -831,6 +831,10 @@ window.RC = window.RC || {};
 
     // 한 대상에게 피해 적용 (방어력 반영, 반격 유발)
     _hit(foe, dmg, game) {
+      // Damage is applied in TWO places — here for unit attacks, and game.hurt() for
+      // towers and death bursts — so the under-attack alert has to be raised from both
+      // or it would miss the majority of the game. See game._maybeAlert.
+      if (game._maybeAlert && !foe.dead) game._maybeAlert(foe, this.owner);
       const armor = foe.kind === 'unit' ? foe.effArmor(game)
                   : (foe.def && foe.def.armor ? foe.def.armor : 0);
       const cover = game.coverMul ? game.coverMul(foe) : 1;   // 숲에 숨은 대상은 덜 아프다

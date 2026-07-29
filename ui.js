@@ -294,6 +294,7 @@ RC.UI = (function () {
     // 일시정지 표시는 매 프레임 맞춘다 — P 키로 바꿔도 버튼이 따라온다
     syncPause();
     syncVoice();
+    syncAttackAlert();
     const me = g.playerOwner;
     if (!g.res[me]) return;                 // online: state not received yet
     const s = g.supply(me);
@@ -745,5 +746,25 @@ RC.UI = (function () {
     });
   }
 
-  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch, syncVoice, wireShare, syncFullscreen };
+  // ── Under-attack banner ────────────────────────────────
+  // Visible for as long as a fight on your stuff is live (game._ageAlerts drops the
+  // marker once the hits stop), not for a fixed few seconds — a raid that lasts thirty
+  // seconds should be flagged for thirty seconds.
+  function syncAttackAlert() {
+    const b = document.getElementById('attack-alert');
+    if (!b) return;
+    const live = !!(g.alerts && g.alerts.length) && !g.over;
+    b.classList.toggle('hidden', !live);
+  }
+  // Snap the camera to the newest attack. Shared by the banner and the Space key.
+  function jumpToAlert() {
+    if (!g.alerts || !g.alerts.length) return false;
+    const a = g.alerts[g.alerts.length - 1];
+    if (RC.Input && RC.Input.centerOn) RC.Input.centerOn(a.x, a.y);
+    return true;
+  }
+  const alertBtn = document.getElementById('attack-alert');
+  if (alertBtn) alertBtn.addEventListener('click', () => { jumpToAlert(); });
+
+  return { init, update, showOverlay, syncPause, togglePause, openGameMenu, closeGameMenu, restartMatch, syncVoice, wireShare, syncFullscreen, jumpToAlert };
 })();

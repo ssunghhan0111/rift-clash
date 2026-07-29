@@ -4,6 +4,10 @@ window.RC = window.RC || {};
 
 (function () {
   const CFG = RC.CFG;
+  // Attack-alert tuning. Two fights further apart than ALERT_RADIUS get their own
+  // marker; the same fight only speaks again after ALERT_COOLDOWN; a marker fades
+  // ALERT_LINGER seconds after the last hit lands.
+  const ALERT_RADIUS = 420, ALERT_COOLDOWN = 14, ALERT_LINGER = 12;
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -116,6 +120,9 @@ window.RC = window.RC || {};
       this.speed = 1;
       this.paused = false;
       this.log = [];
+      this.alerts = [];           // live "under attack" markers (see _maybeAlert)
+      this.alertFlash = 0;
+      this.alertAt = null;
       this.groups = {};
       this.shakeT = 0; this.shakeMax = 0;
       // 데일리 재도전 — 시드 스트림을 처음부터 되감아야 같은 판이 다시 나온다
@@ -321,6 +328,7 @@ window.RC = window.RC || {};
     // 타워/광역 피해 적용 (방어력·반격 처리)
     hurt(foe, dmg, owner, source) {
       if (!foe || foe.dead) return;
+      this._maybeAlert(foe, owner);
       if (source && source.def && source.def.acid) RC.applyAcid(foe, source.def.acid);  // 산성 포탑
       const armor = foe.kind === 'unit' ? foe.effArmor(this) : (foe.def && foe.def.armor ? foe.def.armor : 0);
       const dealt = Math.max(1, (dmg - armor) * this.coverMul(foe));   // 숲 엄폐
@@ -334,6 +342,50 @@ window.RC = window.RC || {};
         foe.damage(dealt);
         foe.hitFlash = 0.09;                                  // 건물 피격 섬광
       }
+    }
+
+    // ── "You are under attack" ────────────────────────────────────────────
+    // The game used to say nothing at all when your things were being killed. notify()
+    // fired for finished upgrades and "not enough shards", but never once for combat —
+    // so an attack on a mineral line outside the current view was completely silent
+    // until the workers were gone. Every damage path funnels through hurt(), so this is
+    // the one place that sees all of it.
+    //
+    // Throttled two ways, because an alarm that cries every frame is an alarm you learn
+    // to ignore: a given area re-arms only after ALERT_COOLDOWN, and separate skirmishes
+    // are kept apart by ALERT_RADIUS rather than being merged into one marker.
+    _maybeAlert(foe, attacker) {
+      if (this.playerOwner == null || !foe || foe.owner !== this.playerOwner) return;
+      if (attacker == null || !this.areEnemies(attacker, this.playerOwner)) return;   // never on friendly fire
+      if (foe.downed) return;
+      const now = this.time;
+      this.alerts = this.alerts || [];
+      for (const a of this.alerts) {
+        if (RC.dist(a.x, a.y, foe.x, foe.y) < ALERT_RADIUS) {
+          a.x = foe.x; a.y = foe.y; a.last = now;       // same fight — just keep it alive
+          if (now - a.spoke >= ALERT_COOLDOWN) { a.spoke = now; this._sayAlert(foe); }
+          return;
+        }
+      }
+      const a = { x: foe.x, y: foe.y, last: now, spoke: now, born: now };
+      this.alerts.push(a);
+      if (this.alerts.length > 6) this.alerts.shift();
+      this._sayAlert(foe);
+    }
+    _sayAlert(foe) {
+      const what = (foe.kind === 'unit')
+        ? (foe.def && foe.def.worker ? 'Your workers are under attack!' : 'Your units are under attack!')
+        : ((foe.def && foe.def.isCore) ? 'Your base is under attack!' : 'Your buildings are under attack!');
+      this.notify('⚠ ' + what);
+      this.alertFlash = 1;                              // renderer/UI read this for the banner + minimap pulse
+      this.alertAt = { x: foe.x, y: foe.y };            // where Space jumps to
+      if (RC.Audio && RC.Audio.play) RC.Audio.play('alarm');
+    }
+    // Drop alerts once their fight has been quiet for a while. Called from update().
+    _ageAlerts(dt) {
+      if (this.alertFlash > 0) this.alertFlash = Math.max(0, this.alertFlash - dt);
+      if (!this.alerts || !this.alerts.length) return;
+      this.alerts = this.alerts.filter(a => this.time - a.last < ALERT_LINGER);
     }
 
     // 죽는 순간 산성 폭발 — 주변 적에게 피해 + 산성
@@ -909,6 +961,7 @@ window.RC = window.RC || {};
       });
 
       RC.AI.update(dt, this);
+      this._ageAlerts(dt);
       if (this.survival && RC.Survival) RC.Survival.update(dt, this);
       this.separate();
 
