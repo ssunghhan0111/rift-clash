@@ -6,6 +6,13 @@ RC.Renderer = (function () {
   const CFG = RC.CFG;
 
   let cv, ctx, mini, mctx;
+  // Some players get motion sick from constant secondary movement, and some just want
+  // it off. Everything decorative (walk bob, breathing, death pop) checks this; nothing
+  // that carries information — health bars, hit flashes, selection rings — ever does.
+  const REDUCED = (() => {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch (e) { return false; }
+  })();
 
   function init(canvas, minimap) {
     cv = canvas; ctx = cv.getContext('2d');
@@ -1702,13 +1709,46 @@ RC.Renderer = (function () {
     const c = unitColors(u, flash);
     const tNow = performance.now() / 1000;
 
-    // 공격 모션 — atkAnim 1(발사 순간)→0. 근접은 전방으로 짧게 돌진하고, 원거리는 뒤로 반동한다.
+    // ── 공격 모션 — 준비동작 → 타격 → 복귀 ──
+    // atkAnim fires at the MOMENT the shot leaves, so a true anticipation ahead of the
+    // hit would need simulation state. Reading the first slice of the animation as a
+    // wind-up gets the same read on screen for free: the unit rocks back, then drives
+    // forward. Purely cosmetic — nothing here touches u.x/u.y.
     let lunge = 0;
     if (u.atkAnim > 0) {
       const ph = 1 - u.atkAnim;                                   // 0(발사)→1(끝)
-      const strike = ph < 0.3 ? ph / 0.3 : 1 - (ph - 0.3) / 0.7;  // 빠르게 나갔다 천천히 복귀
       const melee = (u.def.range || 0) <= 45;
-      lunge = strike * (melee ? u.r * 0.6 : -u.r * 0.22);
+      let strike;
+      if (ph < 0.16) strike = -(ph / 0.16) * 0.34;                // 준비 — 살짝 뒤로
+      else if (ph < 0.42) strike = ((ph - 0.16) / 0.26);          // 타격 — 빠르게 앞으로
+      else strike = 1 - (ph - 0.42) / 0.58;                       // 복귀 — 천천히
+      lunge = strike * (melee ? u.r * 0.68 : -u.r * 0.26);
+    }
+
+    // ── 보행/호흡 애니메이션 ──────────────────────────────
+    // Ground units used to slide across the map in a single fixed pose. The gait is
+    // driven by DISTANCE ACTUALLY TRAVELLED rather than wall-clock time, so a slowed
+    // unit takes slower steps and a stopped one stops stepping — tying it to time
+    // alone makes units moonwalk. All of this lives in render-only fields (_px/_py/
+    // _gait/_idle) that the simulation never reads, so it cannot desync an online match.
+    let bobY = 0, sqX = 1, sqY = 1;
+    if (!u.def.flying) {
+      const moved = (u._px == null) ? 0 : RC.dist(u.x, u.y, u._px, u._py);
+      u._px = u.x; u._py = u.y;
+      u._gait = (u._gait || 0) + moved;
+      const walking = moved > 0.02;
+      if (walking && !REDUCED) {
+        const stride = Math.max(9, u.r * 1.5);                    // bigger units, longer steps
+        const ph = (u._gait / stride) * Math.PI;
+        bobY = -Math.abs(Math.sin(ph)) * u.r * 0.16;              // up on the step, down on the plant
+        const plant = Math.max(0, -Math.sin(ph * 2)) * 0.10;      // squash as the foot lands
+        sqX = 1 + plant; sqY = 1 - plant;
+      } else if (!REDUCED) {
+        // Idle breathing — offset per unit so a standing army doesn't pulse in unison.
+        const br = Math.sin(tNow * 1.7 + (u.id || 0) * 1.3);
+        sqY = 1 + br * 0.022; sqX = 1 - br * 0.018;
+        bobY = br * u.r * 0.03;
+      }
     }
 
     // 공중 유닛 고도 — 살짝 떠 있는 듯한 부유 흔들림 (순수 연출: 그리기 위치만 움직이고
@@ -1762,7 +1802,10 @@ RC.Renderer = (function () {
       ctx.translate(Math.cos(u.hurtDir) * k, Math.sin(u.hurtDir) * k);
     }
 
-    ctx.translate(0, -alt);
+    // Bob and squash are applied in SCREEN space, before the facing rotation, so a
+    // landing squashes downward no matter which way the unit happens to be looking.
+    ctx.translate(0, -alt + bobY);
+    if (sqX !== 1 || sqY !== 1) ctx.scale(sqX, sqY);
     ctx.rotate(u.facing);
     if (lunge) ctx.translate(lunge, 0);   // 공격 돌진/반동 (바라보는 방향 기준)
     // 공중 유닛 — 기체 후미의 엔진 광 (이동 중엔 더 길고 밝은 분사 꼬리)
@@ -2431,6 +2474,8 @@ RC.Renderer = (function () {
 
   function drawShot(f) {
     if (f.boom) { drawBoom(f); return; }
+    // 유닛 사망 팝 — 확장 링 + 흩어지는 파편
+    if (f.pop) { drawPop(f); return; }
     // 스킬 이펙트 (범위 파동 / 치유 / 점멸)
     if (f.abil) {
       const ULT_LIFE = { barrage: 1.1, swarm: 0.9, aegis: 1.0 };
@@ -2795,6 +2840,37 @@ RC.Renderer = (function () {
     // 뷰포트 사각형 — 확대/축소하면 보이는 월드 크기가 달라진다
     const z = camZoom(g);
     mctx.strokeRect(g.camera.x * sx, g.camera.y * sy, (W / z) * sx, (H / z) * sy);
+  }
+
+  // ── Death pop ─────────────────────────────────────────
+  // A quick ring that expands and fades, plus a few chunks thrown outward in the
+  // faction's colour. Short on purpose (0.34s): long enough to register the kill,
+  // short enough that a big fight doesn't turn into soup.
+  const POP_LIFE = 0.34;
+  function drawPop(f) {
+    if (REDUCED) return;
+    const prog = 1 - Math.max(0, f.t) / POP_LIFE;      // 0 → 1
+    if (prog < 0 || prog > 1) return;
+    const tint = (RC.RACES[f.race] && RC.RACES[f.race].tint) || '#cfd8e4';
+    const R = f.r || 10;
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.globalAlpha = (1 - prog) * 0.75;
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = Math.max(1, 2.6 * (1 - prog));
+    ctx.beginPath(); ctx.arc(0, 0, R * (0.5 + prog * 1.5), 0, Math.PI * 2); ctx.stroke();
+    // chunks — deterministic per-fx so they don't jitter from frame to frame
+    const seed = (f.x * 7 + f.y * 13) | 0;
+    ctx.fillStyle = tint;
+    ctx.globalAlpha = (1 - prog) * 0.85;
+    for (let i = 0; i < 5; i++) {
+      const a = ((seed + i * 73) % 360) * Math.PI / 180;
+      const d = R * (0.4 + prog * 1.35);
+      const s = Math.max(0.6, R * 0.2 * (1 - prog));
+      ctx.beginPath(); ctx.arc(Math.cos(a) * d, Math.sin(a) * d * 0.7, s, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   // ── Off-screen attack arrows ──────────────────────────

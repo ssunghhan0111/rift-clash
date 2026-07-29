@@ -997,6 +997,15 @@ window.RC = window.RC || {};
         }
       }
 
+      // A dying unit used to blink out of existence between one frame and the next,
+      // which reads as a rendering glitch rather than a kill. Leave a short pop behind.
+      // Boarded units are merely hidden, not killed, so they get nothing.
+      for (const u of this.units) {
+        if (u.dead && !u.boarded) {
+          this.fx.push({ pop: true, x: u.x, y: u.y, r: (u.r || 10),
+                         race: (u.def && u.def.race) || 'forge', owner: u.owner, t: 0.34 });
+        }
+      }
       this.units = this.units.filter(u => !u.dead && !u.boarded);   // 탑승 유닛은 화면에서 제외
       this.buildings = this.buildings.filter(b => !b.dead);
       this.nodes = this.nodes.filter(n => !n.dead);
