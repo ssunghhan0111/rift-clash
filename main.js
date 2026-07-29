@@ -71,6 +71,7 @@ window.RC = window.RC || {};
   RC.Renderer.init(cv, mini);
   RC.Input.init(game, cv, mini);
   RC.UI.init(game);
+  if (RC.KidsUI) RC.KidsUI.init(game);
   window.addEventListener('resize', resize);
   // Rotating a phone/tablet into landscape (incl. the fullscreen orientation lock)
   // sometimes fires before the viewport settles — re-fit on the next frame too.
@@ -314,10 +315,14 @@ window.RC = window.RC || {};
 
   // ── Game-mode cards (Tutorial / Versus / Survival) ──
   const GAMEMODES = [
+    // Crystal Guard is listed FIRST on purpose. It is the only mode a complete
+    // beginner can understand from the card alone, and it is the one to reach for
+    // when a young player is holding the tablet.
+    { id: 'kids', ic: '💎', name: 'Crystal Guard', sub: 'Easy mode for younger players. Buy fighters, defend the crystal, pick a reward every wave.' },
     { id: 'tutorial', ic: '🎓', name: 'Tutorial', sub: 'Learn the game, then a guided practice match.' },
     { id: 'campaign', ic: '🎯', name: 'Campaign', sub: 'Scripted missions vs bots — a ladder into multiplayer.' },
     { id: 'vs', ic: '⚔️', name: 'Versus', sub: '1v1 or 2v2 vs bots — or online vs friends.' },
-    { id: 'survival', ic: '🛡️', name: 'Survival', sub: 'Defend the Rift Crystal from endless waves.' },
+    { id: 'survival', ic: '🛡️', name: 'Survival', sub: 'Defend the Rift Crystal from endless waves — full RTS.' },
   ];
   function buildGameModes() {
     const wrap = document.getElementById('ss-gamemodes');
@@ -365,15 +370,20 @@ window.RC = window.RC || {};
     show('sec-aidiff', m === 'vs');
     show('sec-diff', m === 'survival');
     show('sec-squad', m === 'survival');
+    // Crystal Guard shows faction and colour but no difficulty, no squad and no map:
+    // every extra picker on the way to "play" is a chance for a kid to get stuck on
+    // the menu instead of in the game.
     show('sec-race', m !== 'tutorial' && m !== 'campaign');
     show('sec-color', m !== 'tutorial' && m !== 'campaign');
     show('act-vs', m === 'vs', 'flex');
     show('act-survival', m === 'survival', 'flex');
+    show('act-kids', m === 'kids', 'flex');
     show('ss-onlinehint', m === 'vs');
     show('ss-survivalhint', m === 'survival');
+    show('ss-kidshint', m === 'kids');
     // Daily now lives in the always-visible front-page banner (rendered in buildStartScreen).
     const rh = document.getElementById('race-h');
-    if (rh) rh.textContent = m === 'survival' ? 'Your faction' : 'Faction (enemy AI takes the other)';
+    if (rh) rh.textContent = (m === 'survival' || m === 'kids') ? 'Your faction' : 'Faction (enemy AI takes the other)';
   }
 
   // ── Campaign (scripted missions) ──────────────────────
@@ -479,6 +489,25 @@ window.RC = window.RC || {};
     game.playerColorId = selColor;
     game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
     openRunToken(selDiff);
+    RC.AI.reset();
+    resize();
+    if (game.crystal) RC.Input.centerOn(game.crystal.x, game.crystal.y);
+    ss.classList.add('hidden');
+    overlay.classList.add('hidden');
+    started = true;
+  }
+
+  // ── Crystal Guard (Kids mode) ──
+  // Offline and solo only for now. No run token: kids runs never reach the world
+  // board (see the reasoning on the end screen in ui.js).
+  function startKids() {
+    RC.online = false;
+    game.practice = false;
+    game.heroesEnabled = true;
+    goFullscreen();
+    audioGo();
+    game.playerColorId = selColor;
+    game.setupKids({ race: selRace });
     RC.AI.reset();
     resize();
     if (game.crystal) RC.Input.centerOn(game.crystal.x, game.crystal.y);
@@ -692,7 +721,8 @@ window.RC = window.RC || {};
          <h3>Controls</h3><p class="muted">Left-click / drag to select · right-click to command · Q/W/E to produce · number keys for control groups · minimap and screen edges to pan.</p>`;
     } else if (tab === 'Modes') {
       body.innerHTML =
-        `<h3>🎓 Tutorial</h3><p>These reference screens plus a guided practice match against a gentle bot.</p>
+        `<h3>💎 Crystal Guard</h3><p><b>The easy one — made for younger players.</b> No mining, no base building, no research. Shards arrive on their own; three big buttons buy a <b>Tank</b>, an <b>Archer</b> and a <b>Support</b>, and more fighters unlock as the waves go on. Clear a wave and <b>choose one of three rewards</b>. Every wave has a name and a surprise — Runner Rush, Big Guy, Sky Swarm. Just keep the crystal alive.</p>
+         <h3>🎓 Tutorial</h3><p>These reference screens plus a guided practice match against a gentle bot.</p>
          <h3>⚔️ Versus</h3><p><b>1 vs 1</b> — you against one bot. <b>2 vs 2</b> — you and an allied bot against two bots. Also playable online against friends on iPad/tablet.</p>
          <h3>🛡️ Survival</h3><p>Defend the <b>Rift Crystal</b> from waves of enemies that march in from the far side. <b>The next wave only comes once you have wiped out the current one</b>, then a few seconds' breathing space — so enemies never pile up, and the time between waves is yours to spend on towers, upgrades and army. Each wave is bigger and tougher than the last. It never ends, so chase a high wave count. Play solo or with an allied bot.</p>`;
     } else if (tab === 'Factions') {
@@ -839,6 +869,8 @@ window.RC = window.RC || {};
 
   document.getElementById('ss-start').addEventListener('click', startGame);
   document.getElementById('ss-survival').addEventListener('click', startSurvival);
+  const kidsBtn = document.getElementById('ss-kids');
+  if (kidsBtn) kidsBtn.addEventListener('click', startKids);
 
   // ── Daily Challenge card ────────────────────────────────
   // Rendered fresh each time the start screen opens, so a player who leaves the
@@ -890,6 +922,10 @@ window.RC = window.RC || {};
     parts.push('<span class="ps-item">Matches <b>' + p.matches + '</b></span>');
     parts.push('<span class="ps-item">Versus <b>' + (p.wins || 0) + '–' + (p.losses || 0) + '</b></span>');
     if (bestSurv > 0) parts.push('<span class="ps-item">Best wave <b>' + bestSurv + '</b></span>');
+    // Crystal Guard keeps its own line rather than folding into "Best wave": the two
+    // curves are not comparable, and a kid deserves to see their own number on the
+    // front page instead of being buried under an adult Survival record.
+    if ((bw.kids || 0) > 0) parts.push('<span class="ps-item">💎 Crystal Guard <b>' + bw.kids + '</b></span>');
     let bestRace = null, bestW = 0;
     for (const r of (RC.RACE_ORDER || [])) { const f = p.faction[r] || { w: 0 }; if ((f.w || 0) > bestW) { bestW = f.w; bestRace = r; } }
     if (bestRace) { const rr = RC.RACES[bestRace]; parts.push('<span class="ps-item">Top faction <b style="color:' + rr.tint + '">' + rr.name + '</b></span>'); }
@@ -1934,6 +1970,7 @@ window.RC = window.RC || {};
       if (game.marks && game.marks.length) { for (const m of game.marks) m.t -= dt; game.marks = game.marks.filter(m => m.t > 0); }
       RC.Renderer.draw(game, RC.Input.state);
       RC.UI.update();
+      if (RC.KidsUI) RC.KidsUI.update();
 
       if (game.over && !overlayShown) {
         overlayShown = true;

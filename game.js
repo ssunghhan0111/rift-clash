@@ -38,6 +38,7 @@ window.RC = window.RC || {};
     // 맵/모드 교체 후 재시작. racePick = { owner: 'forge'|'gloop' } (선택)
     setup(mapDef, mode, racePick, aiDiff) {
       this.survival = false;
+      this.kids = false;
       this.mapDef = mapDef || this.mapDef;
       this.mode = mode || this.mode;
       if (racePick) this._racePick = racePick;
@@ -51,6 +52,7 @@ window.RC = window.RC || {};
     setupSurvival(opts) {
       opts = opts || {};
       this.survival = true;
+      this.kids = false;
       this.survivalDiff = opts.difficulty || 'medium';
       // 데일리 챌린지 — 모두가 같은 시드와 같은 변형으로 플레이한다.
       // Armed BEFORE reset() so the seeded stream and the twist are in place
@@ -82,9 +84,35 @@ window.RC = window.RC || {};
       this.reset();
     }
 
+    // ── Kids mode ─────────────────────────────────────
+    // Survival's crystal and horde, with the RTS removed: no workers, no shard
+    // nodes, no building, no supply management. See kids.js for the reasoning.
+    //
+    // It rides on `survival = true` on purpose — the wave HUD, the crystal lose
+    // condition and the end screen all already key off that flag, and duplicating
+    // them for a second wave mode is exactly the kind of parallel path that drifts.
+    // `kids = true` is the switch that swaps the director and the map builder.
+    //   opts = { race, difficulty? }
+    setupKids(opts) {
+      opts = opts || {};
+      this.survival = true;
+      this.kids = true;
+      this.daily = null; this._dailyRng = null;
+      this.survivalDiff = 'kids';
+      const race = opts.race || 'forge';
+      const players = [{ owner: 1, team: 1, ai: false }];
+      players.push({ owner: 2, team: 2, ai: false, waveEnemy: true });
+      this._racePick = { 1: race, 2: 'forge' };
+      this.mode = { id: 'kids', name: 'Crystal Guard', survival: true, kids: true, count: players.length, players };
+      this.survivalMap = RC.SURVIVAL;
+      this.mapDef = { world: RC.SURVIVAL.world, terrain: RC.SURVIVAL.terrain, obstacles: RC.SURVIVAL.obstacles, spawns: [{ x: 0, y: 0 }] };
+      this.reset();
+    }
+
     // 캠페인 미션 — 스크립트된 1v1 (맵/상대/목표 지정). setup()과 유사하게 주입.
     setupMission(def) {
       this.survival = false;
+      this.kids = false;
       this.missionDef = def;
       this.aiDiff = (def.enemy && def.enemy.diff) || 'normal';
       const prace = def.race || 'forge';
@@ -198,9 +226,12 @@ window.RC = window.RC || {};
       this.heroOf = {};
       this._ai = {};              // per-game AI memory (see ai.js) — reset with the game
       this._sv = null;            // per-game survival wave state (see survival.js) — same reason
+      this._kd = null;            // per-game Kids mode state (see kids.js) — same reason
+      this.kidsBase = null;       // Kids mode: the one building the player buys fighters from
       this._nav = null;           // pathfinding nav grid — rebuilt lazily for the new map
       this.marks = [];            // client-side visual feedback (command markers, damage numbers)
-      if (this.survival) this._buildSurvivalMap();
+      if (this.kids) this._buildKidsMap();
+      else if (this.survival) this._buildSurvivalMap();
       else this.buildMap();
     }
 
@@ -638,6 +669,62 @@ window.RC = window.RC || {};
       if (RC.Survival) RC.Survival.reset();
     }
 
+    // ── Kids mode map ─────────────────────────────────
+    // The Survival map minus everything the kid does not need. Notably:
+    //
+    //   · NO shard nodes. Income is automatic (kids.js), so nodes would just be
+    //     scenery a kid tries to click on and then wonders why nothing happened.
+    //   · NO workers. There is nothing to gather and nothing to build.
+    //   · The Core sits directly BEHIND the crystal instead of off in its own base.
+    //     One place on the map holds everything the kid cares about — what they are
+    //     protecting and where their fighters come out — so the camera never has to
+    //     be in two places at once. This is the single biggest usability difference
+    //     from Survival, where the base and the objective are far apart.
+    //   · The hero stays. A named, levelling, revivable champion is one of the few
+    //     bits of depth that costs a kid nothing to enjoy.
+    _buildKidsMap() {
+      const map = this.survivalMap;
+      const K = (RC.Kids && RC.Kids.CFG) || {};
+      CFG.WORLD_W = map.world.w;
+      CFG.WORLD_H = map.world.h;
+      this.world = { w: map.world.w, h: map.world.h };
+      this.terrain = (map.terrain || []).map(t => ({ ...t }));
+      this.zones = (map.zones || []).map(z => RC.prepZone({ ...z }));
+      this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
+
+      const me = this.players.find(p => p.team === 1) || this.players[0];
+      const rdef = RC.RACES[me.race] || RC.RACES.forge;
+
+      // The crystal — the thing to defend, and the visual centre of the mode.
+      this.crystal = new RC.Building('crystal', map.crystal.x, map.crystal.y, me.owner, true);
+      if (K.CRYSTAL_HP) { this.crystal.maxHp = K.CRYSTAL_HP; this.crystal.hp = K.CRYSTAL_HP; }
+      this.buildings.push(this.crystal);
+
+      // The base, tucked in behind the crystal (the horde comes from the left, so
+      // "behind" is to the right) with its rally point in FRONT of the crystal —
+      // new fighters walk out towards the fight, not away from it.
+      const base = new RC.Building(rdef.core, map.crystal.x + 200, map.crystal.y, me.owner, true);
+      base.rally = { x: map.crystal.x - 130, y: map.crystal.y + 40 };
+      this.buildings.push(base);
+      this.kidsBase = base;
+      me.spawn = { x: base.x, y: base.y };
+
+      if (this.heroesEnabled && rdef.hero) {
+        const h = new RC.Unit(rdef.hero, map.crystal.x - 90, map.crystal.y + 60, me.owner);
+        this.units.push(h);
+        this.heroOf[me.owner] = h;
+      }
+
+      if (K.START_SHARD != null && this.res[me.owner]) this.res[me.owner].shard = K.START_SHARD;
+
+      this.enemySpawn = { x: map.enemySpawn.x, y: map.enemySpawn.y };
+      this.spawn1 = { x: base.x, y: base.y };
+      this.camera.x = this.crystal.x - 560;
+      this.camera.y = this.crystal.y - 380;
+
+      this._initVision();
+    }
+
     // ── 전장의 안개 / Fog of War ───────────────────────
     // 격자 두 장: visSeen(한 번이라도 본 곳=탐사됨, 영구) / visNow(지금 보이는 곳, 매틱 갱신)
     _initVision() {
@@ -787,6 +874,10 @@ window.RC = window.RC || {};
       });
       this.buildings.forEach(b => { if (b.owner === owner && !b.dead && b.done) max += b.def.supplyGiven; });
       this.buildings.forEach(b => { if (b.owner === owner && !b.dead) b.queue.forEach(j => used += RC.UNITS[j.type].supply); });
+      // Kids mode has no supply buildings to put down, so the cap is a flat number.
+      // Without this a kid would hit the Core's 10 population and have no way at all
+      // to raise it — a dead end with no visible cause.
+      if (this.kids && RC.Kids) max = RC.Kids.CFG.POP;
       return { used, max: Math.min(max, CFG.POP_CAP) };
     }
 
@@ -995,7 +1086,8 @@ window.RC = window.RC || {};
       RC.AI.update(dt, this);
       this._applyWind(dt);
       this._ageAlerts(dt);
-      if (this.survival && RC.Survival) RC.Survival.update(dt, this);
+      if (this.kids && RC.Kids) RC.Kids.update(dt, this);
+      else if (this.survival && RC.Survival) RC.Survival.update(dt, this);
       this.separate();
 
       // 죽는 순간 폭발 (블로트 산성 폭발 등)

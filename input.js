@@ -552,19 +552,25 @@ RC.Input = (function () {
       if (combat) { amoveArmed = true; g.notify('Attack-move — click a destination'); snd('select'); return; }
     }
 
-    // build hotkey — with a worker selected, start placing the matching building
-    const hasWorker = g.selection.some(s => s.kind === 'unit' && s.def.worker && s.owner === me);
-    if (hasWorker) {
-      const list = (g.buildableFor ? g.buildableFor(me) : null) || RC.BUILDABLE || [];
-      const bt = list.find(t => RC.BUILDINGS[t].key.toLowerCase() === k);
-      if (bt) { g.placing = bt; return; }
-    }
+    // Kids mode has no building and no direct training: fighters are bought from
+    // the three big buttons at kid prices (kids.js). Letting these two hotkeys
+    // through would put a full-price Wrench Bot on a map with nothing to mine and
+    // nothing to build — a dead unit the kid paid for and cannot use.
+    if (!g.kids) {
+      // build hotkey — with a worker selected, start placing the matching building
+      const hasWorker = g.selection.some(s => s.kind === 'unit' && s.def.worker && s.owner === me);
+      if (hasWorker) {
+        const list = (g.buildableFor ? g.buildableFor(me) : null) || RC.BUILDABLE || [];
+        const bt = list.find(t => RC.BUILDINGS[t].key.toLowerCase() === k);
+        if (bt) { g.placing = bt; return; }
+      }
 
-    // produce hotkey — from a selected building whose produce list has this key
-    const bsel = g.selection.find(s => s.kind === 'building' && s.owner === me && s.done);
-    if (bsel) {
-      const type = bsel.def.produces.find(t => RC.UNITS[t].key.toLowerCase() === k);
-      if (type) { RC.cmd(g, { t: 'train', bid: bsel.id, ut: type }); return; }
+      // produce hotkey — from a selected building whose produce list has this key
+      const bsel = g.selection.find(s => s.kind === 'building' && s.owner === me && s.done);
+      if (bsel) {
+        const type = bsel.def.produces.find(t => RC.UNITS[t].key.toLowerCase() === k);
+        if (type) { RC.cmd(g, { t: 'train', bid: bsel.id, ut: type }); return; }
+      }
     }
 
     // 컨트롤 그룹 1~4

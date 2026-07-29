@@ -13,6 +13,8 @@ npm run test:browser  # real Chromium, real WebSockets, real WebRTC
 |---|---|
 | `wavecheck.js` | Survival difficulty curve, daily twists, seeded reproducibility |
 | `simtest.js` | Full survival runs on every difficulty and every daily twist |
+| `kidstest.js` | Crystal Guard (Kids mode) rules: the gentler curve, a live 10-wave run with the reward loop, unlocks, all three factions, and that Survival is untouched |
+| `kidsuitest.js` | Crystal Guard screen, in real `index.html` under jsdom: the three buy buttons spend shards, reward cards can only be picked once, unlocks reach the shop, the grown-up HUD is hidden. Needs `npm i -D jsdom`; skips cleanly without it |
 | `sighttest.js` | Per-unit sight, auto-engagement, the leash, worker behaviour |
 | `reachtest.js` | Every ground unit can actually damage every building |
 | `planettest.js` | All six maps: spawn clearance, reachability, netcode |

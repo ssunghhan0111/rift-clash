@@ -43,7 +43,8 @@ RC.UI = (function () {
     // reset() cleared the wave log and the run token with it. A restarted Survival
     // run is a new run, so it opens a new one — otherwise the second run of a session
     // could never be posted to the world board.
-    if (g.survival && RC.openRunToken) RC.openRunToken(g.daily ? 'daily' : (g.survivalDiff || 'medium'));
+    // Kids runs never go on the world board, so they never need a run token.
+    if (g.survival && !g.kids && RC.openRunToken) RC.openRunToken(g.daily ? 'daily' : (g.survivalDiff || 'medium'));
     if (RC.AI) RC.AI.reset();
     RC.Input.clampCam();
     g.paused = false;
@@ -653,6 +654,29 @@ RC.UI = (function () {
   }
 
   function showOverlay(kind) {
+    // Kids mode gets its own end screen. It must come BEFORE the survival branch —
+    // Kids runs on survival = true, and the survival screen is a leaderboard
+    // submission form, which is the wrong thing to put in front of a child. There
+    // is no world board here on purpose: a kid's run is not comparable to an adult
+    // Survival run, and "you are #48291" is not the note to end on.
+    if (g.kids) {
+      const waves = Math.max(0, (g.survivalWave || 0) - 1);   // the wave that killed you doesn't count as cleared
+      const kills = g.survivalKills || 0;
+      let best = 0, isNew = false;
+      try {
+        const key = 'riftclash_kidsbest';
+        best = parseInt(window.localStorage.getItem(key) || '0', 10) || 0;
+        if (waves > best) { best = waves; isNew = true; window.localStorage.setItem(key, String(best)); }
+      } catch (e) { /* localStorage unavailable (file://) — the run just isn't remembered */ }
+      const stars = '⭐'.repeat(Math.max(1, Math.min(5, Math.ceil(waves / 4))));
+      el.overlayText.innerHTML =
+        `<b class="win" style="color:#ffd24a">${esc(stars)}</b>` +
+        `<span style="font-size:30px;font-weight:800;color:var(--cyan)">You cleared ${waves} wave${waves === 1 ? '' : 's'}!</span>` +
+        `<span>${kills} enemies beaten` + (isNew ? ` · <b style="color:#5ddc7a">NEW RECORD!</b>` : ` · best so far: ${best}`) + `</span>` +
+        `<span style="color:var(--dim)">The crystal broke — press Restart and try to beat ${best}.</span>`;
+      el.overlay.classList.remove('hidden');
+      return;
+    }
     if (g.survival) {
       // 데일리 챌린지 런은 난이도 보드가 아니라 전용 데일리 보드로 간다
       const isDaily = !!g.daily;

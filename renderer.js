@@ -1924,6 +1924,23 @@ RC.Renderer = (function () {
       ctx.fillText(String(u.cargo.length), u.x + u.r + 8, u.y - u.r - 7);
       ctx.restore();
     }
+    // Kids mode "Big Guy" — a crown and a pulsing ring. The boss has five times the
+    // health of its own card and is otherwise the SAME sprite, so without a marker a
+    // kid has no way to tell which one is the special enemy and no reason to gang up
+    // on it. The wave banner promises a big one; this is what makes good on it.
+    if (u.kidsBoss) {
+      ctx.save();
+      const pulse = 0.72 + 0.28 * Math.sin(tNow * 4);
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = '#ffd24a';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.arc(u.x, u.y, u.r * 1.65, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.font = 'bold ' + Math.round(u.r * 1.5) + 'px system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('👑', u.x, u.y - u.r - 20);
+      ctx.restore();
+    }
   }
 
   // ── 버프/디버프 표시 ──
@@ -2522,10 +2539,59 @@ RC.Renderer = (function () {
     ctx.restore();
   }
 
+  // ── Confetti (Kids mode wave-clear) ─────────────────────────────────────────
+  // Deliberately bright, deliberately over the top. The wave-clear moment is the
+  // reward the whole mode is built around, so it gets a real burst rather than a
+  // line of text. Every particle is derived from the fx's own seed, so it is
+  // recomputed identically each frame without storing per-particle state.
+  const PARTY_COLS = ['#ffd24a', '#ff6ba8', '#63c7ff', '#5ddc7a', '#b98cff', '#ff9b3d', '#ffffff'];
+  function drawParty(f) {
+    const life = f.life || 2.2;
+    const prog = 1 - Math.max(0, f.t) / life;          // 0 → 1
+    if (prog >= 1) return;
+    const n = f.n || 40;
+    const rnd = boomRng(f);
+    ctx.save();
+    // Bright flash on the first instant, so the burst has a bang and not just a drift.
+    if (prog < 0.2) {
+      const k = prog / 0.2;
+      ctx.globalAlpha = (1 - k) * 0.55;
+      ctx.fillStyle = '#fff6d0';
+      ctx.beginPath(); ctx.arc(f.ax, f.ay, 40 + k * 150, 0, Math.PI * 2); ctx.fill();
+    }
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * Math.PI * 2;
+      const sp = 130 + rnd() * 320;                    // px/sec outward
+      const spin = rnd() * Math.PI * 2;
+      const col = PARTY_COLS[Math.floor(rnd() * PARTY_COLS.length)];
+      const t = prog * life;
+      // Ballistic: out fast, then gravity takes over. Reads as thrown, not exploded.
+      const x = f.ax + Math.cos(a) * sp * t * (1 - prog * 0.45);
+      const y = f.ay + Math.sin(a) * sp * 0.62 * t * (1 - prog * 0.45) + 240 * t * t;
+      ctx.globalAlpha = Math.min(1, (1 - prog) * 1.8);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(spin + t * 9);
+      ctx.fillStyle = col;
+      ctx.fillRect(-3.5, -2, 7, 4);                    // little rectangles = paper streamers
+      ctx.restore();
+    }
+    // Expanding ring so the burst has a readable centre even in a busy frame.
+    if (prog < 0.6) {
+      const k = prog / 0.6;
+      ctx.globalAlpha = (1 - k) * 0.5;
+      ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 5 * (1 - k) + 1;
+      ctx.beginPath(); ctx.arc(f.ax, f.ay, 30 + k * 210, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawShot(f) {
     if (f.boom) { drawBoom(f); return; }
     // 유닛 사망 팝 — 확장 링 + 흩어지는 파편
     if (f.pop) { drawPop(f); return; }
+    // Kids mode wave-clear confetti
+    if (f.party) { drawParty(f); return; }
     // 스킬 이펙트 (범위 파동 / 치유 / 점멸)
     if (f.abil) {
       const ULT_LIFE = { barrage: 1.1, swarm: 0.9, aegis: 1.0 };
