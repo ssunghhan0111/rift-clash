@@ -4222,5 +4222,109 @@ RC.Renderer = (function () {
     }
   }
 
-  return { init, draw, drawPortrait, drawRaceFace, drawPlanet };
+  // ── 메뉴 히어로 (시작 화면 아이들 애니메이션) ────────────────
+  // The player's own hero, alive on the main menu: it looks around, breathes, and
+  // waves at you every few seconds. This is the one place the menu says "this is
+  // YOURS" rather than "here are the factions", so it is worth the frames.
+  //
+  // Heroes are no longer bound to a race, so the palette is built in two layers:
+  // the HERO owns its identity colours (body/light/dark/trim/ink) and the RACE only
+  // tints the shared hardware (steel/eye/optic/psi). Starting from raceFaceColors()
+  // rather than an object literal is deliberate — that function is the one place
+  // guaranteed to emit all nine keys, and a missing key here would reach softGlow()
+  // as 'rgba(undefined,1)' and throw out of the menu build. See its comment.
+  const HERO_TINT = { warden: '#c8703a', matriarch: '#7cc23f', archon: '#9a7cf0' };
+  function heroIdleColors(heroId, raceId) {
+    const c = raceFaceColors(raceId || 'forge');
+    const base = HERO_TINT[heroId] || HERO_TINT.warden;
+    c.body = base;
+    c.light = shade(base, 0.32);
+    c.dark = shade(base, -0.46);
+    c.trim = shade(base, 0.55);
+    c.ink = shade(base, -0.72);
+    return c;
+  }
+
+  // The waving arm. Drawn OVER the sprite rather than inside each hero's draw
+  // function, so all three heroes (and any hero added later) get the wave for free
+  // and none of the in-match sprite code has to know the menu exists.
+  //
+  // Angles are canvas convention (y down). The raise interpolates BACKWARD through
+  // ~pi rather than forward through 0: both paths end in the same place, but the
+  // forward one sweeps the hand out through the hero's face on the way up.
+  function drawMenuWave(R, c, wave, t) {
+    if (wave <= 0.001) return;
+    const sx = -R * 0.34, sy = -R * 0.34;      // shoulder, on the near side
+    const REST = 1.95, UP = 4.35;
+    const e = wave * wave * (3 - 2 * wave);    // smoothstep, so the raise has weight
+    const a1 = REST + (UP - REST) * e;
+    const ex = sx + Math.cos(a1) * R * 0.62, ey = sy + Math.sin(a1) * R * 0.62;
+    const a2 = a1 - 0.5 + Math.sin(t * 9) * 0.5 * e;
+    const hx = ex + Math.cos(a2) * R * 0.56, hy = ey + Math.sin(a2) * R * 0.56;
+
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = c.ink; ctx.lineWidth = R * 0.34;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.23;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.strokeStyle = c.body; ctx.lineWidth = R * 0.21;
+    ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = c.trim;
+    ctx.beginPath(); ctx.arc(hx, hy, R * 0.19, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = c.ink; ctx.lineWidth = R * 0.07; ctx.stroke();
+    ctx.restore();
+  }
+
+  // canvas: any sized canvas. heroId: 'warden' | 'matriarch' | 'archon'.
+  // raceId only tints the hardware — the hero is the same hero whichever race it
+  // deploys with, which is the whole point of decoupling the two.
+  function drawHeroIdle(canvas, heroId, raceId) {
+    const def = RC.UNITS[heroId];
+    if (!canvas || !def) return;
+    const pctx = canvas.getContext('2d');
+    if (!pctx) return;
+    const W = canvas.width, H = canvas.height;
+    const race = RC.RACES[raceId] || RC.RACES.forge;
+    const saved = ctx;
+    ctx = pctx;                                // 스프라이트 함수들이 쓰는 모듈 ctx를 잠시 교체
+    try {
+      ctx.clearRect(0, 0, W, H);
+      const bg = ctx.createRadialGradient(W / 2, H * 0.46, 2, W / 2, H * 0.5, H * 0.92);
+      bg.addColorStop(0, mix(race.tint, '#05080e', 0.70));
+      bg.addColorStop(1, 'rgba(5,8,14,0)');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+      const c = heroIdleColors(heroId, raceId);
+      const t = performance.now() / 1000;
+
+      // Wave envelope — a 5.2s cycle that is mostly REST. A hero waving continuously
+      // reads as a broken loop; one that waves occasionally reads as alive.
+      const PERIOD = 5.2, HOLD = 2.3, EDGE = 0.5;
+      const ph = t % PERIOD;
+      const wave = ph >= HOLD ? 0
+        : Math.max(0, Math.min(1, Math.min(ph / EDGE, (HOLD - ph) / EDGE)));
+      const look = Math.sin(t * 0.75);         // head/body turn, left to right
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+      ctx.translate(W / 2, H * 0.62 + Math.sin(t * 1.9) * H * 0.018);   // 숨쉬는 듯한 흔들림
+      const scale = (Math.min(W, H) * 0.30) / Math.max(7, def.r);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = 'rgba(0,0,0,0.32)';                               // 바닥 그림자
+      ctx.beginPath(); ctx.ellipse(0, def.r * 1.28, def.r * 1.2, def.r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+
+      ctx.save();
+      ctx.translate(look * def.r * 0.10, 0);
+      ctx.rotate(look * 0.07);
+      drawUnitSprite({ type: heroId, def: def, r: def.r }, c);
+      drawMenuWave(def.r * 1.30, c, wave, t);   // same R the sprite body was drawn at
+      ctx.restore();
+      ctx.restore();
+    } finally {
+      ctx = saved;
+    }
+  }
+
+  return { init, draw, drawPortrait, drawRaceFace, drawPlanet, drawHeroIdle };
 })();

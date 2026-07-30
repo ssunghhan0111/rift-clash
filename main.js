@@ -176,6 +176,39 @@ window.RC = window.RC || {};
     }
   }
 
+  // ── 메뉴 히어로 ────────────────────────────────────────────────────────────
+  // The hero the player will actually deploy, idling on the start screen.
+  //
+  // Heroes are being decoupled from races (see HERO_DESIGN.md): the pick will live in
+  // its own Hero Bay tab and persist across matches. Until that tab ships, the stored
+  // pick is read if present and the selected race's hero is the fallback — so the menu
+  // is already reading from the future source of truth and swapping the tab in later
+  // touches nothing here.
+  const HERO_KEY = 'riftclash_hero';
+  function heroPick() {
+    let id = null;
+    try { id = window.localStorage.getItem(HERO_KEY); } catch (e) {}
+    if (id && RC.UNITS[id] && RC.UNITS[id].hero) return id;
+    const r = RC.RACES[selRace];
+    return (r && r.hero) || 'warden';
+  }
+  let heroPlateId = null;
+  function drawMenuHero() {
+    if (!RC.Renderer || !RC.Renderer.drawHeroIdle) return;
+    const cv = document.getElementById('hero-cv');
+    if (!cv || !cv.isConnected) return;
+    const id = heroPick();
+    RC.Renderer.drawHeroIdle(cv, id, selRace);
+    // The plate is DOM, so only touch it when the hero actually changed — rewriting
+    // innerHTML twenty times a second is how a menu ends up dropping frames.
+    if (id !== heroPlateId) {
+      heroPlateId = id;
+      const plate = document.getElementById('hero-plate');
+      const def = RC.UNITS[id];
+      if (plate && def) plate.innerHTML = esc(def.name) + '<span class="hp-sub">Your Hero</span>';
+    }
+  }
+
   // Map cards show the planet as a turning globe rather than a flat top-down thumbnail.
   // The old preview was accurate but unreadable at card size — eight dark rectangles
   // with dots on them, none of which said "this is Mars". Canvases that are on screen
@@ -2048,7 +2081,7 @@ window.RC = window.RC || {};
   // ── 루프 ──────────────────────────────────────────
   let last = performance.now();
   let overlayShown = false;
-  let faceAcc = 0;
+  let faceAcc = 0, heroAcc = 0;
 
   function frame(now) {
     let dt = (now - last) / 1000;
@@ -2098,6 +2131,10 @@ window.RC = window.RC || {};
       // 메뉴 화면 — 종족 얼굴만 가볍게 애니메이션 (초당 ~20프레임)
       faceAcc += dt;
       if (faceAcc >= 0.05) { faceAcc = 0; drawRaceFaces(); drawMapGlobes(); }
+      // The hero gets its own, faster budget: the faces only breathe, but the hero
+      // waves, and a wave at 20fps reads as a stutter rather than a gesture.
+      heroAcc += dt;
+      if (heroAcc >= 0.028) { heroAcc = 0; drawMenuHero(); }
     }
 
     requestAnimationFrame(frame);
