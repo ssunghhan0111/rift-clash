@@ -35,9 +35,13 @@ RC.Renderer = (function () {
   }
 
   // 색상 밝기 조절 — pct 양수면 밝게, 음수면 어둡게
-  function shade(hex, pct) {
-    const n = parseInt(hex.slice(1), 16);
-    let r = (n >> 16) & 255, gc = (n >> 8) & 255, b = n & 255;
+  // Takes '#rrggbb' OR 'rgb(r,g,b)'. It used to slice a leading '#' unconditionally, so
+  // shade(shade(x)) — which several sprites do — parsed 'gb(12,20,30)' as hex, got NaN and
+  // returned 'rgb(NaN,NaN,NaN)'. Canvas silently ignores an invalid fillStyle, so those
+  // shapes were quietly inheriting whatever colour happened to be set last.
+  function shade(col, pct) {
+    const p = parseRGB(col);
+    let r = p[0], gc = p[1], b = p[2];
     if (pct >= 0) { r += (255 - r) * pct; gc += (255 - gc) * pct; b += (255 - b) * pct; }
     else { const k = 1 + pct; r *= k; gc *= k; b *= k; }
     return `rgb(${r | 0},${gc | 0},${b | 0})`;
@@ -1275,6 +1279,55 @@ RC.Renderer = (function () {
   const ROUND = 1.9;         // corner-radius multiplier on every rounded rectangle
   const CEL = 0.62;          // strength of the flat top-light
 
+  // ── 3D 일러스트 셰이딩 ─────────────────────────────────────────────────────
+  // Every sprite in the roster is assembled from flat fills, so the cheapest way to make
+  // the whole cast read as rendered-and-painted rather than stamped is to replace those
+  // flat colours with a spherical gradient: a hot specular near the light, the base tone
+  // across the middle, and a cool falloff on the far side. Warm highlight against cool
+  // shadow is what does the illustrated look — a purely lighter/darker ramp of the same
+  // hue still reads flat no matter how strong you push it.
+  // The base tone has to hold the middle of the shape or the unit stops reading as its
+  // owner's colour — the highlight is a SPOT near the light, not a wash over the whole body.
+  const HI_TINT = '#fff3d2', HI_MIX = 0.16, HI_LIFT = 0.34;   // sunlit side
+  const SH_TINT = '#131e33', SH_MIX = 0.22, SH_DROP = -0.32;  // sky-bounce shadow side
+  // createRadialGradient per fill per frame is brutal on software rasterizers, and there
+  // are twenty-odd fills per sprite. Gradients are immutable once built, and the only
+  // things that vary are the base colour and the sprite radius (fixed per unit type), so
+  // the whole roster collapses to a few dozen cached objects.
+  let _ctxSeq = 0;
+  const _vol = new Map();
+  function volGrad(base, R) {
+    if (!ctx.__rcVol) ctx.__rcVol = ++_ctxSeq;    // gradients belong to the ctx that made them
+    const key = ctx.__rcVol + '|' + base + '|' + (R * 4 | 0);
+    let g = _vol.get(key);
+    if (g) return g;
+    // Light source sits OUTSIDE the sprite, up and to the left, with a broad falloff. Putting
+    // it inside the body — the obvious first guess — floods the whole shape with highlight and
+    // the unit stops reading as its owner's colour. The base tone has to land on the middle of
+    // the form (hence the 0.55 stop ≈ the distance from the lamp to the sprite's centre).
+    g = ctx.createRadialGradient(-R * 0.80, -R * 0.92, R * 0.10, -R * 0.80, -R * 0.92, R * 2.45);
+    g.addColorStop(0,    mix(shade(base, HI_LIFT * 1.45), HI_TINT, HI_MIX * 1.7));
+    g.addColorStop(0.24, mix(shade(base, HI_LIFT * 0.60), HI_TINT, HI_MIX));
+    g.addColorStop(0.55, base);
+    g.addColorStop(1,    mix(shade(base, SH_DROP), SH_TINT, SH_MIX));
+    if (_vol.size > 600) _vol.clear();
+    _vol.set(key, g);
+    return g;
+  }
+  // Volumetric copy of a unit palette. Structural tones become gradients; anything that is
+  // meant to GLOW (eye, psi, ink) stays flat — a gradient on an emissive surface reads as
+  // dirt, and c.ink doubles as the outline colour where a gradient would just look muddy.
+  // The originals survive as _body/_dark/_light for the few sprites that re-shade them.
+  function volPal(c, R) {
+    const v = {
+      _body: c.body, _dark: c.dark, _light: c.light,
+      body: volGrad(c.body, R), dark: volGrad(c.dark, R), light: volGrad(c.light, R),
+      steel: volGrad(c.steel, R), trim: volGrad(c.trim, R),
+      eye: c.eye, ink: c.ink, opticRGB: c.opticRGB, psi: c.psi,
+    };
+    return v;
+  }
+
   function inkLine(c, w) {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.strokeStyle = c.ink; ctx.lineWidth = w * INK; ctx.stroke();
@@ -1325,6 +1378,10 @@ RC.Renderer = (function () {
     // cartoon pass: a chunkier body over the same footprint is what gives the roster
     // its stubby hero proportions without touching collision or pathing.
     const R = u.r * 1.30;
+    // One swap here lights the entire roster: every draw function below fills with c.body /
+    // c.dark / c.steel, so handing them gradients instead of hex turns all twenty-odd
+    // sprites volumetric without touching a single shape.
+    c = volPal(c, R);
     if (u.type === 'wrench') drawWrench(R, c);
     else if (u.type === 'volt') drawVolt(R, c);
     else if (u.type === 'shielder') drawShielder(R, c);
@@ -1597,42 +1654,6 @@ RC.Renderer = (function () {
     visorSlit(c, R * 0.14, -R * 0.02, R * 0.34, R * 0.15);
   }
 
-  // ── 베놈 하이드라 (글룹) — 세 개의 머리를 가진 독사 ──
-  // 실루엣 포인트: 굵은 몸통에서 뻗어 나온 세 개의 목 + 뚝뚝 떨어지는 독액.
-  function drawHydra(R, c) {
-    const t = performance.now() / 420;
-    ctx.fillStyle = c.dark; blob(R * 0.92, 0.08, 5); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.76, 0.08, 5); ctx.fill();
-    ctx.fillStyle = c.light;
-    ctx.beginPath(); ctx.ellipse(-R * 0.2, -R * 0.24, R * 0.3, R * 0.2, 0, 0, Math.PI * 2); ctx.fill();
-    // 세 개의 목 + 머리 (살짝 흔들린다)
-    for (let i = -1; i <= 1; i++) {
-      const sway = Math.sin(t + i * 1.7) * 0.16;
-      const a = i * 0.52 + sway;
-      const nx = Math.cos(a), ny = Math.sin(a);
-      ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.24; ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(nx * R * 0.32, ny * R * 0.32);
-      ctx.lineTo(nx * R * 1.02, ny * R * 1.02);
-      ctx.stroke();
-      ctx.fillStyle = c.body;
-      ctx.beginPath(); ctx.ellipse(nx * R * 1.12, ny * R * 1.12, R * 0.26, R * 0.19, a, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = ACID;                                   // 벌어진 아가리
-      ctx.beginPath(); ctx.arc(nx * R * 1.28, ny * R * 1.28, R * 0.11, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = c.eye;
-      ctx.beginPath(); ctx.arc(nx * R * 1.06, ny * R * 1.06, R * 0.07, 0, Math.PI * 2); ctx.fill();
-    }
-    // 독액 방울
-    ctx.fillStyle = ACID; ctx.globalAlpha = 0.55;
-    for (let i = 0; i < 3; i++) {
-      const a = t * 0.8 + i * 2.1;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a) * R * 0.55, Math.sin(a * 1.3) * R * 0.5 + R * 0.3, R * 0.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  }
-
   // ── 블레이드스원 (Aether) — 쌍검 암살자 ──
   // 실루엣 포인트: 가느다란 몸 + 앞으로 길게 뻗은 두 자루의 빛나는 칼날.
   function drawBladesworn(R, c) {
@@ -1688,26 +1709,6 @@ RC.Renderer = (function () {
     visorSlit(c, R * 0.05, -R * 0.02, R * 0.5, R * 0.2);
   }
 
-  // ── 영웅: 브루드 매트리아크 (글룹) — 거대 여왕 점액 ──
-  function drawMatriarch(R, c) {
-    ctx.fillStyle = c.dark; blob(R * 1.05, 0.1, 2); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.9, 0.1, 2); ctx.fill();
-    ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.24, R * 0.4, 0, Math.PI * 2); ctx.fill();
-    // 왕관 가시
-    ctx.fillStyle = ACID;
-    for (let i = -2; i <= 2; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * R * 0.3, -R * 0.66); ctx.lineTo(i * R * 0.3 + R * 0.1, -R * 1.05); ctx.lineTo(i * R * 0.3 + R * 0.2, -R * 0.66);
-      ctx.closePath(); ctx.fill();
-    }
-    // 분사 주둥이
-    ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.moveTo(R * 0.5, -R * 0.26); ctx.lineTo(R * 1.1, 0); ctx.lineTo(R * 0.5, R * 0.26); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = ACID; ctx.beginPath(); ctx.arc(R * 1.02, 0, R * 0.17, 0, Math.PI * 2); ctx.fill();
-    // 눈
-    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.05, -R * 0.12, R * 0.15, 0, Math.PI * 2); ctx.fill();
-  }
-
   // 선택 유닛 초상화 — 작은 캔버스에 확대/애니메이션으로 '카메라 피드'처럼 보여준다
   function drawPortrait(canvas, u) {
     if (!canvas || !u) return;
@@ -1729,6 +1730,9 @@ RC.Renderer = (function () {
       ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
       const t = performance.now() / 1000;
       const bob = Math.sin(t * 2.3) * H * 0.02;      // 숨쉬는 듯한 위아래 흔들림
+      // The portrait is a camera feed of a unit standing still, so the Gloop creatures idle
+      // here: legs shift and settle rather than march. _walking stays false for that.
+      _ph = t * 2.0; _walking = false;
       const c = unitColors(u, false);
       ctx.translate(W / 2, H * 0.55 + bob);
       const scale = (Math.min(W, H) * 0.30) / Math.max(7, u.r);
@@ -1778,15 +1782,17 @@ RC.Renderer = (function () {
     // unit takes slower steps and a stopped one stops stepping — tying it to time
     // alone makes units moonwalk. All of this lives in render-only fields (_px/_py/
     // _gait/_idle) that the simulation never reads, so it cannot desync an online match.
-    let bobY = 0, sqX = 1, sqY = 1;
+    let bobY = 0, sqX = 1, sqY = 1, gaitPh = 0, gaitOn = false;
     if (!u.def.flying) {
       const moved = (u._px == null) ? 0 : RC.dist(u.x, u.y, u._px, u._py);
       u._px = u.x; u._py = u.y;
       u._gait = (u._gait || 0) + moved;
       const walking = moved > 0.02;
-      if (walking && !REDUCED) {
-        const stride = Math.max(9, u.r * 1.5);                    // bigger units, longer steps
-        const ph = (u._gait / stride) * Math.PI;
+      const stride = Math.max(9, u.r * 1.5);                      // bigger units, longer steps
+      gaitOn = walking && !REDUCED;
+      gaitPh = (u._gait / stride) * Math.PI;                      // shared with the leg cycle below
+      if (gaitOn) {
+        const ph = gaitPh;
         bobY = -Math.abs(Math.sin(ph)) * u.r * 0.16;              // up on the step, down on the plant
         const plant = Math.max(0, -Math.sin(ph * 2)) * 0.10;      // squash as the foot lands
         sqX = 1 + plant; sqY = 1 - plant;
@@ -1807,8 +1813,12 @@ RC.Renderer = (function () {
     ctx.translate(u.x, u.y);
 
     // 그림자 (공중 유닛은 아래쪽에 더 흐리게)
-    ctx.fillStyle = alt ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.28)';
-    ctx.beginPath(); ctx.ellipse(2, u.r * 0.8 + alt * 0.5, u.r * 1.05, u.r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+    // A soft-edged blob instead of the old hard ellipse: a crisp shadow rim reads as a
+    // decal stuck to the ground, while a diffuse one with a darker core is what makes the
+    // unit look like it is standing ON the terrain rather than pasted over it.
+    const shSpr = softGlow('0,0,0', [0.55, 0.55]);
+    blitGlow(shSpr, 2, u.r * 0.78 + alt * 0.5, u.r * 1.5, u.r * 0.66, alt ? 0.20 : 0.34);
+    ctx.globalAlpha = 1;
 
     // 소유자 원반 — 모든 유닛 발밑에 주인 색 디스크를 항상 깐다.
     // 유닛 스프라이트만으로는 난전에서 누가 누구인지 알아보기 어려워서, 색 원반이
@@ -1867,6 +1877,11 @@ RC.Renderer = (function () {
       if (moving) blitGlow(spr, -R * 1.6, 0, R * 1.53, R * 0.5, 0.28 * pulse);
       ctx.globalAlpha = 1;
     }
+    // Hand the gait to the sprite layer. The Gloop creatures walk on legs, and a leg cycle
+    // driven by wall-clock time makes a standing animal paddle the air; driven by distance
+    // travelled it plants when the unit stops. Module-level because the draw functions take
+    // only (R, c) — and render-only, so it can never desync a match.
+    _ph = gaitPh; _walking = gaitOn;
     drawUnitSprite(u, c);
 
     ctx.restore();
@@ -2018,7 +2033,7 @@ RC.Renderer = (function () {
     rrect(-R * 0.8, -R * 1.02, R * 1.4, R * 0.42, 4); ctx.fill();
     rrect(-R * 0.8,  R * 0.6,  R * 1.4, R * 0.42, 4); ctx.fill();
     // 캐터필러 볼트
-    ctx.fillStyle = shade(c.dark, 0.25);
+    ctx.fillStyle = shade(c._dark, 0.25);
     for (let i = -2; i <= 2; i++) {
       ctx.beginPath(); ctx.arc(i * R * 0.28, -R * 0.81, R * 0.06, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(i * R * 0.28,  R * 0.81, R * 0.06, 0, Math.PI * 2); ctx.fill();
@@ -2041,7 +2056,7 @@ RC.Renderer = (function () {
     ctx.fillStyle = c.dark;
     rrect(-R * 0.75, -R * 0.95, R * 1.35, R * 0.4, 4); ctx.fill();
     rrect(-R * 0.75,  R * 0.55, R * 1.35, R * 0.4, 4); ctx.fill();
-    ctx.fillStyle = shade(c.dark, 0.25);
+    ctx.fillStyle = shade(c._dark, 0.25);
     for (let i = -2; i <= 2; i++) {
       ctx.beginPath(); ctx.arc(i * R * 0.26, -R * 0.75, R * 0.055, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(i * R * 0.26,  R * 0.75, R * 0.055, 0, Math.PI * 2); ctx.fill();
@@ -2062,13 +2077,13 @@ RC.Renderer = (function () {
   function drawHover(R, c) {
     const spin = performance.now() / 40;
     // 로터 (양옆, 회전하는 날)
-    ctx.strokeStyle = shade(c.body, -0.1); ctx.lineWidth = 1.6;
+    ctx.strokeStyle = shade(c._body, -0.1); ctx.lineWidth = 1.6;
     [[-R * 0.15, -R * 0.75], [-R * 0.15, R * 0.75]].forEach(([px, py]) => {
       ctx.fillStyle = c.dark;
       ctx.beginPath(); ctx.arc(px, py, R * 0.5, 0, Math.PI * 2); ctx.fill();
       ctx.save();
       ctx.translate(px, py); ctx.rotate(spin);
-      ctx.strokeStyle = shade(c.light, 0.1); ctx.lineWidth = 2;
+      ctx.strokeStyle = shade(c._light, 0.1); ctx.lineWidth = 2;
       for (let k = 0; k < 3; k++) {
         ctx.rotate((Math.PI * 2) / 3);
         ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(R * 0.48, 0); ctx.stroke();
@@ -2130,7 +2145,7 @@ RC.Renderer = (function () {
     rrect(-R * 0.1, R * 0.5, R * 0.5, R * 0.18, 2); ctx.fill(); inkLine(c, R * 0.11);
     optic(c, R * 0.4, 0, R * 0.18);
     ctx.save(); ctx.rotate(spin);
-    ctx.strokeStyle = shade(c.light, 0.1); ctx.lineWidth = R * 0.09;
+    ctx.strokeStyle = shade(c._light, 0.1); ctx.lineWidth = R * 0.09;
     ctx.beginPath(); ctx.moveTo(-R * 1.1, 0); ctx.lineTo(R * 1.1, 0); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, -R * 1.1); ctx.lineTo(0, R * 1.1); ctx.stroke(); ctx.restore();
     ctx.fillStyle = c.trim; ctx.beginPath(); ctx.arc(0, 0, R * 0.12, 0, Math.PI * 2); ctx.fill();
@@ -2196,122 +2211,547 @@ RC.Renderer = (function () {
     ctx.lineWidth = Math.max(4, b.w * 0.065);
     rrect(x, y, b.w, b.h, rad); ctx.stroke();
   }
-  // 울렁이는 블롭 외곽 (n개 정점을 시간에 따라 흔든다)
-  function blob(R, wob, seed) {
+  // ══ 외계 동물 해부학 (글룹 공용) ═══════════════════════════════════════════
+  // The swarm used to be wobbling blobs with a single eye stuck on the front, which read as
+  // slime rather than as living things. These primitives are what turn them into ANIMALS:
+  // limbs that plant and push against the ground, jaws that open, vertical slit pupils,
+  // segmented chitin, whipping tails. Everything fills from the volumetric palette, so the
+  // creatures pick up the same rendered shading as the machines.
+  let _ph = 0, _walking = false;      // 보행 위상 / 실제로 움직이는 중인지 (drawUnit이 설정)
+
+  // 울렁이는 살덩이 외곽 — 정점을 시간에 따라 흔들고 중점 보간으로 매끄럽게 잇는다.
+  // cx/cy로 몸통을 앞뒤로 밀 수 있고 ky로 납작하게 눌러, 하나의 함수로 흉부·복부·머리를
+  // 모두 만든다. 정점 버퍼는 미리 할당해 둔다 — 매 프레임 수천 개의 배열을 새로 만들면
+  // 그리기보다 GC가 더 비싸진다.
+  const _bp = new Float64Array(40);
+  function blob(R, wob, seed, cx, cy, ky) {
     const t = performance.now() / 380 + seed;
-    const n = 9;
-    ctx.beginPath();
-    for (let i = 0; i <= n; i++) {
+    const n = 14; cx = cx || 0; cy = cy || 0; ky = (ky == null) ? 1 : ky;
+    for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
       const rr = R * (1 + Math.sin(a * 3 + t) * wob + Math.cos(a * 2 - t * 0.7) * wob * 0.6);
-      const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      _bp[i * 2] = cx + Math.cos(a) * rr;
+      _bp[i * 2 + 1] = cy + Math.sin(a) * rr * ky;
+    }
+    ctx.beginPath();
+    ctx.moveTo((_bp[(n - 1) * 2] + _bp[0]) / 2, (_bp[(n - 1) * 2 + 1] + _bp[1]) / 2);
+    for (let i = 0; i < n; i++) {
+      const j = ((i + 1) % n) * 2;
+      ctx.quadraticCurveTo(_bp[i * 2], _bp[i * 2 + 1], (_bp[i * 2] + _bp[j]) / 2, (_bp[i * 2 + 1] + _bp[j + 1]) / 2);
     }
     ctx.closePath();
   }
-  function drawSlug(R, c) {
-    ctx.fillStyle = c.dark; blob(R * 0.9, 0.08, 0); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.76, 0.08, 0); ctx.fill();
-    // 등껍질 — 일꾼만의 실루엣 (전투 유닛과 확실히 구분된다)
-    ctx.fillStyle = c.dark;
-    ctx.beginPath(); ctx.ellipse(-R * 0.24, -R * 0.3, R * 0.58, R * 0.42, -0.35, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = c.light;
-    ctx.beginPath(); ctx.ellipse(-R * 0.28, -R * 0.36, R * 0.36, R * 0.24, -0.35, 0, Math.PI * 2); ctx.fill();
-    // 더듬이 두 가닥
-    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.09; ctx.lineCap = 'round';
-    [-1, 1].forEach(k => {
-      ctx.beginPath(); ctx.moveTo(R * 0.34, k * R * 0.2);
-      ctx.lineTo(R * 0.78, k * R * 0.55); ctx.stroke();
-      ctx.fillStyle = ACID;
-      ctx.beginPath(); ctx.arc(R * 0.8, k * R * 0.58, R * 0.09, 0, Math.PI * 2); ctx.fill();
-    });
-    // 채집 촉수
-    ctx.strokeStyle = ACID; ctx.lineWidth = R * 0.15; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(R * 0.36, 0); ctx.lineTo(R * 1.02, -R * 0.08); ctx.stroke();
-    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.26, 0, R * 0.15, 0, Math.PI * 2); ctx.fill();
+
+  // 살갗 한 겹 — 어두운 아래층, 본체, 유기적 잉크 외곽선.
+  // 굵은 외곽선이 글룹에 없던 "그려진 그림" 느낌을 만든다.
+  function hide(R, c, rad, wob, seed, cx, cy, ky) {
+    ctx.fillStyle = c.dark; blob(rad * 1.07, wob, seed, cx, cy, ky); ctx.fill();
+    ctx.fillStyle = c.body; blob(rad, wob, seed, cx, cy, ky); ctx.fill();
+    inkLine(c, R * 0.07);
   }
-  function drawGlobling(R, c) {
-    ctx.fillStyle = c.dark; blob(R * 0.98, 0.14, 7); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.82, 0.14, 7); ctx.fill();
-    ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.18, -R * 0.2, R * 0.3, 0, Math.PI * 2); ctx.fill();
-    // 이빨
-    ctx.fillStyle = '#eef6ff';
-    for (let i = -1; i <= 1; i++) {
+
+  // 키틴 — 껍질·왕관·등판에 쓰는 어두운 각질색. c.steel(차가운 금속빛)을 그대로 쓰면
+  // 유기체에 강판을 붙인 것처럼 보여서, 소유자 색을 어둡게 깔고 이끼빛을 섞는다.
+  function chitin(c, R) { return volGrad(shade(mix(c._dark, '#1b2a1a', 0.55), -0.18), R); }
+  const BONE = '#e8f0d6';        // 이빨·발톱·뿔 — 살보다 밝아야 아가리가 읽힌다
+  const BONE_DIM = '#a8b894';    // 등가시 끝 — 이빨만큼 밝으면 등에 이빨이 난 것처럼 보인다
+  // 사지·턱·날개막은 그라디언트를 쓰지 않는다. 광원이 스프라이트 왼쪽 위에 있으니, 가는
+  // 부속지에 같은 그라디언트를 물리면 왼쪽 다리는 하이라이트를 받아 밝게 떠 버리고 실루엣이
+  // 무너진다. 덩어리(몸통·머리)만 입체로 칠하고 부속지는 납작한 어두운 색으로 받친다 —
+  // 일러스트에서 팔다리를 어둡게 깔아 몸통을 앞으로 밀어내는 것과 같은 이유다.
+  function limbCol(c) { return mix(c._dark, '#0a1611', 0.36); }
+
+  // 마디진 몸통 — 뒤에서 앞으로 겹쳐 놓은 여러 개의 살덩이.
+  // 하나의 큰 덩이로 그리면 아무리 잘 칠해도 '다리 달린 공'으로 읽힌다. 크기가 줄어드는
+  // 덩이를 겹쳐 놓는 것만으로 흉부와 복부가 생기고, 어디가 앞인지가 형태만으로 드러난다.
+  // 뒤쪽 마디부터 그려서 앞 마디가 위로 올라오게 한다.
+  function segBody(R, c, n, xr, xf, radR, radF, wob, seed, ky) {
+    const rad = (i) => R * (radR + (radF - radR) * ((n === 1) ? 0 : i / (n - 1)));
+    const cx  = (i) => R * (xr + (xf - xr) * ((n === 1) ? 0 : i / (n - 1)));
+    // 외곽선은 '조금 더 큰 어두운 덩이'로 만든다. 마디마다 선을 두르면 앞 마디의 닫힌
+    // 테두리가 뒤 마디 위에 검은 초승달로 남아 몸에 구멍이 뚫린 것처럼 보인다. 칠해서
+    // 겹친 도형은 내부 경계가 사라지므로, 밑층을 전부 깐 뒤 살색을 전부 얹는다.
+    ctx.fillStyle = c.dark;
+    for (let i = 0; i < n; i++) { blob(rad(i) * 1.09, wob, seed + i * 3.7, cx(i), 0, ky); ctx.fill(); }
+    ctx.fillStyle = c.body;
+    for (let i = 0; i < n; i++) { blob(rad(i), wob, seed + i * 3.7, cx(i), 0, ky); ctx.fill(); }
+    // 마디 이음매 — 뒤쪽을 향한 짧은 호만 그린다. 닫힌 원이 아니라 주름으로 읽힌다.
+    ctx.strokeStyle = c.ink; ctx.globalAlpha = 0.38; ctx.lineWidth = R * 0.055; ctx.lineCap = 'round';
+    for (let i = 1; i < n; i++) {
       ctx.beginPath();
-      ctx.moveTo(R * (0.5 + i * 0.16), -R * 0.12);
-      ctx.lineTo(R * (0.58 + i * 0.16), R * 0.14);
-      ctx.lineTo(R * (0.42 + i * 0.16), R * 0.05);
-      ctx.closePath(); ctx.fill();
-    }
-    // 앞으로 뻗은 두 개의 집게발 — 근접 돌격형 실루엣
-    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.17; ctx.lineCap = 'round';
-    [-1, 1].forEach(k => {
-      ctx.beginPath();
-      ctx.moveTo(R * 0.3, k * R * 0.34);
-      ctx.lineTo(R * 0.92, k * R * 0.62);
-      ctx.lineTo(R * 1.22, k * R * 0.3);
+      ctx.ellipse(cx(i), 0, rad(i) * 0.97, rad(i) * 0.97 * ky, 0, Math.PI * 0.60, Math.PI * 1.40);
       ctx.stroke();
-    });
-    // 등 가시
-    ctx.fillStyle = c.dark;
-    for (let i = -1; i <= 1; i++) {
-      ctx.beginPath();
-      ctx.moveTo(-R * (0.2 + i * 0.22), -R * 0.5);
-      ctx.lineTo(-R * (0.32 + i * 0.22), -R * 1.0);
-      ctx.lineTo(-R * (0.04 + i * 0.22), -R * 0.56);
-      ctx.closePath(); ctx.fill();
     }
-    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.05, -R * 0.28, R * 0.14, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
   }
-  function drawSpitter(R, c) {
-    ctx.fillStyle = c.dark; blob(R * 0.95, 0.1, 3); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.8, 0.1, 3); ctx.fill();
-    ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.22, R * 0.3, 0, Math.PI * 2); ctx.fill();
-    // 위로 치켜든 목 + 긴 분사 주둥이 — 원거리형 실루엣
-    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.26; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(R * 0.1, -R * 0.1); ctx.lineTo(R * 0.62, -R * 0.62); ctx.stroke();
-    ctx.fillStyle = c.dark;
+
+  // 젖은 표면 반사 — 점액질 생물이라는 인상을 주는 하이라이트
+  function gloss(x, y, rx, ry, rot, a) {
+    ctx.globalAlpha = (a == null) ? 0.30 : a;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot || 0, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // 생체발광 낭 — 산성 체액이 차 있는 반투명 주머니
+  function sac(x, y, r, a) {
+    const k = (a == null) ? 1 : a;
+    sglow(x, y, r * 2.5, '150,255,90', 0.28 * k);
+    ctx.globalAlpha = 0.70 * k; ctx.fillStyle = ACID;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.55 * k; ctx.fillStyle = '#f2ffdc';
+    ctx.beginPath(); ctx.arc(x - r * 0.30, y - r * 0.33, r * 0.36, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // 수직 동공을 가진 짐승 눈 — 이 종족이 기계가 아니라 생물임을 알리는 가장 강한 신호.
+  // 둥근 광학 렌즈(optic)와 나란히 두면 차이가 한눈에 보인다.
+  function beastEye(c, x, y, r, tilt) {
+    r *= EYE * 0.92;
+    sglow(x, y, r * 1.7, c.opticRGB, 0.30);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = c.ink; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r * 0.76, 0, TAU); ctx.fillStyle = c.eye; ctx.fill();
+    ctx.fillStyle = c.ink;                                   // 수직으로 째진 동공
+    ctx.beginPath(); ctx.ellipse(x, y, r * 0.20, r * 0.62, tilt || 0, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.85; ctx.fillStyle = '#ffffff';        // 촉촉한 반사광
+    ctx.beginPath(); ctx.arc(x - r * 0.32, y - r * 0.34, r * 0.20, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // 송곳니 한 개 — (px,py)에서 ang 방향으로 뻗은 삼각 이빨
+  function fang(px, py, ang, len, wid, col) {
+    ctx.fillStyle = col || BONE;
     ctx.beginPath();
-    ctx.moveTo(R * 0.42, -R * 0.86); ctx.lineTo(R * 1.32, -R * 0.44);
-    ctx.lineTo(R * 0.5, -R * 0.28); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = ACID;
-    ctx.beginPath(); ctx.arc(R * 1.26, -R * 0.46, R * 0.17, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(-R * 0.05, 0, R * 0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.moveTo(px + Math.cos(ang + 1.5708) * wid, py + Math.sin(ang + 1.5708) * wid);
+    ctx.lineTo(px + Math.cos(ang) * len, py + Math.sin(ang) * len);
+    ctx.lineTo(px + Math.cos(ang - 1.5708) * wid, py + Math.sin(ang - 1.5708) * wid);
+    ctx.closePath(); ctx.fill();
   }
-  function drawBloat(R, c) {
-    ctx.fillStyle = c.dark; blob(R * 1.0, 0.09, 1); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.88, 0.09, 1); ctx.fill();
-    ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.24, -R * 0.26, R * 0.4, 0, Math.PI * 2); ctx.fill();
-    // 부글대는 산성 물집
-    const t = performance.now() / 500;
-    ctx.fillStyle = ACID;
-    for (let i = 0; i < 4; i++) {
-      const a = t + i * Math.PI / 2;
-      const bx = Math.cos(a) * R * 0.4, by = Math.sin(a) * R * 0.4;
-      ctx.globalAlpha = 0.55 + 0.3 * Math.sin(t * 2 + i);
-      ctx.beginPath(); ctx.arc(bx, by, R * 0.16, 0, Math.PI * 2); ctx.fill();
+  // 턱선(along)을 따라 박힌 이빨 줄. point는 이빨이 향하는 방향 — 위턱과 아래턱의 이빨은
+  // 서로 아가리 안쪽을 향해야 한다. 부호를 잘못 주면 이빨이 밖으로 뻗쳐 수염처럼 보인다.
+  function fangRow(x, y, along, point, span, n, len, wid, col) {
+    for (let i = 0; i < n; i++) {
+      const d = span * ((n === 1) ? 0.5 : i / (n - 1));
+      fang(x + Math.cos(along) * d, y + Math.sin(along) * d, point, len, wid, col);
+    }
+  }
+
+  // 다리 한 짝 — 무릎에서 꺾이고 발끝으로 갈수록 얇아지며, 발톱이 두 갈래로 벌어진다.
+  // 변형(transform) 없이 그리는 게 중요하다: 그라디언트는 사용 시점의 좌표계에서 평가되므로
+  // 여기서 회전시키면 사지마다 광원이 따로 놀게 된다.
+  function limb(hx, hy, kx, ky, fx, fy, w, col, claw) {
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = col;
+    ctx.lineWidth = w;         ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky); ctx.stroke();
+    ctx.lineWidth = w * 0.60;  ctx.beginPath(); ctx.moveTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+    if (claw) {
+      const a = Math.atan2(fy - ky, fx - kx);
+      ctx.lineWidth = w * 0.26;
+      for (let s = -1; s <= 1; s += 2) {
+        ctx.beginPath(); ctx.moveTo(fx, fy);
+        ctx.lineTo(fx + Math.cos(a + s * 0.55) * w * 1.15, fy + Math.sin(a + s * 0.55) * w * 1.15);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // 다리 여러 쌍 — 좌우가 엇갈리는 교대 보행. 멈추면 발이 땅에 붙는다.
+  // 무릎은 앞쪽 바깥으로, 발은 다시 뒤로 쓸린다. 무릎과 발을 같은 방향으로 뻗으면 다리가
+  // 아니라 더듬이처럼 보인다 — 꺾이는 방향이 곤충 다리를 만든다.
+  function legs(R, c, n, x0, x1, spread, w, reach) {
+    const amp = _walking ? 1 : 0.20;
+    reach = (reach == null) ? -0.12 : reach;
+    const col = limbCol(c);
+    for (let i = 0; i < n; i++) {
+      const bx = R * (x0 + (x1 - x0) * ((n === 1) ? 0 : i / (n - 1)));
+      for (let s = -1; s <= 1; s += 2) {
+        const sw = Math.sin(_ph + i * 2.1 + (s > 0 ? Math.PI : 0)) * amp;
+        const lift = Math.max(0, sw) * R * 0.10;          // 들어올린 발은 안쪽으로 당겨진다
+        limb(bx, s * R * 0.20,
+             bx + R * 0.24 + sw * R * 0.14, s * (R * spread * 0.66 - lift),
+             bx + R * reach + sw * R * 0.40, s * (R * spread - lift),
+             R * w, col, true);
+      }
+    }
+  }
+
+  // 등을 따라 솟은 가시 — 실루엣을 톱니처럼 만들어 멀리서도 위협적으로 읽힌다.
+  // 뼈색으로 칠한다: 살색과 같은 색이면 30px 스프라이트에서 몸통에 묻혀 사라진다.
+  // 가시는 등마루(flank)에서 바깥으로 솟아야 한다. 몸통 중심에서 그리면 등에 난 뿔이 아니라
+  // 배에서 자란 창처럼 보인다. base는 가시가 박히는 옆구리 높이.
+  function spines(R, c, x0, x1, n, len, base) {
+    const by = R * (base == null ? 0.28 : base);
+    for (let i = 0; i < n; i++) {
+      const k = (n === 1) ? 0.5 : i / (n - 1);
+      const px = R * (x0 + (x1 - x0) * k);
+      const h = by + R * len * (0.55 + 0.45 * Math.sin(Math.PI * (0.12 + 0.76 * k)));
+      ctx.fillStyle = c.ink;
+      ctx.beginPath();
+      ctx.moveTo(px - R * 0.075, -by * 0.55);
+      ctx.lineTo(px + R * 0.02, -h);
+      ctx.lineTo(px + R * 0.095, -by * 0.55);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = BONE_DIM;                  // 가시 끝만 뼈색 — 톱니 실루엣이 살아난다
+      ctx.beginPath();
+      ctx.moveTo(px - R * 0.040, -(h - (h - by) * 0.34));
+      ctx.lineTo(px + R * 0.02, -h);
+      ctx.lineTo(px + R * 0.055, -(h - (h - by) * 0.34));
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  // 체절 능선 — 껍질을 가로지르는 갈비 선. 한 덩이 살을 마디진 몸으로 보이게 한다.
+  // 선이 많거나 진하면 마디가 아니라 줄무늬 공처럼 보인다 — 적게, 옅게.
+  function segRibs(R, c, x0, x1, n, hw, w, alpha) {
+    ctx.strokeStyle = c.ink; ctx.lineCap = 'round';
+    ctx.lineWidth = R * w; ctx.globalAlpha = (alpha == null) ? 0.26 : alpha;
+    for (let i = 0; i < n; i++) {
+      const k = (n === 1) ? 0.5 : i / (n - 1);
+      const px = R * (x0 + (x1 - x0) * k);
+      const h = R * hw * (0.5 + 0.5 * Math.sin(Math.PI * (0.16 + 0.7 * k)));
+      ctx.beginPath(); ctx.moveTo(px, -h); ctx.quadraticCurveTo(px + R * 0.10, 0, px, h); ctx.stroke();
     }
     ctx.globalAlpha = 1;
-    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.2, 0, R * 0.15, 0, Math.PI * 2); ctx.fill();
   }
-  function drawFloater(R, c) {
-    // 늘어진 촉수
-    ctx.strokeStyle = c.dark; ctx.lineWidth = R * 0.14; ctx.lineCap = 'round';
-    const t = performance.now() / 300;
-    for (let i = -1; i <= 1; i++) {
+
+  // 꼬리 — 뒤로 뻗으며 좌우로 휘두른다 (마디마다 얇아진다)
+  function tail(R, c, len, w, seg, from) {
+    const sway = Math.sin(_ph * 0.5 + 0.7) * (_walking ? 0.44 : 0.18);
+    ctx.strokeStyle = limbCol(c); ctx.lineCap = 'round';
+    let px = R * (from == null ? -0.45 : from), py = 0, ang = Math.PI;
+    const step = R * len / seg;
+    for (let i = 0; i < seg; i++) {
+      ang += sway * 0.34;
+      const nx = px + Math.cos(ang) * step, ny = py + Math.sin(ang) * step;
+      ctx.lineWidth = R * w * (1 - (i / seg) * 0.82);
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(nx, ny); ctx.stroke();
+      px = nx; py = ny;
+    }
+    return [px, py];
+  }
+
+  // 늘어진 촉수 — 물결치며 흔들린다
+  function tentacle(x, y, ang, len, w, phase, col, seg) {
+    const t = performance.now() / 300 + phase;
+    ctx.strokeStyle = col; ctx.lineCap = 'round';
+    let px = x, py = y, a = ang;
+    const step = len / seg;
+    for (let i = 0; i < seg; i++) {
+      a += Math.sin(t + i * 0.9) * 0.30;
+      const nx = px + Math.cos(a) * step, ny = py + Math.sin(a) * step;
+      ctx.lineWidth = w * (1 - (i / seg) * 0.75);
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(nx, ny); ctx.stroke();
+      px = nx; py = ny;
+    }
+  }
+
+  // 두개골 윤곽 — 뒤통수는 넓고 주둥이로 갈수록 좁아지는 쐐기.
+  // 위에서 내려다본 짐승 머리는 타원이 아니다. 타원으로 그리면 눈 두 개가 얼굴 정면에
+  // 나란히 붙은 것처럼 보여 방향을 읽을 수 없다. 좁아지는 주둥이가 곧 시선의 방향이다.
+  function skullWedge(x, y, ang, s, back, halfw) {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const px = (f, l) => [x + ca * f * s - sa * l * s, y + sa * f * s + ca * l * s];
+    const a = px(-back, -halfw), b = px(0.30, -halfw * 0.86), tip = px(1.15, 0);
+    const d = px(0.30, halfw * 0.86), e = px(-back, halfw), f = px(-back * 1.55, 0);
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]);
+    ctx.quadraticCurveTo(b[0], b[1], tip[0], tip[1]);
+    ctx.quadraticCurveTo(d[0], d[1], e[0], e[1]);
+    ctx.quadraticCurveTo(f[0], f[1], a[0], a[1]);
+    ctx.closePath();
+  }
+
+  // 아가리 있는 머리 — 두개골 + 벌어지는 위/아래 턱 + 이빨 + 짐승 눈.
+  // (x,y)를 중심으로 ang 방향을 물어뜯는다. open은 턱이 벌어진 각도.
+  // 필드에서 이 머리는 15px 남짓이다. 그래서 이빨은 턱마다 두 개, 혀는 옵션, 콧구멍은 없다 —
+  // 작게 줄었을 때 살아남는 건 '벌어진 밝은 아가리 + 노려보는 눈' 뿐이다.
+  function beastHead(R, c, x, y, ang, s, open, tongue) {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const jx = x + ca * s * 0.30, jy = y + sa * s * 0.30;        // 턱 관절
+    // 벌어진 아가리 속 — 어두운 목구멍에 산성 체액이 고여 있다
+    ctx.fillStyle = c.ink;
+    ctx.beginPath(); ctx.ellipse(x + ca * s * 0.95, y + sa * s * 0.95, s * 1.05, s * 0.80, ang, 0, TAU); ctx.fill();
+    sac(x + ca * s * 1.00, y + sa * s * 1.00, s * 0.34, 0.9);
+    if (tongue) {                                               // 두 갈래 혀
+      const wig = Math.sin(performance.now() / 130) * 0.28;
+      ctx.strokeStyle = '#ff7a9c'; ctx.lineWidth = s * 0.13; ctx.lineCap = 'round';
+      for (let k = -1; k <= 1; k += 2) {
+        ctx.beginPath();
+        ctx.moveTo(x + ca * s * 0.95, y + sa * s * 0.95);
+        ctx.lineTo(x + Math.cos(ang + wig + k * 0.30) * s * 2.1, y + Math.sin(ang + wig + k * 0.30) * s * 2.1);
+        ctx.stroke();
+      }
+    }
+    // 위/아래 턱 — 벌어질수록 넓은 쐐기로 열린다. 두개골보다 훨씬 앞으로 나가야
+    // 뒤에 그려지는 두개골에 먹히지 않는다 (아가리가 사라지는 가장 흔한 원인).
+    const jawCol = limbCol(c);
+    for (let k = -1; k <= 1; k += 2) {
+      const a2 = ang + k * (open + 0.22);
+      const px = Math.cos(a2 + k * 1.5708), py = Math.sin(a2 + k * 1.5708);
+      ctx.fillStyle = jawCol;
       ctx.beginPath();
-      ctx.moveTo(i * R * 0.35, R * 0.3);
-      ctx.quadraticCurveTo(i * R * 0.35 + Math.sin(t + i) * R * 0.2, R * 0.7, i * R * 0.35, R * 1.0);
+      ctx.moveTo(jx + px * s * 0.58, jy + py * s * 0.58);
+      ctx.lineTo(jx + Math.cos(a2) * s * 2.05, jy + Math.sin(a2) * s * 2.05);
+      ctx.lineTo(jx - px * s * 0.14, jy - py * s * 0.14);
+      ctx.closePath(); ctx.fill();
+      fangRow(jx + Math.cos(a2) * s * 0.95, jy + Math.sin(a2) * s * 0.95,
+              a2, a2 - k * 1.5708, s * 0.85, 2, s * 0.42, s * 0.13, BONE);
+    }
+    // 두개골 — 좁아지는 주둥이가 얼굴 방향을 만든다
+    ctx.fillStyle = c.dark; skullWedge(x, y, ang, s, 0.80, 0.86); ctx.fill();
+    inkLine(c, R * 0.05);
+    ctx.fillStyle = c.body; skullWedge(x - ca * s * 0.06, y - sa * s * 0.06, ang, s * 0.86, 0.78, 0.82); ctx.fill();
+    gloss(x - ca * s * 0.30, y - sa * s * 0.26, s * 0.30, s * 0.13, ang, 0.22);
+    // 눈 — 뒤통수 양옆에 얕게 박힌다. 크고 앞쪽에 두면 머리 전체가 눈으로 덮여 아가리가 사라진다.
+    for (let k = -1; k <= 1; k += 2) {
+      beastEye(c, x - ca * s * 0.26 - sa * s * k * 0.46, y - sa * s * 0.26 + ca * s * k * 0.46, s * 0.19, ang);
+    }
+  }
+
+  // ── 슬러그 (일꾼) — 껍질을 짊어진 외계 복족류. 촉수로 광석을 녹여 빨아들인다 ──
+  function drawSlug(R, c) {
+    const t = performance.now() / 700;
+    legs(R, c, 3, 0.30, -0.54, 0.72, 0.135, 0.04);      // 짧고 많은 관족
+    tail(R, c, 0.5, 0.18, 3, -0.62);
+    // 넓적한 몸통 — 뒤가 크고 앞이 작은 두 마디
+    segBody(R, c, 2, -0.30, 0.16, 0.60, 0.44, 0.07, 0, 1.06);
+    segRibs(R, c, -0.44, 0.10, 3, 0.48, 0.055);
+    // 등껍질 — 일꾼만의 실루엣. 마디진 돔이라 전투 유닛과 확실히 구분된다.
+    ctx.fillStyle = c.dark;
+    ctx.beginPath(); ctx.ellipse(-R * 0.28, -R * 0.10, R * 0.58, R * 0.48, -0.24, 0, TAU); ctx.fill();
+    inkLine(c, R * 0.06);
+    ctx.fillStyle = chitin(c, R);
+    ctx.beginPath(); ctx.ellipse(-R * 0.30, -R * 0.13, R * 0.47, R * 0.37, -0.24, 0, TAU); ctx.fill();
+    // 성장 능선 — 껍질 정점에서 뻗어나온 방사 갈비. 동심원이나 나선은 과녁·웃는 입으로 읽힌다.
+    ctx.strokeStyle = c.ink; ctx.globalAlpha = 0.24; ctx.lineWidth = R * 0.045; ctx.lineCap = 'round';
+    for (let i = -1; i <= 2; i++) {
+      const a = -0.24 + i * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.30 + Math.cos(a) * R * 0.10, -R * 0.13 + Math.sin(a) * R * 0.08);
+      ctx.lineTo(-R * 0.30 + Math.cos(a) * R * 0.36, -R * 0.13 + Math.sin(a) * R * 0.28);
       ctx.stroke();
     }
-    // 가스 주머니 본체
-    ctx.fillStyle = c.dark; blob(R * 0.92, 0.07, 5); ctx.fill();
-    ctx.fillStyle = c.body; blob(R * 0.78, 0.07, 5); ctx.fill();
-    ctx.fillStyle = c.light; ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.26, R * 0.34, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.6; ctx.fillStyle = ACID;
-    ctx.beginPath(); ctx.arc(R * 0.15, R * 0.1, R * 0.22, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
-    ctx.fillStyle = c.eye; ctx.beginPath(); ctx.arc(R * 0.05, -R * 0.1, R * 0.14, 0, Math.PI * 2); ctx.fill();
+    gloss(-R * 0.46, -R * 0.28, R * 0.14, R * 0.07, -0.5, 0.24);
+    sac(-R * 0.62, R * 0.10, R * 0.09, 0.45 + 0.2 * Math.sin(t * 2));   // 껍질 틈의 산성 저장낭
+    // 작은 머리 + 채집 촉수 (광석을 녹여 빨아들인다)
+    ctx.fillStyle = c.dark; skullWedge(R * 0.54, 0, 0, R * 0.28, 0.72, 0.86); ctx.fill();
+    inkLine(c, R * 0.05);
+    ctx.fillStyle = c.body; skullWedge(R * 0.52, -R * 0.02, 0, R * 0.24, 0.70, 0.82); ctx.fill();
+    tentacle(R * 0.82, 0, -0.10, R * 0.46, R * 0.19, 0, limbCol(c), 3);
+    sac(R * 1.20, -R * 0.06, R * 0.13, 0.9);
+    // 눈자루 두 가닥 — 머리에 붙은 짧고 굵은 자루라야 몸의 일부로 읽힌다
+    for (let s = -1; s <= 1; s += 2) {
+      const wob = Math.sin(t * 1.6 + s) * R * 0.05;
+      ctx.strokeStyle = limbCol(c); ctx.lineWidth = R * 0.13; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(R * 0.44, s * R * 0.14);
+      ctx.quadraticCurveTo(R * 0.60, s * R * 0.34, R * 0.56, s * R * 0.42 + wob);
+      ctx.stroke();
+      beastEye(c, R * 0.56, s * R * 0.44 + wob, R * 0.12, 1.4);
+    }
+  }
+
+  // ── 글로블링 (스웜 근접) — 네 발로 달려드는 외계 사냥개 ──
+  function drawGlobling(R, c) {
+    const t = performance.now() / 200;
+    const snap = 0.52 + 0.22 * Math.sin(t * 1.6);       // 계속 씹어대는 아가리
+    legs(R, c, 2, 0.30, -0.44, 0.74, 0.165, 0.14);
+    tail(R, c, 0.90, 0.20, 4, -0.5);
+    // 목 — 몸통보다 먼저 깔아야 어깨에 묻힌다. 나중에 그리면 등판에 검은 막대가 남는다.
+    ctx.strokeStyle = limbCol(c); ctx.lineWidth = R * 0.32; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(R * 0.10, 0); ctx.lineTo(R * 0.56, 0); ctx.stroke();
+    // 낮게 웅크린 몸통 — 뒤가 크고 어깨가 작은 두 마디 (개처럼 달리는 실루엣)
+    segBody(R, c, 2, -0.34, 0.14, 0.52, 0.40, 0.10, 7, 0.86);
+    segRibs(R, c, -0.44, 0.02, 3, 0.40, 0.055);
+    gloss(-R * 0.34, -R * 0.22, R * 0.22, R * 0.09, -0.4, 0.26);
+    spines(R, c, -0.50, 0.04, 4, 0.24, 0.30);          // 옆구리에서 솟은 등 가시
+    beastHead(R, c, R * 0.82, 0, 0, R * 0.40, snap, false);
+  }
+
+  // ── 스피터 (원거리) — 목을 치켜들고 산을 뱉는 외계 도마뱀 ──
+  function drawSpitter(R, c) {
+    const t = performance.now() / 420;
+    const swell = 0.86 + 0.22 * Math.sin(t * 1.4);      // 부풀었다 꺼지는 목주머니
+    legs(R, c, 2, -0.06, -0.48, 0.82, 0.16, 0.00);      // 뒷다리 두 쌍이 몸을 받친다
+    tail(R, c, 1.0, 0.20, 4, -0.55);
+    // 뒤로 앉은 몸통 — 두 마디
+    segBody(R, c, 2, -0.40, 0.04, 0.52, 0.42, 0.08, 3, 0.96);
+    segRibs(R, c, -0.50, -0.04, 3, 0.44, 0.055);
+    gloss(-R * 0.40, -R * 0.26, R * 0.22, R * 0.09, -0.4, 0.26);
+    // 앞발 — 짧게 접혀 가슴에 붙는다
+    for (let s = -1; s <= 1; s += 2) {
+      limb(R * 0.14, s * R * 0.22, R * 0.42, s * R * 0.38, R * 0.60, s * R * 0.22, R * 0.115, limbCol(c), true);
+    }
+    // 치켜든 목 + 부푼 산성 주머니
+    ctx.strokeStyle = limbCol(c); ctx.lineWidth = R * 0.30; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(R * 0.05, -R * 0.05);
+    ctx.quadraticCurveTo(R * 0.40, -R * 0.34, R * 0.56, -R * 0.60);
+    ctx.stroke();
+    ctx.fillStyle = c.body;
+    ctx.beginPath(); ctx.ellipse(R * 0.34, -R * 0.34, R * 0.28 * swell, R * 0.23 * swell, 0.6, 0, TAU); ctx.fill();
+    inkLine(c, R * 0.05);
+    sac(R * 0.34, -R * 0.32, R * 0.12 * swell, 0.7);
+    // 머리 — 위로 들고 앞으로 뱉는다
+    beastHead(R, c, R * 0.74, -R * 0.74, -0.26, R * 0.36, 0.58, true);
+  }
+
+  // ── 블로트 (탱커) — 껍질을 두른 거대 외계 두꺼비. 죽을 때 산성으로 터진다 ──
+  function drawBloat(R, c) {
+    const t = performance.now() / 500;
+    const breathe = 1 + 0.03 * Math.sin(t * 1.1);
+    legs(R, c, 3, 0.34, -0.56, 0.84, 0.215, 0.02);      // 굵고 짧은 여섯 다리
+    // 거대한 몸통
+    hide(R, c, R * 0.76 * breathe, 0.06, 1, -R * 0.10, 0, 1.02);
+    // 등껍질 — 어두운 각질 돔. 갈비선은 뒤쪽 절반에만 넣어 마디로 읽히게 한다.
+    ctx.fillStyle = chitin(c, R);
+    ctx.beginPath(); ctx.ellipse(-R * 0.10, 0, R * 0.73, R * 0.70, 0, 0, TAU); ctx.fill();
+    inkLine(c, R * 0.06);
+    segRibs(R, c, -0.66, 0.12, 5, 0.58, 0.06, 0.26);
+    gloss(-R * 0.40, -R * 0.34, R * 0.24, R * 0.11, -0.4, 0.22);
+    // 부글대는 산성 물집 — 터질 준비가 된 압력
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.6 + i * (TAU / 3);
+      sac(Math.cos(a) * R * 0.32 - R * 0.16, Math.sin(a) * R * 0.28,
+          R * 0.115 * (0.8 + 0.3 * Math.sin(t * 2 + i)), 0.8);
+    }
+    // 두툼한 머리 + 아래로 휜 엄니
+    const hs = R * 0.34;
+    ctx.fillStyle = c.dark; skullWedge(R * 0.74, 0, 0, hs, 0.80, 0.92); ctx.fill();
+    inkLine(c, R * 0.06);
+    ctx.fillStyle = c.body; skullWedge(R * 0.72, -R * 0.02, 0, hs * 0.86, 0.78, 0.88); ctx.fill();
+    ctx.fillStyle = c.ink; ctx.globalAlpha = 0.75;      // 다물린 입선
+    ctx.beginPath(); ctx.ellipse(R * 1.06, 0, R * 0.05, R * 0.13, 0, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    for (let s = -1; s <= 1; s += 2) {                  // 밖으로 휜 엄니 — 실루엣을 넓힌다
+      fang(R * 1.00, s * R * 0.18, s * 0.72, R * 0.22, R * 0.075, BONE);
+      beastEye(c, R * 0.64, s * R * 0.24, R * 0.145, 0);
+    }
+  }
+
+  // ── 베놈 하이드라 (공성) — 세 개의 목을 곧추세운 외계 독사 ──
+  function drawHydra(R, c) {
+    const t = performance.now() / 420;
+    legs(R, c, 2, 0.16, -0.44, 0.78, 0.16, 0.04);
+    tail(R, c, 0.9, 0.20, 4, -0.5);
+    // 굵은 몸통 — 두 마디
+    segBody(R, c, 2, -0.38, 0.02, 0.56, 0.46, 0.07, 5, 1.0);
+    segRibs(R, c, -0.50, -0.02, 3, 0.48, 0.055);
+    gloss(-R * 0.34, -R * 0.26, R * 0.22, R * 0.09, -0.4, 0.26);
+    // 세 개의 목 + 머리 — 각자 다른 위상으로 흔들린다
+    for (let i = -1; i <= 1; i++) {
+      const sway = Math.sin(t + i * 1.7) * 0.17;
+      const a = i * 0.55 + sway;
+      const ca = Math.cos(a), sa2 = Math.sin(a);
+      ctx.strokeStyle = limbCol(c); ctx.lineWidth = R * 0.26; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(ca * R * 0.16, sa2 * R * 0.16);
+      ctx.quadraticCurveTo(ca * R * 0.60, sa2 * R * 0.60, ca * R * 0.84, sa2 * R * 0.84);
+      ctx.stroke();
+      beastHead(R, c, ca * R * 1.00, sa2 * R * 1.00, a, R * 0.28, 0.50 + 0.14 * Math.sin(t * 2 + i), true);
+    }
+    // 목 밑동에서 흘러내리는 독액
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.8 + i * 2.1;
+      sac(Math.cos(a) * R * 0.38 - R * 0.18, Math.sin(a * 1.3) * R * 0.30 + R * 0.18, R * 0.095, 0.65);
+    }
+  }
+
+  // ── 플로터 (공중 폭격) — 막을 펄럭이며 떠다니는 외계 가오리 ──
+  function drawFloater(R, c) {
+    const t = performance.now() / 300;
+    const flap = Math.sin(t * 1.3);
+    // 늘어진 촉수 — 몸 밑으로 흔들린다
+    for (let i = -1; i <= 1; i++) {
+      tentacle(i * R * 0.26 - R * 0.34, R * 0.10, 1.5708 + i * 0.24, R * 1.0, R * 0.14, i * 1.4, limbCol(c), 4);
+    }
+    // 막날개 — 가오리처럼 한 장으로 이어진 마름모 지느러미. 좌우를 따로 그리면 두 장의
+    // 판자가 겹쳐 보인다. 펄럭임은 좌우 폭을 엇갈리게 흔들어서 만든다.
+    const spanL = R * (1.10 - 0.26 * flap), spanR = R * (1.10 + 0.26 * flap);
+    ctx.fillStyle = limbCol(c);
+    ctx.beginPath();
+    ctx.moveTo(R * 0.66, 0);
+    ctx.quadraticCurveTo(R * 0.30, -spanL * 0.66, -R * 0.44, -spanL);
+    ctx.quadraticCurveTo(-R * 0.52, -spanL * 0.30, -R * 0.86, 0);
+    ctx.quadraticCurveTo(-R * 0.52, spanR * 0.30, -R * 0.44, spanR);
+    ctx.quadraticCurveTo(R * 0.30, spanR * 0.66, R * 0.66, 0);
+    ctx.closePath(); ctx.fill();
+    inkLine(c, R * 0.06);
+    // 막을 지탱하는 뼈대
+    ctx.strokeStyle = c.ink; ctx.globalAlpha = 0.28; ctx.lineWidth = R * 0.05;
+    for (let s = -1; s <= 1; s += 2) {
+      const span = s < 0 ? spanL : spanR;
+      for (let k = 0; k < 3; k++) {
+        ctx.beginPath(); ctx.moveTo(R * 0.10, 0);
+        ctx.lineTo(R * (0.26 - k * 0.32), s * span * (0.70 - k * 0.04));
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    // 가스 주머니 몸통 — 앞뒤로 긴 유선형
+    hide(R, c, R * 0.50, 0.06, 5, -R * 0.02, 0, 0.78);
+    segRibs(R, c, -0.30, 0.16, 3, 0.34, 0.05);
+    gloss(-R * 0.20, -R * 0.20, R * 0.22, R * 0.09, -0.4, 0.30);
+    sac(-R * 0.18, R * 0.04, R * 0.13, 0.75);           // 포자낭
+    // 앞으로 뻗은 머리 + 눈 한 쌍 + 흡입구
+    ctx.fillStyle = c.dark; skullWedge(R * 0.46, 0, 0, R * 0.30, 0.70, 0.80); ctx.fill();
+    inkLine(c, R * 0.05);
+    ctx.fillStyle = c.body; skullWedge(R * 0.44, -R * 0.02, 0, R * 0.26, 0.68, 0.76); ctx.fill();
+    for (let s = -1; s <= 1; s += 2) beastEye(c, R * 0.38, s * R * 0.15, R * 0.135, 0);
+    ctx.fillStyle = c.ink; ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.ellipse(R * 0.76, 0, R * 0.07, R * 0.12, 0, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // ── 영웅: 브루드 매트리아크 (글룹) — 알을 품은 거대 여왕 곤충 ──
+  function drawMatriarch(R, c) {
+    const t = performance.now() / 600;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 1.6);
+    legs(R, c, 3, 0.30, -0.50, 0.92, 0.165, 0.06);      // 여섯 다리
+    // 복부 — 알로 가득 차 무겁게 늘어진다
+    hide(R, c, R * 0.60, 0.06, 2, -R * 0.66, 0, 1.06);
+    segRibs(R, c, -1.00, -0.42, 4, 0.52, 0.06, 0.24);
+    for (let i = 0; i < 3; i++) {                       // 속에서 빛나는 알
+      sac(-R * (0.48 + i * 0.22), Math.sin(t + i) * R * 0.10, R * 0.12, 0.5 + 0.3 * pulse);
+    }
+    // 흉부
+    hide(R, c, R * 0.46, 0.07, 4, R * 0.08, 0, 0.92);
+    gloss(-R * 0.04, -R * 0.22, R * 0.22, R * 0.09, -0.4, 0.28);
+    // 왕관 뿔 — 실루엣만으로 영웅임을 알린다. 세 개만: 가늘고 많으면 왕관이 아니라 빗이 된다.
+    for (let i = -1; i <= 1; i++) {
+      const h = R * (0.72 - Math.abs(i) * 0.18);
+      const bx = R * (0.08 + i * 0.24), tx = R * (0.20 + i * 0.30);
+      ctx.fillStyle = chitin(c, R);
+      ctx.beginPath();
+      ctx.moveTo(bx - R * 0.10, -R * 0.26);
+      ctx.lineTo(tx, -h - R * 0.26);
+      ctx.lineTo(bx + R * 0.14, -R * 0.22);
+      ctx.closePath(); ctx.fill();
+      inkLine(c, R * 0.05);
+      ctx.fillStyle = BONE_DIM;                        // 뿔 끝
+      ctx.beginPath();
+      ctx.moveTo(tx - R * 0.055 - (tx - bx) * 0.22, -h * 0.66 - R * 0.26);
+      ctx.lineTo(tx, -h - R * 0.26);
+      ctx.lineTo(tx + R * 0.055 - (tx - bx) * 0.22, -h * 0.64 - R * 0.26);
+      ctx.closePath(); ctx.fill();
+    }
+    // 머리
+    const ms = R * 0.32;
+    ctx.fillStyle = c.dark; skullWedge(R * 0.64, 0, 0, ms, 0.82, 0.95); ctx.fill();
+    inkLine(c, R * 0.055);
+    ctx.fillStyle = c.body; skullWedge(R * 0.62, -R * 0.02, 0, ms * 0.86, 0.80, 0.90); ctx.fill();
+    for (let s = -1; s <= 1; s += 2) {                  // 벌어지는 큰턱 — 안쪽으로 휘어 집는다
+      const open = 0.34 + 0.12 * Math.sin(t * 2.2);
+      ctx.strokeStyle = chitin(c, R); ctx.lineWidth = R * 0.14; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(R * 0.90, s * R * 0.20);
+      ctx.quadraticCurveTo(R * 1.28, s * R * (0.26 + open * 0.6), R * 1.34, s * R * 0.06);
+      ctx.stroke();
+      fang(R * 1.34, s * R * 0.06, -s * 0.7, R * 0.26, R * 0.08, BONE);
+    }
+    // 산성 분사구 + 눈
+    sac(R * 0.96, 0, R * 0.11, 0.85);
+    for (let s = -1; s <= 1; s += 2) beastEye(c, R * 0.52, s * R * 0.19, R * 0.15, 0);
   }
 
   function healthBar(cx, y, w, frac, show) {
