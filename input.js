@@ -537,12 +537,11 @@ RC.Input = (function () {
       return;
     }
 
-    // ability / hero-skill hotkey — cast on selected units of mine whose (skill) key matches
+    // ability / hero-signature hotkey — cast on selected units of mine whose key matches
     const casters = g.selection.filter(s =>
       s.kind === 'unit' && s.owner === me && (
         (s.def.ability && s.def.ability.key.toLowerCase() === k) ||
-        (s.def.hero && (s.def.skills || []).some(sk => sk.key.toLowerCase() === k)) ||
-        (s.def.hero && s.def.ult && s.def.ult.key.toLowerCase() === k)     // ultimate (R)
+        (s.def.hero && s.def.sig && s.def.sig.key.toLowerCase() === k)     // signature (R)
       ));
     if (casters.length) { RC.cmd(g, { t: 'cast', ids: casters.map(u => u.id), key: k }); snd('cast'); return; }
 

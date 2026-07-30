@@ -1223,6 +1223,7 @@ RC.Renderer = (function () {
     }
 
     if (b.done) shieldFlare(b);
+    guardDome(b);
     shieldBar(b, b.x, y - 25, b.w * 0.8);
     healthBar(b.x, y - 20, b.w * 0.8, b.hp / b.maxHp,
               b.hp < b.maxHp || !b.done || b.def.isCrystal || (b.maxShield > 0 && b.shield < b.maxShield));
@@ -1903,6 +1904,21 @@ RC.Renderer = (function () {
       ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 11px ui-monospace, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(String(u.level || 1), u.x - u.r - 3, u.y - u.r - 3);
+      // Signature charge — an arc around the hero's feet, drawn on the SAME ellipse as
+      // the gold hero ring so it reads as that ring filling up rather than as a second
+      // ring competing with it. Full means the button is live.
+      if (u.def.sig) {
+        const c01 = Math.max(0, Math.min(1, u.charge || 0));
+        const full = c01 >= 1;
+        if (full) blitGlow(softGlow('79,214,232'), u.x, u.y + u.r * 0.5, u.r * 2.1, u.r * 1.05, 0.16 + 0.10 * hp2);
+        ctx.globalAlpha = full ? 1 : 0.85;
+        ctx.strokeStyle = full ? '#8ff4ff' : '#4fd6e8';
+        ctx.lineWidth = full ? 3.4 : 2.6;
+        ctx.beginPath();
+        ctx.ellipse(u.x, u.y + u.r * 0.5, u.r * 1.4, u.r * 0.64, 0, -Math.PI / 2, -Math.PI / 2 + c01 * Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       ctx.restore();
     }
 
@@ -1917,6 +1933,7 @@ RC.Renderer = (function () {
     }
     // 플라즈마 실드 (Aether) — 껍질 반짝임 + 체력바 위 실드 띠
     shieldFlare(u);
+    guardDome(u);
     shieldBar(u, u.x, u.y - u.r - 14, u.r * 2.3);
     healthBar(u.x, u.y - u.r - 10, u.r * 2.3, u.hp / u.maxHp, u.hp < u.maxHp || (u.maxShield > 0 && u.shield < u.maxShield));
     // 에너지 바 — 스킬 있는 유닛만, 체력바 바로 아래
@@ -2776,6 +2793,35 @@ RC.Renderer = (function () {
   }
 
   // 실드 껍질 — 평상시엔 돌아가는 미광 호(弧), 피격 순간엔 육각 면이 드러나는 에너지 셸
+  // The Warden's dome. Drawn as a ring plus a soft fill rather than a solid disc so the
+  // thing underneath stays readable — a kid has to keep watching the crystal's health
+  // bar while the dome is up, and an opaque bubble would hide the very thing it protects.
+  function guardDome(e) {
+    const gd = e.guard;
+    if (!gd || gd.hp <= 0) return;
+    const t = performance.now() / 1000;
+    const R = gd.radius || 120;
+    const frac = Math.max(0, Math.min(1, gd.hp / (gd.max || gd.hp)));
+    const hit = gd.fx > 0 ? gd.fx / 0.2 : 0;
+    // Fades as the pool drains, so "nearly gone" is visible before it pops.
+    const a = 0.16 + 0.24 * frac + hit * 0.35;
+    blitGlow(softGlow('120,220,255'), e.x, e.y, R, R, 0.10 + 0.10 * frac + hit * 0.25);
+    ctx.save();
+    ctx.strokeStyle = '#9fe6ff';
+    ctx.lineWidth = 2 + 2.4 * frac + hit * 3;
+    ctx.globalAlpha = Math.min(1, a + 0.15 * Math.sin(t * 4));
+    ctx.beginPath(); ctx.arc(e.x, e.y, R, 0, Math.PI * 2); ctx.stroke();
+    // A second, tighter ring turning the other way — one static circle reads as a
+    // decal, two counter-rotating ones read as a field being held in place.
+    ctx.globalAlpha *= 0.5;
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([R * 0.16, R * 0.10]);
+    ctx.lineDashOffset = -t * 40;
+    ctx.beginPath(); ctx.arc(e.x, e.y, R * 0.93, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   function shieldFlare(e) {
     if (!e.maxShield || e.shield <= 0) return;
     const a = e.shieldFx > 0 ? Math.min(1, e.shieldFx / 0.18) : 0;

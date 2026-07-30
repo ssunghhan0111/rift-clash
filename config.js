@@ -462,22 +462,23 @@ RC.UNITS = {
     cost: 0, time: 0, supply: 0, armor: 3, energy: 200, key: 'H',
     grow: { hp: 70, dmg: 4, armor: 0.5 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
-    // 3 skills; each ranks up with level. All effects are self-contained (no passive stat plumbing).
-    skills: [
-      { id: 'salvo', name: 'Seismic Slam', key: 'F', cost: 40, cd: 8, radius: 120, dmg: 45, dmgPerRank: 28,
-        desc: 'Smashes the ground for heavy area damage.' },
-      { id: 'mend',  name: 'Repair Pulse', key: 'G', cost: 35, cd: 7, radius: 170, heal: 60, healPerRank: 40,
-        desc: 'Repairs the Warden and nearby allies.' },
-      // Signature (LoL: Malphite — Unstoppable Force): a dash that lands with AoE damage
-      // and leaves enemies reeling. Turns the Warden into a true front-line initiator.
-      { id: 'leap',  name: 'Leap Slam',    key: 'C', cost: 30, cd: 9, dist: 250, distPerRank: 30, radius: 135, dmg: 40, dmgPerRank: 22, stun: 1.3,
-        desc: 'Vaults to the front line and smashes down — heavy area damage that leaves enemies reeling.' },
-    ],
-    // ── ULTIMATE ── one per hero. Unlocks at a level, costs most of the energy
-    //    bar, very long cooldown, and is meant to be the moment of the match.
-    ult: { id: 'barrage', name: 'Orbital Barrage', key: 'R', cost: 120, cd: 80, minLevel: 6,
-      radius: 300, dmg: 180, dmgPerLevel: 15, stun: 2.2, shake: 1.0,
-      desc: 'Calls down an orbital bombardment. Massive damage across a huge area, and survivors are left reeling.' },
+    // ── SIGNATURE ── The Warden's answer is HOLD ON. See RC.SIG below for the shape
+    //    every hero's ability shares and why there is only one of them.
+    sig: {
+      id: 'dome', ic: '🛡️', name: 'Bulwark', key: 'R',
+      // Kid-facing. One line, present tense, says what you will SEE happen.
+      kid: 'Puts a big shield bubble on the crystal!',
+      desc: 'Slams the ground and throws a shield dome over the crystal, soaking every hit for a few seconds.',
+      shield: 900, shieldPerLevel: 80, dur: 6, radius: 300, shake: 0.55,
+      ups: [
+        { id: 'wide',    ic: '🧱', name: 'Wider Dome',  kid: 'Your fighters get a bubble too!',
+          desc: 'Allies inside the dome get a shield of their own, a third as strong.', allyShare: 0.34 },
+        { id: 'long',    ic: '⏳', name: 'Longer Hold', kid: 'The bubble lasts longer.',
+          desc: 'The dome holds for three extra seconds.', durAdd: 3 },
+        { id: 'shatter', ic: '💥', name: 'Shatter',     kid: 'The bubble EXPLODES when it pops!',
+          desc: 'When the dome ends it detonates, damaging and reeling everything around the crystal.', shatterDmg: 70, shatterSlow: 1.6 },
+      ],
+    },
     desc: 'A towering war machine. Grows stronger with every battle — you need it to win.'
   },
   matriarch: {
@@ -487,19 +488,21 @@ RC.UNITS = {
     acid: { dmg: 4, dur: 5, shred: 2, max: 6 },
     grow: { hp: 55, dmg: 4, armor: 0.4 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
-    skills: [
-      // Signature (LoL: Cassiopeia — Twin Fang): damages and corrodes nearby foes, and
-      // the Matriarch feeds on each one she hits to heal — sustain built on her acid.
-      { id: 'devour', name: 'Devouring Acid', key: 'A', cost: 40, cd: 8, radius: 170, dmg: 24, dmgPerRank: 15, heal: 20, healPerRank: 12, healCap: 4, slowDur: 2,
-        desc: 'Sprays devouring acid: damages and corrodes nearby foes while the Matriarch feeds on them to heal.' },
-      { id: 'salvo', name: 'Spore Storm',    key: 'F', cost: 45, cd: 9, radius: 115, dmg: 38, dmgPerRank: 24,
-        desc: 'Rains acid spores over an area.' },
-      { id: 'weld',  name: 'Regenerate',     key: 'G', cost: 35, cd: 7, radius: 180, heal: 90, healPerRank: 55, target: 'repair',
-        desc: 'Rapidly heals the most-wounded nearby ally.' },
-    ],
-    ult: { id: 'swarm', name: 'Hatch the Brood', key: 'R', cost: 110, cd: 80, minLevel: 6,
-      count: 6, countPerLevel: 0.5, maxCount: 12, spawn: 'globling', life: 26, radius: 110, shake: 0.55,
-      desc: 'Splits open the ground and hatches a swarm of free globlings that fight for a short time.' },
+    // ── SIGNATURE ── The Matriarch's answer is MORE FRIENDS, NOW.
+    sig: {
+      id: 'brood', ic: '🥚', name: 'Hatch the Brood', key: 'R',
+      kid: 'Hatches a bunch of babies to fight for you!',
+      desc: 'Splits the ground open where the fight is thickest and hatches free globlings that fight for a while.',
+      count: 5, countPerLevel: 0.4, maxCount: 12, spawn: 'globling', life: 26, radius: 130, shake: 0.5,
+      ups: [
+        { id: 'many',   ic: '🐛', name: 'Bigger Brood', kid: 'Three more babies!',
+          desc: 'Three extra hatchlings every time.', countAdd: 3 },
+        { id: 'acid',   ic: '🧪', name: 'Acid Babies',  kid: 'The babies pop with acid when they die!',
+          desc: 'Every hatchling bursts in an acid cloud when it dies.', burstDmg: 34, burstRadius: 95 },
+        { id: 'fierce', ic: '😤', name: 'Angry Brood',  kid: 'The babies come out ANGRY. Fast and strong.',
+          desc: 'Hatchlings arrive enraged — faster, and they bite much harder.', hatchSpd: 1.35, hatchDmg: 1.4 },
+      ],
+    },
     desc: 'Acid-spewing matriarch. Feeds on the fallen to grow — essential to victory.'
   },
   archon: {
@@ -508,25 +511,67 @@ RC.UNITS = {
     cost: 0, time: 0, supply: 0, armor: 2, energy: 220, shield: 320, key: 'H',
     grow: { hp: 45, dmg: 5, armor: 0.4, shield: 55 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
-    skills: [
-      { id: 'salvo', name: 'Psionic Storm', key: 'F', cost: 45, cd: 9, radius: 130, dmg: 42, dmgPerRank: 27,
-        desc: 'Tears open a storm of psionic energy over an area.' },
-      { id: 'mend',  name: 'Shield Cascade', key: 'G', cost: 35, cd: 7, radius: 180, heal: 55, healPerRank: 35, shieldHeal: 90, shieldHealPerRank: 55,
-        desc: 'Recharges the shields and health of the Archon and nearby allies.' },
-      // Signature (LoL: Kassadin — Riftwalk): blinks through the rift and erupts on
-      // arrival, blasting enemies where the Archon reappears. Reposition + burst in one.
-      { id: 'riftblast', name: 'Rift Surge', key: 'C', cost: 30, cd: 7, dist: 250, distPerRank: 35, radius: 120, dmg: 34, dmgPerRank: 22,
-        desc: 'Steps through the rift and erupts on arrival, blasting enemies where the Archon reappears.' },
-    ],
-    ult: { id: 'aegis', name: 'Aegis Storm', key: 'R', cost: 115, cd: 80, minLevel: 6,
-      radius: 260, dmg: 95, dmgPerLevel: 9, shieldGrant: 200, shieldPerLevel: 22, heal: 80, shake: 0.8,
-      desc: 'A radiant shockwave: enemies are blasted back while every nearby ally is healed and wrapped in a fresh shield.' },
+    // ── SIGNATURE ── The Archon's answer is MAKE SPACE. The shove is measured from the
+    //    CRYSTAL rather than from the Archon, so it always clears the thing you are
+    //    defending instead of scattering enemies wherever the hero happens to stand.
+    sig: {
+      id: 'riftnova', ic: '⚡', name: 'Rift Nova', key: 'R',
+      kid: 'Blasts the bad guys away from the crystal!',
+      desc: 'A radiant shockwave that damages every enemy caught in it and hurls them back away from the crystal.',
+      radius: 240, dmg: 70, dmgPerLevel: 8, push: 95, slowDur: 1.5, shake: 0.8,
+      ups: [
+        { id: 'bigger', ic: '🌀', name: 'Wider Nova', kid: 'A much bigger blast!',
+          desc: 'Forty percent more range and damage.', radiusMul: 1.4, dmgMul: 1.4 },
+        { id: 'ward',   ic: '✨', name: 'Warding Nova', kid: 'Your fighters get shields too!',
+          desc: 'Allies caught in the blast are healed and given a fresh shield.', healAdd: 60, shieldAdd: 140 },
+        { id: 'mire',   ic: '🕸️', name: 'Rift Mire', kid: 'The bad guys get stuck in slow goo.',
+          desc: 'Leaves the ground churning — everything hit stays slowed far longer.', slowSet: 4 },
+      ],
+    },
     desc: 'A being of pure energy wrapped in a colossal shield. Grows radiant with every kill.'
   },
 };
 
+// ── Hero signature abilities ──────────────────────────────────────────────────
+// Every hero has exactly ONE, and it replaces the old three-skills-plus-an-ultimate
+// panel. The reasons are all the same reason:
+//
+//   · Four cooldowns is a bar of icons to read mid-fight. One is a decision.
+//   · Crystal Guard hid the whole panel (it lives inside #hud), and auto-cast only ran
+//     for AI owners — so a kid had a levelling hero that could never use anything.
+//   · With one ability per hero, each hero can be a genuinely different ANSWER rather
+//     than three variations on "area damage": the Warden holds the line, the Matriarch
+//     adds bodies, the Archon makes space. Which faction you pick now changes how you play.
+//
+// Shared shape:
+//   sig.key      hotkey (all three use R, so there is one key to learn)
+//   sig.kid      one line a six-year-old can read — what you will SEE happen
+//   sig.desc     the grown-up line
+//   sig.ups[]    three upgrades unique to that hero. In Crystal Guard they arrive as
+//                reward cards; everywhere else they unlock at the levels in upLevels.
+//
+// The ability charges from FIGHTING rather than ticking back on a cooldown — see
+// RC.HERO.charge* below and the accrual in entities.js.
+RC.SIG_KEY = 'R';
+
 // Hero progression tuning
-RC.HERO = { maxLevel: 10, xpBase: 100, xpStep: 60, killXp: 12, killXpPerSupply: 8, workerXp: 6, heroXp: 55, xpRange: 620 };
+RC.HERO = {
+  maxLevel: 10, xpBase: 100, xpStep: 60, killXp: 12, killXpPerSupply: 8, workerXp: 6, heroXp: 55, xpRange: 620,
+  // ── Signature charge ──
+  // Time-charging (the old energy bar) collapses into "use it the moment it is up",
+  // because spending early costs nothing — the meter refills at the same rate either
+  // way. Charging from participation is what makes "now or save it?" a real question:
+  // the meter fills fastest in a big fight, so holding it through a small wave is a
+  // genuine sacrifice. The idle trickle is the floor that stops a losing player from
+  // being locked out of their own comeback button.
+  chargeIdle: 1 / 95,        // full in ~95s doing nothing at all
+  chargeDealt: 1 / 2600,     // per point of damage the hero deals
+  chargeTaken: 1 / 1500,     // per point taken — tanking charges it too
+  chargeKill: 0.02,          // per enemy that dies near the hero
+  killRange: 260,
+  sigCd: 1.5,                // brief lockout after a cast, so a double-tap cannot double-fire
+  upLevels: [3, 6, 9],       // where the three upgrades unlock OUTSIDE Crystal Guard
+};
 
 // ── Buildings ─────────────────────────────────────────
 RC.BUILDINGS = {

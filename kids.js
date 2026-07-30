@@ -349,6 +349,30 @@ RC.Kids = (function () {
       apply: (g, o) => { if (g.res[o]) g.res[o].shard += 350; } },
   ];
 
+  // ── Hero upgrade cards ────────────────────────────────────────────────────
+  // Built from the player's OWN hero rather than written out here, so the three cards a
+  // Warden player sees can never be the three a Matriarch player sees. Adding a fourth
+  // upgrade to a hero in config.js puts a fourth card in that hero's pool with no change
+  // here. They ride in the same after-wave pool as everything else: no second screen, no
+  // second currency, and hero cards have to compete with Sharper Shots for the pick.
+  function heroOf(g, owner) {
+    const o = (owner == null) ? g.playerOwner : owner;
+    // The unit list rather than g.heroOf, because it is the one thing an online client
+    // and the server always agree on — see the heroOf rebuild in net_core applySnapshot.
+    for (const u of (g.units || [])) if (u.hero && u.owner === o && !u.dead && u.def && u.def.sig) return u;
+    const h = g.heroOf && g.heroOf[o];
+    return (h && !h.dead && h.def && h.def.sig) ? h : null;
+  }
+  function heroCards(g, owner) {
+    const h = heroOf(g, owner);
+    if (!h) return [];
+    return (h.def.sig.ups || []).map(up => ({
+      id: 'sig_' + up.id, ic: up.ic, name: up.name,
+      desc: up.kid || up.desc, max: 1, hero: true, up: up.id,
+      apply: (gg, o) => { const hh = heroOf(gg, o); if (hh) { hh.useCardUpgrades(); hh.grantUp(up.id); } },
+    }));
+  }
+
   // How many times a card has already been taken this run BY THIS DEFENDER. Per player,
   // so one kid maxing out Sharper Shots does not empty the other kid's card pool.
   function taken(g, id, owner) { const p = per(g, owner); return (p.taken && p.taken[id]) || 0; }
@@ -357,7 +381,7 @@ RC.Kids = (function () {
   // at full health — offering a repair to an undamaged crystal is a wasted choice,
   // and a wasted choice teaches a kid that the cards do not matter.
   function offer(g, owner) {
-    const pool = CARDS.filter(c => {
+    const pool = CARDS.concat(heroCards(g, owner)).filter(c => {
       if (taken(g, c.id, owner) >= c.max) return false;
       if (c.id === 'heal' && g.crystal && g.crystal.hp >= g.crystal.maxHp * 0.95) return false;
       return true;
@@ -368,7 +392,8 @@ RC.Kids = (function () {
       out.push(bag.splice(Math.floor(Math.random() * bag.length), 1)[0]);
     }
     return out.map(c => ({ id: c.id, ic: c.ic, name: c.name, desc: c.desc,
-                           tier: taken(g, c.id, owner) + 1, max: c.max, shared: !!c.shared }));
+                           tier: taken(g, c.id, owner) + 1, max: c.max,
+                           shared: !!c.shared, hero: !!c.hero }));
   }
 
   // One defender takes their card. Everyone picks from their OWN three and nobody waits
@@ -380,7 +405,7 @@ RC.Kids = (function () {
     if (owner == null) owner = g.playerOwner;
     const p = per(g, owner);
     if (p.picked) return false;                                      // one card per wave, per player
-    const card = CARDS.find(c => c.id === id);
+    const card = CARDS.find(c => c.id === id) || heroCards(g, owner).find(c => c.id === id);
     if (!card) return false;
     if (!p.offer || !p.offer.some(o => o.id === id)) return false;    // only from what was offered
     card.apply(g, owner);
@@ -728,6 +753,7 @@ RC.Kids = (function () {
       shard: Math.floor((g.res[owner] || {}).shard || 0),
       queue: (b && b.queue) || [],
       lanes: s.lanes || 1, laneMax: lanesOf(g).length,
+      sig: sigHud(g, owner),
       coop: !!s.coop,
       crystal: g.crystal ? { hp: Math.max(0, Math.round(g.crystal.hp)), max: Math.round(g.crystal.maxHp) } : null,
     };
@@ -774,8 +800,22 @@ RC.Kids = (function () {
     }
   }
 
+  // Everything the big charge button needs, or null when this player has no hero.
+  function sigHud(g, owner) {
+    const h = heroOf(g, owner);
+    if (!h) return null;
+    const sig = h.def.sig;
+    return {
+      id: sig.id, ic: sig.ic, name: sig.name, kid: sig.kid,
+      charge: Math.max(0, Math.min(1, h.charge || 0)),
+      ready: h.sigReady(), downed: !!h.downed, level: h.level,
+      ups: (sig.ups || []).filter(u => h.hasUp(u.id)).map(u => u.ic),
+    };
+  }
+
   return {
     CFG, CARDS, KITS, ROSTER, UNLOCK_WAVES, FLAVOURS, LANE_AT,
+    heroCards, sigHud,
     netState, applyNetState,
     kitOf, costOf, timeOf, roster, waveSize, hpMul, weightAt, compose,
     flavourFor, waveLabel, offer, choose, autoPick, buy, freeSquad,

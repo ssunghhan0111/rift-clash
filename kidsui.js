@@ -128,6 +128,42 @@ RC.KidsUI = (function () {
                border:2px solid currentColor; border-radius:14px; padding:6px 16px; }
 #kid-next .t { font-weight:700; color:#cfe0f5; font-size:14px; margin-left:6px; }
 
+/* ── The hero's one button ──────────────────────────────────────────────────
+   Sits apart from the shop, on the right, because it is not a purchase — it is the
+   one thing in the mode that is free and can only be spent once. The ring IS the
+   decision: a kid can see it filling and knows they are saving something up. */
+#kid-sig { position:absolute; right:18px; bottom:96px; width:120px; height:120px;
+           border-radius:50%; cursor:pointer; pointer-events:auto; display:none;
+           align-items:center; justify-content:center; flex-direction:column;
+           background:radial-gradient(circle at 50% 38%, #2c3d63, #131c31);
+           border:4px solid rgba(255,255,255,.18); color:#eaf2ff;
+           user-select:none; -webkit-tap-highlight-color:transparent;
+           transition:transform .1s, border-color .15s, box-shadow .2s; }
+#kid-sig.on { display:flex; }
+#kid-sig .ic { font-size:40px; line-height:1; filter:drop-shadow(0 2px 5px rgba(0,0,0,.6)); }
+#kid-sig .lb { font-size:11px; font-weight:900; letter-spacing:.4px; margin-top:1px;
+               color:#9fb2d0; text-transform:uppercase; }
+/* The charge ring. A conic gradient means no canvas and no per-frame drawing —
+   one CSS variable moves and the browser does the rest. */
+#kid-sig .ring { position:absolute; inset:-4px; border-radius:50%; pointer-events:none;
+                 background:conic-gradient(#4fd6e8 calc(var(--c,0) * 1turn),
+                                           rgba(255,255,255,.10) 0); mask:radial-gradient(
+                 farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+                 -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px)); }
+#kid-sig.ready { border-color:#ffd24a; box-shadow:0 0 0 4px rgba(255,210,74,.22), 0 0 34px rgba(255,210,74,.5);
+                 animation:kidsigpulse 1.15s ease-in-out infinite; }
+#kid-sig.ready .lb { color:#ffd24a; }
+#kid-sig.ready .ring { background:conic-gradient(#ffd24a 1turn, #ffd24a 0); }
+#kid-sig:active { transform:scale(.93); }
+#kid-sig.down { opacity:.4; }
+@keyframes kidsigpulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+/* Upgrade badges — the run's story in three emoji. */
+#kid-sig .ups { position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+                display:flex; gap:3px; font-size:15px; filter:drop-shadow(0 2px 3px rgba(0,0,0,.7)); }
+/* Hero cards get a gold edge so an ability upgrade never looks like a generic buff. */
+.kid-card.hero { border-color:rgba(255,210,74,.55);
+                 background:linear-gradient(180deg,#4a3c1e,#221a10); }
+
 /* Kids mode hides the grown-up HUD entirely. */
 body.kids-mode #hud { display:none !important; }
 body.kids-mode #minimap { display:none !important; }
@@ -141,6 +177,8 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
   .kid-buy .role { font-size:13px; }
   .kid-card { width:150px; min-height:180px; }
   .kid-card .ic { font-size:40px; }
+  #kid-sig { width:92px; height:92px; right:10px; bottom:88px; }
+  #kid-sig .ic { font-size:30px; }
   #kid-btitle { font-size:30px; }
   #kid-bic { font-size:48px; }
 }`;
@@ -158,6 +196,12 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       </div>
       <div id="kid-queue"></div>
       <div id="kid-shop"></div>
+      <div id="kid-sig">
+        <div class="ring"></div>
+        <div class="ups"></div>
+        <div class="ic">✨</div>
+        <div class="lb">—</div>
+      </div>
       <div id="kid-banner">
         <div id="kid-bic">🎉</div>
         <div id="kid-btitle">—</div>
@@ -190,7 +234,21 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       rtitle: root.querySelector('#kid-rtitle'),
       cards: root.querySelector('#kid-cards'),
       next: root.querySelector('#kid-next'),
+      sig: root.querySelector('#kid-sig'),
+      sigIc: root.querySelector('#kid-sig .ic'),
+      sigLb: root.querySelector('#kid-sig .lb'),
+      sigRing: root.querySelector('#kid-sig .ring'),
+      sigUps: root.querySelector('#kid-sig .ups'),
     };
+    // One tap fires it at the smartest spot — there is nothing to aim. The mode has no
+    // build placement for the same reason: nothing to put down means nothing to put down
+    // wrong, and a mis-tap would waste a charge the kid waited two minutes for.
+    els.sig.addEventListener('pointerdown', ev => {
+      ev.preventDefault();
+      const h = g && g.heroOf && g.heroOf[g.playerOwner];
+      if (!h || h.dead || h.downed) return;
+      RC.cmd(g, { t: 'cast', ids: [h.id], key: (h.def.sig && h.def.sig.key || 'R').toLowerCase() });
+    });
   }
 
   function init(game) { g = game; build(); }
@@ -259,6 +317,27 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     }
   }
 
+  // ── The hero's charge button ──────────────────────────────────────────────
+  let sigShown = '';
+  function renderSig(h) {
+    const s = h.sig;
+    els.sig.classList.toggle('on', !!s);
+    if (!s) return;
+    const sig2 = s.id + '|' + s.ic + '|' + s.ups.join('');
+    if (sig2 !== sigShown) {
+      sigShown = sig2;
+      els.sigIc.textContent = s.ic;
+      els.sigUps.textContent = s.ups.join('');
+      els.sig.title = s.name + ' — ' + s.kid;
+    }
+    els.sigRing.style.setProperty('--c', s.charge.toFixed(3));
+    els.sig.classList.toggle('ready', !!s.ready);
+    els.sig.classList.toggle('down', !!s.downed);
+    // The label is the only text on the button, so it says the one thing that changes:
+    // whether pressing it right now would do anything.
+    els.sigLb.textContent = s.downed ? 'GONE' : s.ready ? 'TAP!' : Math.round(s.charge * 100) + '%';
+  }
+
   // ── Reward cards ──────────────────────────────────────────────────────────
   let shownOffer = null;
   function renderReward(h) {
@@ -280,7 +359,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     els.cards.innerHTML = '';
     h.offer.forEach(c => {
       const card = document.createElement('div');
-      card.className = 'kid-card';
+      card.className = 'kid-card' + (c.hero ? ' hero' : '');
       card.innerHTML =
         `<div class="ic">${esc(c.ic)}</div>` +
         `<div class="nm">${esc(c.name)}</div>` +
@@ -336,6 +415,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
 
     renderShop(h);
     renderQueue(h);
+    renderSig(h);
 
     // Banner
     if (h.banner) {

@@ -135,7 +135,13 @@ window.RC = window.RC || {};
       if (u.hero) {
         const cd = {};
         for (const k in u.skillCd) if (u.skillCd[k] > 0) cd[k] = Math.round(u.skillCd[k] * 10);
-        d.hr = { l: u.level, xp: Math.round(u.xp), cd };
+        // ch/sc/up carry the signature: charge 0..255, the post-cast lockout, and which
+        // upgrades are held. Without them an online player's charge ring would sit empty
+        // and their upgrade icons would never appear — the server owns all three.
+        d.hr = { l: u.level, xp: Math.round(u.xp), cd,
+                 ch: Math.round((u.charge || 0) * 255),
+                 sc: u.sigCd > 0 ? Math.round(u.sigCd * 10) : 0,
+                 up: Object.keys(u.sigUp || {}) };
         if (u.downed) d.hr.d = 1;
         if (u.reviveT) d.hr.rt = Math.round(u.reviveT * 10);
         if (u.reviveCost) d.hr.rc = u.reviveCost;
@@ -196,6 +202,11 @@ window.RC = window.RC || {};
       // 영웅 — 서버가 권위. 레벨/부활/쿨다운을 그대로 반영해야 스킬·궁극기 버튼이 맞는다
       if (d.hr && u.hero) {
         u.level = d.hr.l; u.xp = d.hr.xp;
+        u.charge = (d.hr.ch || 0) / 255;
+        u.sigCd = (d.hr.sc || 0) / 10;
+        u.sigUp = {};
+        for (const k of (d.hr.up || [])) u.sigUp[k] = true;
+        if ((d.hr.up || []).length) u.useCardUpgrades();
         u.downed = !!d.hr.d; u.reviveT = (d.hr.rt || 0) / 10; u.reviveCost = d.hr.rc || 0;
         u.skillCd = {};
         for (const k in d.hr.cd) u.skillCd[k] = d.hr.cd[k] / 10;
@@ -207,6 +218,13 @@ window.RC = window.RC || {};
     }
     for (const [id, u] of umap) if (!useen.has(id)) umap.delete(id);
     game.units = Array.from(umap.values());
+    // Rebuild heroOf. A client replaces its whole unit list from the snapshot, so the
+    // objects game.heroOf was pointing at are no longer on the field — leaving the hero
+    // button, the charge ring and the Crystal Guard signature button all reading a stale
+    // corpse that never updates again.
+    game.heroOf = game.heroOf || {};
+    for (const o in game.heroOf) if (game.heroOf[o] && !umap.has(game.heroOf[o].id)) delete game.heroOf[o];
+    for (const u of game.units) if (u.hero && !u.dead) game.heroOf[u.owner] = u;
 
     const bmap = game._bmap || (game._bmap = new Map());
     const bseen = new Set();

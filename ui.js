@@ -489,6 +489,11 @@ RC.UI = (function () {
   }
 
   // 영웅 스킬 3개 버튼 (미습득=잠김, 부활 중=카운트다운)
+  // ── The hero's one button ────────────────────────────────────────────────
+  // This used to be three skill buttons plus an ultimate, each with its own energy cost
+  // and cooldown. It is one now, for every mode: heroes have a single signature that
+  // charges by fighting. Four cooldowns is a bar of icons to read mid-fight; one is a
+  // decision, and it is the same decision an eight-year-old and a thirteen-year-old make.
   function heroSkills(h) {
     if (h.downed) {
       const b = document.createElement('div');
@@ -497,38 +502,27 @@ RC.UI = (function () {
       el.cmds.appendChild(b);
       return;
     }
-    (h.def.skills || []).forEach((sk, i) => {
-      const rank = h.heroRank(i);
-      const key = sk.key.toLowerCase();
-      const cd = (h.skillCd && h.skillCd[key]) || 0;
-      const locked = rank <= 0;
-      const ready = !locked && cd <= 0 && h.energy >= sk.cost;
-      const b = document.createElement('button');
-      b.className = 'cmd ability' + (ready ? '' : ' off');
-      const rankStr = locked ? 'Locked (Lv ' + (i + 1) + ')' : 'Rank ' + rank;
-      b.innerHTML = `<kbd>${sk.key}</kbd><span class="l">✦ ${sk.name}</span>` +
-                    `<span class="s">${rankStr} · E${sk.cost}${cd > 0 ? ' · ' + Math.ceil(cd) + 's' : ''}</span>`;
-      b.title = `${sk.name} — ${sk.desc || ''}`;
-      if (!locked) b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key }); });
-      el.cmds.appendChild(b);
-    });
+    const sig = h.def.sig;
+    if (!sig) return;
+    const pct = Math.round(Math.max(0, Math.min(1, h.charge || 0)) * 100);
+    const ready = h.sigReady();
+    const b = document.createElement('button');
+    b.className = 'cmd ability ult' + (ready ? ' ready' : ' off');
+    const sub = ready ? 'READY' : (h.sigCd > 0 ? 'Recovering…' : 'Charging ' + pct + '%');
+    b.innerHTML = `<kbd>${sig.key}</kbd><span class="l">${sig.ic} ${sig.name}</span><span class="s">${sub}</span>`;
+    b.title = `${sig.name} — ${sig.desc || ''} (charges by fighting; press ${sig.key})`;
+    b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key: sig.key.toLowerCase() }); });
+    el.cmds.appendChild(b);
 
-    // 궁극기 — 레벨로 해금되고 쿨다운이 길다. 준비되면 눈에 띄게 강조.
-    const ult = h.def.ult;
-    if (ult) {
-      const key = ult.key.toLowerCase();
-      const cd = (h.skillCd && h.skillCd[key]) || 0;
-      const locked = h.level < (ult.minLevel || 6);
-      const ready = !locked && cd <= 0 && h.energy >= ult.cost;
-      const b = document.createElement('button');
-      b.className = 'cmd ability ult' + (ready ? ' ready' : ' off');
-      const sub = locked ? 'Locked — reach Lv ' + (ult.minLevel || 6)
-        : (cd > 0 ? 'Ready in ' + Math.ceil(cd) + 's'
-          : (h.energy < ult.cost ? 'Energy ' + Math.floor(h.energy) + ' / ' + ult.cost : 'READY · E' + ult.cost));
-      b.innerHTML = `<kbd>${ult.key}</kbd><span class="l">★ ${ult.name}</span><span class="s">${sub}</span>`;
-      b.title = `ULTIMATE — ${ult.name}: ${ult.desc || ''} (Energy ${ult.cost}, cooldown ${ult.cd}s, unlocks at level ${ult.minLevel || 6})`;
-      if (!locked) b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key }); });
-      el.cmds.appendChild(b);
+    // Held upgrades, as one quiet row. Which three you have is the run's story.
+    const held = (sig.ups || []).filter(u => h.hasUp(u.id));
+    if (held.length) {
+      const r = document.createElement('div');
+      r.className = 'cmd off';
+      r.innerHTML = `<span class="l">${held.map(u => u.ic).join(' ')}</span>` +
+                    `<span class="s">${held.map(u => u.name).join(' · ')}</span>`;
+      r.title = held.map(u => u.name + ' — ' + u.desc).join('\n');
+      el.cmds.appendChild(r);
     }
   }
 

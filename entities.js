@@ -36,6 +36,24 @@ window.RC = window.RC || {};
   // Any hit resets the recharge delay, so shields only regrow out of combat.
   function dealDamage(foe, dealt) {
     if (!foe || dealt <= 0) return 0;
+    // ── Guard (the Warden's dome) ──
+    // A temporary pool that sits IN FRONT of shields and hp and works on units and
+    // buildings alike, which is what lets one ability cover the crystal and, upgraded,
+    // everything standing near it. Hooked here because every damage path in the game —
+    // unit attacks, towers, death bursts, abilities — funnels through this function.
+    if (foe.guard && foe.guard.hp > 0) {
+      const g = Math.min(foe.guard.hp, dealt);
+      foe.guard.hp -= g;
+      dealt -= g;
+      foe.guard.fx = 0.2;                     // renderer flashes the dome where it was hit
+      if (dealt <= 0) return 0;
+    }
+    // Taking a hit charges a hero's signature. Tanking is participation too, and without
+    // this the only way to fill the meter would be to deal damage — which punishes the
+    // defensive hero for playing defensively.
+    if (foe.hero && foe.charge != null && foe.charge < 1) {
+      foe.charge = Math.min(1, foe.charge + dealt * RC.HERO.chargeTaken);
+    }
     if (foe.maxShield > 0) {
       foe.shieldT = RC.CFG.SHIELD_DELAY;
       if (foe.shield > 0) {
@@ -60,6 +78,18 @@ window.RC = window.RC || {};
     if (e.shield < e.maxShield) e.shield = Math.min(e.maxShield, e.shield + RC.CFG.SHIELD_REGEN * dt);
   }
   RC.tickShield = tickShield;
+
+  // Guard countdown. Returns true on the tick it expires, so the caller can fire the
+  // Shatter upgrade — the dome has to know when it ENDED, not merely that it is gone.
+  function tickGuard(e, dt) {
+    if (!e.guard) return false;
+    if (e.guard.fx > 0) e.guard.fx = Math.max(0, e.guard.fx - dt);
+    e.guard.t -= dt;
+    if (e.guard.t > 0 && e.guard.hp > 0) return false;
+    e.guard = null;
+    return true;
+  }
+  RC.tickGuard = tickGuard;
 
   // 실드 회복 스킬 (오라클 / 아콘) — 실드를 우선 채우고 남은 값을 반환
   function restoreShield(e, amount) {
@@ -167,6 +197,23 @@ window.RC = window.RC || {};
 
     update(dt, game) {
       if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - dt);   // 피격 섬광 감쇠
+      // The Warden's dome sits on a building far more often than on a unit, so the
+      // Shatter detonation lives here. tickGuard reports the tick it ENDS on, which is
+      // the only moment the explosion can fire — a guard that is merely absent tells us
+      // nothing about whether it expired or was never cast.
+      if (this.guard) {
+        const g = this.guard;
+        if (RC.tickGuard(this, dt) && g.shatterDmg) {
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, g.owner)) continue;
+            if (RC.dist(this.x, this.y, u.x, u.y) > (g.radius || 300)) continue;
+            game.hurt(u, g.shatterDmg, g.owner, this);
+            u.slow = Math.max(u.slow || 0, g.shatterSlow || 0);
+          }
+          game.fx.push({ abil: 'dome', ax: this.x, ay: this.y, t: 0.7, radius: g.radius || 300, owner: g.owner });
+          if (game.shake) game.shake(0.4);
+        }
+      }
       // 산성 지속 피해 (건설 중에도 진행)
       if (this.acidStacks > 0) {
         this.acidT -= dt;
@@ -309,56 +356,73 @@ window.RC = window.RC || {};
         this.hero = true;
         this.level = 1;
         this.xp = 0;
-        this.skillCd = {};        // skill key -> cooldown seconds
+        this.skillCd = {};        // retained for the wire format; heroes now charge instead
+        this.charge = 0;          // 0..1 signature charge — fills by FIGHTING (see RC.HERO)
+        this.sigCd = 0;           // brief lockout after a cast so a double-tap cannot double-fire
+        this.sigUp = {};          // upgrade id -> true (Crystal Guard cards; levels elsewhere)
         this.downed = false;      // slain, waiting to revive (kept in play, inert)
         this.reviveT = 0;
         this.reviveCost = 0;
       }
     }
 
-    // ── 영웅: 레벨/스킬 헬퍼 ──────────────────────────
+    // ── 영웅: 레벨 / 시그니처 헬퍼 ─────────────────────
+    // heroRank / _skillByKey / _effSkill / _effUlt used to live here. They served the
+    // three-skills-plus-an-ultimate panel, which the signature ability replaced: one
+    // ability per hero, charged by fighting, with three upgrades unique to that hero.
     xpToNext() { return RC.HERO.xpBase + (this.level - 1) * RC.HERO.xpStep; }
-    // i번째 스킬의 현재 랭크(0=미습득). 레벨 i+1에 습득, 이후 3레벨마다 +1, 최대 3.
-    heroRank(i) {
-      if (this.level < i + 1) return 0;
-      return Math.min(3, 1 + Math.floor((this.level - (i + 1)) / 3));
+
+    // Outside Crystal Guard there are no reward cards to pick upgrades from, so the three
+    // unlock at levels instead. Same three upgrades either way; only the route differs,
+    // and this is the single place that knows that.
+    hasUp(id) {
+      const sig = this.def.sig;
+      if (!sig || !sig.ups) return false;
+      if (this.sigUp && this.sigUp[id]) return true;
+      if (this._cardUps) return false;              // Crystal Guard: cards are the only route
+      const i = sig.ups.findIndex(u => u.id === id);
+      if (i < 0) return false;
+      const lv = (RC.HERO.upLevels || [])[i];
+      return lv != null && this.level >= lv;
     }
-    _skillByKey(key) {
-      const list = this.def.skills || [];
-      for (let i = 0; i < list.length; i++) if (list[i].key.toLowerCase() === key) return { sk: list[i], idx: i };
-      const ult = this.def.ult;
-      if (ult && ult.key.toLowerCase() === key) return { sk: ult, idx: -1, ult: true };
-      return null;
+    // Crystal Guard hands upgrades out as cards, so it turns the level route OFF —
+    // otherwise a hero would collect the same upgrade twice through two different doors.
+    useCardUpgrades() { this._cardUps = true; }
+    grantUp(id) { if (this.sigUp) this.sigUp[id] = true; }
+    sigReady() { return !!(this.hero && this.def.sig && !this.downed && this.sigCd <= 0 && this.charge >= 1); }
+
+    // The signature's numbers after level scaling and whichever upgrades are held.
+    effSig() {
+      const sig = this.def.sig;
+      if (!sig) return null;
+      const a = Object.assign({}, sig);
+      const lv = this.level - 1;
+      if (sig.shieldPerLevel) a.shield = sig.shield + sig.shieldPerLevel * lv;
+      if (sig.dmgPerLevel)    a.dmg    = sig.dmg + sig.dmgPerLevel * lv;
+      if (sig.countPerLevel)  a.count  = Math.min(sig.maxCount || 99, sig.count + sig.countPerLevel * lv);
+      // Upgrades carry uniquely-named fields (durAdd, countAdd, radiusMul, ...), so this
+      // merge never has to know WHICH upgrade it holds. Add one to config.js with a new
+      // field name and it lands here without touching this code.
+      a.held = {};
+      for (const up of (sig.ups || [])) {
+        if (!this.hasUp(up.id)) continue;
+        a.held[up.id] = true;
+        if (up.durAdd)    a.dur    = (a.dur || 0) + up.durAdd;
+        if (up.countAdd)  a.count  = (a.count || 0) + up.countAdd;
+        if (up.radiusMul) a.radius = (a.radius || 0) * up.radiusMul;
+        if (up.dmgMul)    a.dmg    = (a.dmg || 0) * up.dmgMul;
+        if (up.slowSet)   a.slowDur = Math.max(a.slowDur || 0, up.slowSet);
+        if (up.healAdd)   a.heal   = (a.heal || 0) + up.healAdd;
+        if (up.shieldAdd) a.shieldGrant = (a.shieldGrant || 0) + up.shieldAdd;
+        if (up.allyShare) a.allyShare = up.allyShare;
+        if (up.shatterDmg) { a.shatterDmg = up.shatterDmg; a.shatterSlow = up.shatterSlow || 0; }
+        if (up.burstDmg)   { a.burstDmg = up.burstDmg; a.burstRadius = up.burstRadius || 90; }
+        if (up.hatchSpd)  a.hatchSpd = up.hatchSpd;
+        if (up.hatchDmg)  a.hatchDmg = up.hatchDmg;
+      }
+      return a;
     }
-    // Ultimates unlock at a level rather than ranking up, so they get their own
-    // gate. Returns 0 when still locked, otherwise the hero's level.
-    ultRank() {
-      const u = this.def.ult;
-      if (!u || !this.hero) return 0;
-      return this.level >= (u.minLevel || 6) ? this.level : 0;
-    }
-    ultReady() {
-      const u = this.def.ult;
-      if (!u || this.downed || !this.ultRank()) return false;
-      return (this.skillCd[u.key.toLowerCase()] || 0) <= 0 && this.energy >= u.cost;
-    }
-    _effSkill(sk, rank) {
-      const ab = Object.assign({}, sk);
-      if (sk.dmgPerRank) ab.dmg = (sk.dmg || 0) + (rank - 1) * sk.dmgPerRank;
-      if (sk.healPerRank) ab.heal = (sk.heal || 0) + (rank - 1) * sk.healPerRank;
-      if (sk.distPerRank) ab.dist = (sk.dist || 0) + (rank - 1) * sk.distPerRank;
-      if (sk.shieldHealPerRank) ab.shieldHeal = (sk.shieldHeal || 0) + (rank - 1) * sk.shieldHealPerRank;
-      return ab;
-    }
-    // Ultimates scale off the hero's level above the unlock level, not a rank.
-    _effUlt(u) {
-      const ab = Object.assign({}, u);
-      const over = Math.max(0, this.level - (u.minLevel || 6));
-      if (u.dmgPerLevel) ab.dmg = (u.dmg || 0) + over * u.dmgPerLevel;
-      if (u.shieldPerLevel) ab.shieldGrant = (u.shieldGrant || 0) + over * u.shieldPerLevel;
-      if (u.countPerLevel) ab.count = Math.min(u.maxCount || 99, Math.floor((u.count || 0) + over * u.countPerLevel));
-      return ab;
-    }
+
     gainXp(n) {
       if (!this.hero || this.level >= RC.HERO.maxLevel) return;
       this.xp += n;
@@ -637,7 +701,16 @@ window.RC = window.RC || {};
       if (this.atkAnim > 0) this.atkAnim = Math.max(0, this.atkAnim - dt / 0.22);
       if (this.hurt > 0)    this.hurt    = Math.max(0, this.hurt    - dt / 0.18);
       this.abilityCd = Math.max(0, this.abilityCd - dt);
-      if (this.hero) { for (const k in this.skillCd) if (this.skillCd[k] > 0) this.skillCd[k] = Math.max(0, this.skillCd[k] - dt); }
+      if (this.hero) {
+        this.sigCd = Math.max(0, this.sigCd - dt);
+        // The idle trickle. Everything else about the charge rewards fighting; this is
+        // the floor that stops a player who is losing badly — few units, little damage —
+        // from being locked out of the one button that could turn it around.
+        if (this.charge < 1) this.charge = Math.min(1, this.charge + (RC.HERO.chargeIdle || 0) * dt);
+      }
+      // A unit's guard just runs out — only the dome's host building shatters (see
+      // Building.update), because that is the one the ability was actually aimed at.
+      if (this.guard) RC.tickGuard(this, dt);
       this.castFx = Math.max(0, this.castFx - dt);
       this.critFx = Math.max(0, this.critFx - dt);
       this.surge = Math.max(0, this.surge - dt);
@@ -842,6 +915,13 @@ window.RC = window.RC || {};
                   : (foe.def && foe.def.armor ? foe.def.armor : 0);
       const cover = game.coverMul ? game.coverMul(foe) : 1;   // 숲에 숨은 대상은 덜 아프다
       const dealt = Math.max(1, (dmg - armor) * cover);
+      // Dealing damage charges the signature, and a kill is worth a visible jump — the
+      // meter should move when the player can see why it moved.
+      if (this.hero && this.charge != null && this.charge < 1) {
+        const wasAlive = !foe.dead;
+        this.charge = Math.min(1, this.charge + dealt * RC.HERO.chargeDealt);
+        if (wasAlive && foe.hp - dealt <= 0) this.charge = Math.min(1, this.charge + (RC.HERO.chargeKill || 0));
+      }
       if (this.def.acid) RC.applyAcid(foe, this.def.acid);   // 글룹 — 산성 중첩
       if (foe.kind === 'unit') {
         RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
@@ -924,44 +1004,27 @@ window.RC = window.RC || {};
 
     // ── 스킬 시전 ────────────────────────────────────
     canCast(game, key) {
-      if (this.hero) {
-        if (this.downed) return false;
-        const s = this._skillByKey((key || '').toLowerCase());
-        if (!s) return false;
-        if (s.ult) return this.ultReady();
-        if (this.heroRank(s.idx) <= 0) return false;
-        return (this.skillCd[s.sk.key.toLowerCase()] || 0) <= 0 && this.energy >= s.sk.cost;
-      }
+      // Heroes have exactly one ability and it answers to any key — the hotkey, the HUD
+      // button and the kid's big button all arrive here, and none of them should have to
+      // know which letter this particular hero uses.
+      if (this.hero) return this.sigReady();
       const ab = this.def.ability;
       return !!ab && this.abilityCd <= 0 && this.energy >= ab.cost;
     }
 
     cast(game, key) {
       if (this.hero) {
-        if (this.downed) return false;
-        const s = this._skillByKey((key || '').toLowerCase());
-        if (!s) return false;
-        const kk = s.sk.key.toLowerCase();
-
-        if (s.ult) {                                   // ULTIMATE
-          if (!this.ultReady()) return false;
-          const ab = this._effUlt(s.sk);
-          if (!this._applyAbility(game, ab)) return false;
-          this.energy -= s.sk.cost;
-          this.skillCd[kk] = s.sk.cd;
-          this.castFx = 0.9;                           // longer glow than a normal skill
-          game.shake(ab.shake || 0.8);
-          game.notify(this.def.name + ' — ' + s.sk.name + '!');
-          return true;
-        }
-
-        const rank = this.heroRank(s.idx);
-        if (rank <= 0 || (this.skillCd[kk] || 0) > 0 || this.energy < s.sk.cost) return false;
-        const ab = this._effSkill(s.sk, rank);
-        if (!this._applyAbility(game, ab)) return false;   // 대상 없으면 소모 안 함
-        this.energy -= s.sk.cost;
-        this.skillCd[kk] = s.sk.cd;
-        this.castFx = 0.4;
+        if (!this.sigReady()) return false;
+        const ab = this.effSig();
+        if (!ab || !this._applyAbility(game, ab)) return false;
+        // Charge is spent whether or not it killed anything. A refund on a "bad" cast
+        // would quietly teach the player to only ever fire it at a perfect moment, which
+        // is the opposite of the decision this ability is for.
+        this.charge = 0;
+        this.sigCd = RC.HERO.sigCd || 1.5;
+        this.castFx = 0.9;
+        game.shake(ab.shake || 0.6);
+        game.notify(this.def.name + ' — ' + ab.name + '!');
         return true;
       }
       const ab = this.def.ability;
@@ -1160,6 +1223,90 @@ window.RC = window.RC || {};
           game.fx.push({ abil: 'barrage', ax: cx, ay: cy, t: 1.1, radius: ab.radius, owner: this.owner });
           return true;
         }
+        // ── SIGNATURE: Bulwark (Ironclad Warden) ──
+        // Throws a guard dome over the thing being defended, not over the hero. In
+        // Crystal Guard that is the crystal; in a normal match it falls back to the
+        // nearest friendly core, and to the Warden itself if it is somehow alone.
+        case 'dome': {
+          const host = this._domeHost(game);
+          if (!host) return false;
+          const amount = Math.round(ab.shield || 600);
+          host.guard = { hp: amount, max: amount, t: ab.dur || 6, fx: 0.25,
+                         owner: this.owner, radius: ab.radius || 300,
+                         shatterDmg: ab.shatterDmg || 0, shatterSlow: ab.shatterSlow || 0 };
+          // Wider Dome — allies standing inside get a smaller guard of their own.
+          if (ab.allyShare) {
+            const share = Math.round(amount * ab.allyShare);
+            for (const u of game.units) {
+              if (u.dead || u.owner !== this.owner || u.hero) continue;
+              if (RC.dist(host.x, host.y, u.x, u.y) > (ab.radius || 300)) continue;
+              u.guard = { hp: share, max: share, t: ab.dur || 6, fx: 0.2, owner: this.owner, radius: u.r + 6 };
+            }
+          }
+          game.fx.push({ abil: 'dome', ax: host.x, ay: host.y, t: 0.8, radius: ab.radius || 300, owner: this.owner });
+          return true;
+        }
+
+        // ── SIGNATURE: Hatch the Brood (Brood Matriarch) ──
+        // Hatches at the thickest knot of enemies rather than under the hero's feet, so
+        // the babies arrive where the fight actually is instead of needing to walk there.
+        case 'brood': {
+          const type = ab.spawn || 'globling';
+          if (!RC.UNITS[type]) return false;
+          const at = this._pressurePoint(game, 900) || { x: this.x, y: this.y };
+          const n = Math.max(1, Math.round(ab.count || 5));
+          for (let i = 0; i < n; i++) {
+            const a2 = (i / n) * Math.PI * 2;
+            const d = (ab.radius || 130) * (0.4 + 0.6 * ((i % 3) / 2));
+            const nx = Math.max(20, Math.min(RC.CFG.WORLD_W - 20, at.x + Math.cos(a2) * d));
+            const ny = Math.max(20, Math.min(RC.CFG.WORLD_H - 20, at.y + Math.sin(a2) * d));
+            const u = new RC.Unit(type, nx, ny, this.owner);
+            u.temp = ab.life || 26;      // free, but they expire — no supply, no upkeep
+            u.free = true;
+            u.summoned = true;
+            if (ab.hatchSpd) u.speedMul = (u.speedMul || 1) * ab.hatchSpd;
+            if (ab.hatchDmg) u.dmgMul = (u.dmgMul || 1) * ab.hatchDmg;
+            if (ab.burstDmg) u.deathBurst = { radius: ab.burstRadius || 90, dmg: ab.burstDmg };
+            if (game.initUnit) game.initUnit(u);
+            game.units.push(u);
+            game.fx.push({ abil: 'warp', ax: nx, ay: ny, t: 0.4, radius: u.r + 8, owner: this.owner });
+          }
+          game.fx.push({ abil: 'swarm', ax: at.x, ay: at.y, t: 0.9, radius: ab.radius || 130, owner: this.owner });
+          return true;
+        }
+
+        // ── SIGNATURE: Rift Nova (Radiant Archon) ──
+        // The shove is measured from the CRYSTAL, not from the Archon. Pushing away from
+        // the hero scatters enemies wherever the hero happens to stand; pushing away from
+        // the objective always clears the thing you are defending.
+        // NB the id is 'riftnova', not 'nova' — the Spitter's Corrosive Spray already owns
+        // 'nova', and a duplicate case label is silently unreachable rather than an error.
+        case 'riftnova': {
+          const at = this._pressurePoint(game, ab.radius * 2.2) || { x: this.x, y: this.y };
+          const from = this._domeHost(game) || this;
+          const R = ab.radius || 240;
+          let hit = 0;
+          for (const u of game.units) {
+            if (u.dead) continue;
+            if (RC.dist(at.x, at.y, u.x, u.y) > R) continue;
+            if (game.areEnemies(u.owner, this.owner)) {
+              this._hit(u, ab.dmg || 60, game);
+              u.slow = Math.max(u.slow || 0, ab.slowDur || 1.5);
+              const a2 = Math.atan2(u.y - from.y, u.x - from.x);
+              const push = ab.push || 95;
+              u.x = Math.max(u.r, Math.min(RC.CFG.WORLD_W - u.r, u.x + Math.cos(a2) * push));
+              u.y = Math.max(u.r, Math.min(RC.CFG.WORLD_H - u.r, u.y + Math.sin(a2) * push));
+              hit++;
+            } else if (u.owner === this.owner && (ab.heal || ab.shieldGrant)) {
+              if (ab.heal && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + ab.heal);
+              if (ab.shieldGrant && u.maxShield) RC.restoreShield(u, ab.shieldGrant);
+            }
+          }
+          game.fx.push({ abil: 'aegis', ax: at.x, ay: at.y, t: 1.0, radius: R, owner: this.owner });
+          void hit;                       // fires even on an empty field — see cast()
+          return true;
+        }
+
         case 'swarm': {   // 브루드 매트리아크 — 무리 부화
           const type = ab.spawn || 'globling';
           if (!RC.UNITS[type]) return false;
@@ -1226,36 +1373,61 @@ window.RC = window.RC || {};
       return false;
     }
 
-    // AI 영웅 자동 시전 — 습득한 스킬을 상황에 맞게
-    _heroAutoCast(game) {
-      // 궁극기 — 값이 비싸므로 정말 값어치할 때만 (적이 여럿 몰려 있을 때)
-      const ult = this.def.ult;
-      if (ult && this.ultReady()) {
-        const r = ult.radius || 200;
-        let foes = 0;
-        for (const u of game.units) {
-          if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-          if (RC.dist(this.x, this.y, u.x, u.y) <= r) foes++;
-        }
-        // 'swarm' is a reinforcement ult — worth using whenever a real fight starts.
-        const need = ult.id === 'swarm' ? 2 : 4;
-        if (foes >= need) { this.cast(game, ult.key.toLowerCase()); return; }
-      }
+    // What the hero is defending: the crystal if the mode has one, otherwise the hero
+    // itself. Both signatures that need an origin read this — the dome goes over it, and
+    // the nova shoves enemies away from it.
+    //
+    // It used to fall back to the nearest friendly CORE, which was wrong in every mode
+    // without a crystal: the hero pushes out, the core sits at the far end of the map, and
+    // an AI Warden measured pressure at an empty base and so never fired at all. "Hold on"
+    // has to mean the place that is actually in danger, and that place is where the hero
+    // is standing. With Wider Dome that covers the squad standing with it.
+    _domeHost(game) {
+      if (game.crystal && !game.crystal.dead) return game.crystal;
+      return this;
+    }
 
-      const list = this.def.skills || [];
-      for (let i = 0; i < list.length; i++) {
-        const sk = list[i];
-        if (this.heroRank(i) <= 0) continue;
-        const key = sk.key.toLowerCase();
-        if ((this.skillCd[key] || 0) > 0 || this.energy < sk.cost) continue;
-        if (sk.id === 'mend' || sk.id === 'weld') {
-          if (this.hp < this.maxHp * 0.6) this.cast(game, key);
-        } else if (sk.id === 'warp') {
-          // 자동 점멸은 하지 않음
-        } else if (this.foe && !this.foe.dead) {
-          this.cast(game, key);          // 공격 스킬 — 교전 중일 때
+    // The thickest knot of enemies within `range` — where the fight actually is. Scored
+    // by how many other enemies sit near each candidate, so a lone scout never outranks a
+    // clump. This is the whole of the auto-targeting: the player chooses WHEN, not where.
+    _pressurePoint(game, range) {
+      const home = this._domeHost(game);
+      const ox = home ? home.x : this.x, oy = home ? home.y : this.y;
+      let best = null, bestScore = 0;
+      for (const u of game.units) {
+        if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+        if (RC.dist(ox, oy, u.x, u.y) > range) continue;
+        let n = 0;
+        for (const v of game.units) {
+          if (v.dead || !game.areEnemies(v.owner, this.owner)) continue;
+          if (RC.dist(u.x, u.y, v.x, v.y) <= 150) n++;
         }
+        // Tie-break towards the objective, so an equal clump closer to the crystal wins.
+        const score = n * 1000 - RC.dist(ox, oy, u.x, u.y);
+        if (score > bestScore || !best) { bestScore = score; best = u; }
       }
+      return best ? { x: best.x, y: best.y } : null;
+    }
+
+    // AI 영웅 자동 시전 — 하나뿐인 시그니처를 값어치할 때만
+    _heroAutoCast(game) {
+      const sig = this.def.sig;
+      if (!sig || !this.sigReady()) return;
+      const r = sig.radius || 240;
+      const home = this._domeHost(game);
+      let foes = 0;
+      for (const u of game.units) {
+        if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+        // The dome is judged by pressure on what it protects; the other two by pressure
+        // near the hero, which is where they will land.
+        const ax = (sig.id === 'dome' && home) ? home.x : this.x;
+        const ay = (sig.id === 'dome' && home) ? home.y : this.y;
+        if (RC.dist(ax, ay, u.x, u.y) <= r) foes++;
+      }
+      // The brood is reinforcement — worth it the moment a real fight starts. The other
+      // two are moments, and a moment spent on two stragglers is a moment wasted.
+      const need = sig.id === 'brood' ? 2 : 4;
+      if (foes >= need) this.cast(game, sig.key);
     }
 
     // AI 유닛 자동 시전 — 상황에 맞을 때만
