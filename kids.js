@@ -940,7 +940,9 @@ RC.Kids = (function () {
     }
   }
 
-  // Everything the big charge button needs, or null when this player has no hero.
+  // Everything the hero buttons need, or null when this player has no hero.
+  // `skills` is the two small tactical buttons (Q/E); the big ring is still the
+  // signature, kept separate because it is the only one with a story attached to it.
   function sigHud(g, owner) {
     const h = heroOf(g, owner);
     if (!h) return null;
@@ -950,6 +952,13 @@ RC.Kids = (function () {
       charge: Math.max(0, Math.min(1, h.charge || 0)),
       ready: h.sigReady(), downed: !!h.downed, level: h.level,
       ups: (sig.ups || []).filter(u => h.hasUp(u.id)).map(u => u.ic),
+      skills: (h.def.skills || []).filter(sk => !sk.ult).map(sk => ({
+        key: sk.key, ic: sk.ic, name: sk.name, kid: sk.kid,
+        ready: h.skillReady(sk),
+        // A fraction rather than seconds — a six-year-old reads a shrinking wedge much
+        // faster than they read a number, and it drives the same CSS ring as the charge.
+        cd: sk.cd ? Math.max(0, 1 - (h.skillCd[sk.id] || 0) / sk.cd) : 1,
+      })),
     };
   }
 

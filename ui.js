@@ -345,7 +345,7 @@ RC.UI = (function () {
     const up = g.upgrades && g.upgrades[me] ? RC.UPGRADE_ORDER.map(k => g.upgrades[me][k]).join('') : '';
     const sig = sel.map(e => {
       let t = e.id + ':' + (e.queue ? e.queue.length : 0) + ':' + Math.round(e.buildProgress * 20 || 0);
-      if (e.kind === 'unit' && e.def.ability) t += ':' + (e.canCast(g) ? 1 : 0);
+      if (e.hero) t += ':C' + Math.round((e.charge || 0) * 20) + ':' + e.skills().map(sk => e.skillReady(sk) ? 1 : 0).join('');
       if (e.hero) t += ':H' + e.level + ':' + Math.floor(e.xp) + ':' + (e.downed ? 1 : 0) + ':' + Math.floor(g.time);
       if (e.research) t += ':r' + Math.ceil(e.research.timeLeft);
       else if (e.kind === 'building' && e.def.research) t += ':r0';
@@ -393,18 +393,10 @@ RC.UI = (function () {
       el.cmds.innerHTML = '';
       const w = sel.filter(e => e.kind === 'unit' && e.def.worker);
       if (w.length) buildButtons();
-      // 선택 안에 있는 유닛 종류별 스킬 버튼 (같은 종류 전부에게 시전)
-      const byAbility = {};
-      sel.forEach(e => {
-        if (e.kind === 'unit' && e.owner === g.playerOwner && e.def.ability) {
-          (byAbility[e.def.ability.id] = byAbility[e.def.ability.id] || []).push(e);
-        }
-      });
-      Object.values(byAbility).forEach(list => {
-        const ready = list.some(u => u.canCast(g));
-        const ab = list[0].def.ability;
-        abilityBtn(ab, ready, () => RC.cmd(g, { t: 'cast', ids: list.map(u => u.id), key: ab.key.toLowerCase() }));
-      });
+      // 여러 유닛을 골랐을 때 스킬 버튼은 없다 — 유닛 능력은 전부 패시브라 누를 것이
+      // 없다. 영웅이 섞여 있으면 영웅 버튼만 나온다.
+      const hero = sel.find(e => e.hero && e.owner === g.playerOwner);
+      if (hero) heroSkills(hero);
       return;
     }
 
@@ -451,6 +443,8 @@ RC.UI = (function () {
     el.cmds.innerHTML = '';
     const me = g.playerOwner;
     if (e.owner !== me) return;
+    // 고유 능력을 맨 위에 — 이 유닛이 무엇을 하는지가 무엇을 만들 수 있는지보다 먼저다.
+    if (e.kind === 'unit') passiveRow(e.def);
     if (e.kind === 'building' && e.done) {
       e.def.produces.forEach(t => {
         const d = RC.UNITS[t];
@@ -481,19 +475,25 @@ RC.UI = (function () {
     } else if (e.kind === 'unit' && e.def.hero) {
       heroSkills(e);
     }
-
-    // unit ability button
-    if (e.kind === 'unit' && e.def.ability) {
-      abilityBtn(e.def.ability, e.canCast(g), () => RC.cmd(g, { t: 'cast', ids: [e.id], key: e.def.ability.key.toLowerCase() }));
-    }
   }
 
-  // 영웅 스킬 3개 버튼 (미습득=잠김, 부활 중=카운트다운)
-  // ── The hero's one button ────────────────────────────────────────────────
-  // This used to be three skill buttons plus an ultimate, each with its own energy cost
-  // and cooldown. It is one now, for every mode: heroes have a single signature that
-  // charges by fighting. Four cooldowns is a bar of icons to read mid-fight; one is a
-  // decision, and it is the same decision an eight-year-old and a thirteen-year-old make.
+  // 고유 능력 — 누를 수 없다는 것이 요점이라 버튼이 아니라 한 줄로 보여준다.
+  function passiveRow(d) {
+    const p = d.passive && RC.PASSIVE[d.passive.id];
+    if (!p) return;
+    const r = document.createElement('div');
+    r.className = 'cmd off passive';
+    r.innerHTML = `<span class="l">${p.ic} ${p.name}</span><span class="s">Always on</span>`;
+    r.title = `${p.name} — ${p.desc}`;
+    el.cmds.appendChild(r);
+  }
+
+  // ── The hero's bar ───────────────────────────────────────────────────────
+  // Three buttons, and the hero is the ONLY thing in the game that has any. Q and E run
+  // on energy plus a cooldown so they are pressed constantly; R runs on the fight-charge
+  // meter so it is the one you save. The subtitle always says which of the two currencies
+  // is holding the button back, because "why is this greyed out" is the question a player
+  // actually has mid-fight.
   function heroSkills(h) {
     if (h.downed) {
       const b = document.createElement('div');
@@ -504,15 +504,26 @@ RC.UI = (function () {
     }
     const sig = h.def.sig;
     if (!sig) return;
-    const pct = Math.round(Math.max(0, Math.min(1, h.charge || 0)) * 100);
-    const ready = h.sigReady();
-    const b = document.createElement('button');
-    b.className = 'cmd ability ult' + (ready ? ' ready' : ' off');
-    const sub = ready ? 'READY' : (h.sigCd > 0 ? 'Recovering…' : 'Charging ' + pct + '%');
-    b.innerHTML = `<kbd>${sig.key}</kbd><span class="l">${sig.ic} ${sig.name}</span><span class="s">${sub}</span>`;
-    b.title = `${sig.name} — ${sig.desc || ''} (charges by fighting; press ${sig.key})`;
-    b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key: sig.key.toLowerCase() }); });
-    el.cmds.appendChild(b);
+    for (const sk of h.skills()) {
+      const ready = h.skillReady(sk);
+      const b = document.createElement('button');
+      b.className = 'cmd ability' + (sk.ult ? ' ult' : '') + (ready ? ' ready' : ' off');
+      let sub;
+      if (sk.ult) {
+        const pct = Math.round(Math.max(0, Math.min(1, h.charge || 0)) * 100);
+        sub = ready ? 'READY' : (h.sigCd > 0 ? 'Recovering…' : 'Charging ' + pct + '%');
+      } else {
+        const cd = h.skillCd[sk.id] || 0;
+        sub = cd > 0 ? Math.ceil(cd) + 's'
+            : (h.energy < (sk.cost || 0) ? 'Energy ' + Math.floor(h.energy) + '/' + sk.cost
+                                         : 'Energy ' + sk.cost + ' · CD ' + sk.cd + 's');
+      }
+      b.innerHTML = `<kbd>${sk.key}</kbd><span class="l">${sk.ic} ${sk.name}</span><span class="s">${sub}</span>`;
+      b.title = `${sk.name} — ${sk.desc || ''}` +
+                (sk.ult ? ` (charges by fighting; press ${sk.key})` : ` (Energy ${sk.cost}, cooldown ${sk.cd}s; press ${sk.key})`);
+      b.addEventListener('click', ev => { ev.stopPropagation(); RC.cmd(g, { t: 'cast', ids: [h.id], key: sk.key.toLowerCase() }); });
+      el.cmds.appendChild(b);
+    }
 
     // Held upgrades, as one quiet row. Which three you have is the run's story.
     const held = (sig.ups || []).filter(u => h.hasUp(u.id));
@@ -524,17 +535,6 @@ RC.UI = (function () {
       r.title = held.map(u => u.name + ' — ' + u.desc).join('\n');
       el.cmds.appendChild(r);
     }
-  }
-
-  // 스킬 버튼 — 에너지/쿨다운 반영
-  function abilityBtn(ab, ready, fn) {
-    const b = document.createElement('button');
-    b.className = 'cmd ability' + (ready ? '' : ' off');
-    b.innerHTML = `<kbd>${ab.key}</kbd><span class="l">✦ ${ab.name}</span>` +
-                  `<span class="s">Energy ${ab.cost} · CD ${ab.cd}s</span>`;
-    b.title = `${ab.name} — ${ab.desc || ''} (Energy ${ab.cost}, cooldown ${ab.cd}s)`;
-    b.addEventListener('click', ev => { ev.stopPropagation(); fn(); });
-    el.cmds.appendChild(b);
   }
 
   // 툴팁 문구 — 유닛/건물의 핵심 스탯 + 설명

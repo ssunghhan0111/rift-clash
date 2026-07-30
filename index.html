@@ -197,6 +197,11 @@
   .cmd.ult .l { color: #ffe9a8; }
   .cmd.ult.ready { background: #4a3a12; box-shadow: 0 0 0 1px #ffc857 inset; animation: ultpulse 1.4s ease-in-out infinite; }
   .cmd.ult.ready .l { color: #fff4cf; }
+  /* Q/E ready — a quiet cyan edge, deliberately NOT the ultimate's gold pulse. */
+  .cmd.ability.ready:not(.ult) { box-shadow: 0 0 0 1px var(--cyan) inset; }
+  /* A passive is shown as a row, never a button: there is nothing to press. */
+  .cmd.passive { border-left-color: #7d8ea3; background: #1b2028; cursor: default; }
+  .cmd.passive .l { color: #cfe0f0; }
   @keyframes ultpulse {
     0%, 100% { box-shadow: 0 0 0 1px #ffc857 inset, 0 0 0 rgba(255,200,87,0); }
     50%      { box-shadow: 0 0 0 1px #ffe9a8 inset, 0 0 14px rgba(255,200,87,.55); }

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "npm run test:sim && npm run test:browser",
-    "test:sim": "node tests/wavecheck.js && node tests/simtest.js && node tests/kidstest.js && node tests/kidsuitest.js && node tests/kidscoop_test.js && node tests/inputmap_test.js && node tests/sighttest.js && node tests/reachtest.js && node tests/planettest.js && node tests/hardentest.js && node tests/herokit_test.js && node tests/aidiff_test.js && node tests/aiecon_test.js && node tests/profile_test.js",
+    "test:sim": "node tests/wavecheck.js && node tests/simtest.js && node tests/kidstest.js && node tests/kidsuitest.js && node tests/kidscoop_test.js && node tests/inputmap_test.js && node tests/sighttest.js && node tests/reachtest.js && node tests/planettest.js && node tests/hardentest.js && node tests/herokit_test.js && node tests/passive_test.js && node tests/aidiff_test.js && node tests/aiecon_test.js && node tests/profile_test.js",
     "test:browser": "node tests/lobbytest.js && node tests/uitest.js && node tests/devtest.js && node tests/touchtest.js && node tests/fstest.js && node tests/voicetest.js && node tests/sharetest.js && node tests/herotest.js && node tests/zoomtest.js && node tests/resumetest.js",
     "test:waves": "node tests/wavecheck.js",
     "test:survival": "node tests/simtest.js",
@@ -27,6 +27,7 @@
     "test:fullscreen": "node tests/fstest.js",
     "test:hero": "node tests/herotest.js",
     "test:herokit": "node tests/herokit_test.js",
+    "test:passive": "node tests/passive_test.js",
     "test:aidiff": "node tests/aidiff_test.js",
     "test:aiecon": "node tests/aiecon_test.js",
     "test:profile": "node tests/profile_test.js",

@@ -30,6 +30,98 @@ window.RC = window.RC || {};
   }
   RC.applyAcid = applyAcid;
 
+  // ── 상태이상 / Passive statuses ─────────────────────────────────────────
+  // Every unit passive that touches an enemy lands as one of four statuses. They share
+  // one rule: a fresh hit REFRESHES the timer and adds at most one stack, so a stream of
+  // fire keeps a status topped up but can never run away with it. Acid above is the
+  // fifth and oldest of these; shred is deliberately the same currency, so a Gloop army
+  // and a Chaingunner stack into each other instead of each doing their own thing.
+  //
+  // Buildings can be venomed and shredded (a siege should still rot a wall) but never
+  // chilled or frozen — there is nothing to slow down, and a frozen building would read
+  // as broken rather than as controlled.
+  function applyChill(foe, p) {
+    if (!p || !foe || foe.dead || foe.kind !== 'unit') return;
+    foe.slow = Math.max(foe.slow || 0, p.slow || 1.5);
+    foe.chillStk = (foe.chillStk || 0) + 1;
+    foe.chillT = p.slow || 1.5;
+    // Full stacks cash themselves in for a freeze and reset — so chill is a countdown
+    // the enemy can watch, not a slow that silently becomes a stun.
+    if (foe.chillStk >= (p.max || 4)) {
+      foe.chillStk = 0; foe.chillT = 0;
+      foe.frozen = Math.max(foe.frozen || 0, p.freeze || 1);
+      foe.freezeFx = 0.3;
+    }
+  }
+  function applyVenom(foe, p) {
+    if (!p || !foe || foe.dead) return;
+    foe.venomStk = Math.min(p.max || 4, (foe.venomStk || 0) + 1);
+    foe.venomT = p.dur || 4;
+    foe.venomDmg = p.dmg || 4;
+    foe.venomFire = !!p.fire;          // burn vs venom — identical maths, different colour
+  }
+  function applyShred(foe, p) {
+    if (!p || !foe || foe.dead) return;
+    foe.shredStk = Math.min(p.max || 5, (foe.shredStk || 0) + 1);
+    foe.shredT = p.dur || 4;
+    foe.shredAmt = p.amt || 1;
+  }
+  function applyMark(foe, p) {
+    if (!p || !foe || foe.dead) return;
+    foe.markT = Math.max(foe.markT || 0, p.dur || 4);
+    foe.markAmp = Math.max(foe.markAmp || 0, p.amp || 0.2);
+  }
+  RC.applyChill = applyChill;
+  RC.applyVenom = applyVenom;
+  RC.applyShred = applyShred;
+  RC.applyMark = applyMark;
+
+  // 방어 상태 초기화 — 유닛과 건물이 같은 필드를 쓰기 때문에 한 곳에서 만든다.
+  function initStatus(e) {
+    e.acidStacks = 0; e.acidT = 0; e.acidDmg = 0; e.acidShred = 0;
+    e.venomStk = 0; e.venomT = 0; e.venomDmg = 0; e.venomFire = false;
+    e.shredStk = 0; e.shredT = 0; e.shredAmt = 0;
+    e.chillStk = 0; e.chillT = 0; e.frozen = 0; e.freezeFx = 0;
+    e.markT = 0; e.markAmp = 0;
+    e.auraArmor = 0; e.auraArmorT = 0;
+  }
+  RC.initStatus = initStatus;
+
+  // 서로를 살려내는 고리 차단 / The healer-on-healer rule.
+  //
+  // A healing aura that heals other healing auras is a closed loop: nine Patch Bots keep
+  // each other topped up faster than an early wave can kill any one of them, so they
+  // never die, they fill the population cap, and the army never turns over into anything
+  // that deals damage. A Crystal Guard run that used to reach wave 11 stalled out at 7
+  // holding a pile of immortal medics. So healers mend the ARMY, never each other — one
+  // rule, stated once, rather than a heal number tuned down until the loop is merely slow.
+  const HEAL_AURA = { mender: 1, bloom: 1 };
+  function isHealer(e) { return !!(e && e.def && e.def.passive && HEAL_AURA[e.def.passive.id]); }
+
+  // 상태이상 감쇠 + 지속 피해. 반환값은 이번 틱에 입은 지속 피해량.
+  // Units and buildings both call this, which is the only reason venom works on a wall.
+  function tickStatus(e, dt) {
+    let dot = 0;
+    if (e.acidStacks > 0) {
+      e.acidT = Math.max(0, e.acidT - dt);
+      dot += e.acidStacks * e.acidDmg * dt;
+      if (!e.acidT) { e.acidStacks = 0; e.acidDmg = 0; e.acidShred = 0; }
+    }
+    if (e.venomStk > 0) {
+      e.venomT = Math.max(0, e.venomT - dt);
+      dot += e.venomStk * e.venomDmg * dt;
+      if (!e.venomT) { e.venomStk = 0; e.venomDmg = 0; }
+    }
+    if (e.shredT > 0) { e.shredT = Math.max(0, e.shredT - dt); if (!e.shredT) { e.shredStk = 0; e.shredAmt = 0; } }
+    if (e.markT > 0)  { e.markT  = Math.max(0, e.markT  - dt); if (!e.markT)  e.markAmp = 0; }
+    if (e.chillT > 0) { e.chillT = Math.max(0, e.chillT - dt); if (!e.chillT) e.chillStk = 0; }
+    if (e.frozen > 0) e.frozen = Math.max(0, e.frozen - dt);
+    if (e.freezeFx > 0) e.freezeFx = Math.max(0, e.freezeFx - dt);
+    if (e.auraArmorT > 0) { e.auraArmorT -= dt; if (e.auraArmorT <= 0) e.auraArmor = 0; }
+    return dot;
+  }
+  RC.tickStatus = tickStatus;
+
   // ── 플라즈마 실드 (Aether) ────────────────────────────
   // Single choke point for post-armor damage so units, buildings, towers and
   // splash all obey the same rule: shields soak first, HP takes the remainder.
@@ -175,7 +267,7 @@ window.RC = window.RC || {};
       this.cd = 0;              // 타워 공격 쿨타임
       this.foe = null;          // 타워 현재 표적
       this.rally = { x: x, y: y + d.h / 2 + 50 };
-      this.acidStacks = 0; this.acidT = 0; this.acidDmg = 0; this.acidShred = 0;  // 산성 중첩
+      RC.initStatus(this);                       // 산성/맹독/장갑파쇄/표식 (유닛과 동일)
       // 플라즈마 실드 (Aether) — 건설이 끝나야 완충된다
       this.maxShield = d.shield || 0;
       this.shield = prebuilt ? this.maxShield : 0;
@@ -215,11 +307,8 @@ window.RC = window.RC || {};
         }
       }
       // 산성 지속 피해 (건설 중에도 진행)
-      if (this.acidStacks > 0) {
-        this.acidT -= dt;
-        this.damage(this.acidStacks * this.acidDmg * dt);
-        if (this.acidT <= 0) this.acidStacks = 0;
-      }
+      const dot = RC.tickStatus(this, dt);
+      if (dot > 0) this.damage(dot);
       if (this.done) RC.tickShield(this, dt);   // 실드 재충전 (완공된 건물만)
       if (!this.done) return;
       // 연구 진행 (아크 랩)
@@ -310,13 +399,13 @@ window.RC = window.RC || {};
       // 에너지 / 스킬
       this.maxEnergy = d.energy || 0;
       this.energy = this.maxEnergy * (RC.CFG.ENERGY_START || 0.5);
-      this.abilityCd = 0;
       this.curSpeed = d.speed;
-      // 버프/디버프 타이머 (초)
-      this.surge = 0;      // 볼트병 과부하 사격 (공속·이속↑)
-      this.bulwark = 0;    // 실드러 방벽 (방어력↑)
-      this.rail = 0;       // 스파크캐논 조준 사격 (사거리·위력↑, 이동불가)
-      this.slow = 0;       // 펄스코일 정전 파동 피격 (느려짐)
+      // ── 버프 타이머 (초) ──
+      // `haste` is any move/fire-rate boost (the Hoverwing's Strafe Run passive today,
+      // and anything a hero grants later). Generic on purpose: the source no longer has
+      // to be a def.ability that the stat getters can read the numbers back out of.
+      this.haste = 0; this.hasteSpd = 1; this.hasteFire = 1;
+      this.slow = 0;       // 둔화 — 냉기/충격 계열 피격
       this.castFx = 0;     // 시전 연출 타이머
       this.critFx = 0;     // 치명타 연출 타이머
       this._castTry = 0;   // AI 자동시전 시도 간격
@@ -343,8 +432,9 @@ window.RC = window.RC || {};
       // atkAnim: 공격하는 순간의 돌진(근접)/반동(원거리) 모션.
       // hurt: 맞은 순간 뒤로 밀리는 반응. hurtDir는 공격자→피격자 방향(밀려나는 쪽).
       this.atkAnim = 0; this.hurt = 0; this.hurtDir = 0;
-      // 산성 중첩 (글룹 피격 시) — 방어 감소 + 지속 피해
-      this.acidStacks = 0; this.acidT = 0; this.acidDmg = 0; this.acidShred = 0;
+      // 상태이상 — 산성/맹독/장갑파쇄/냉기·동결/표식 (RC.initStatus 참조)
+      RC.initStatus(this);
+      this._auraT = 0;                       // 오라 패시브 갱신 주기
       // 플라즈마 실드 (Aether) — 체력보다 먼저 소모되고 전투 이탈 후 빠르게 재충전
       this.maxShield = d.shield || 0;
       this.baseMaxShield = d.shield || 0;
@@ -390,6 +480,18 @@ window.RC = window.RC || {};
     useCardUpgrades() { this._cardUps = true; }
     grantUp(id) { if (this.sigUp) this.sigUp[id] = true; }
     sigReady() { return !!(this.hero && this.def.sig && !this.downed && this.sigCd <= 0 && this.charge >= 1); }
+
+    // Q/E after level scaling. Deliberately much simpler than effSig: the tactical two
+    // carry no upgrades, so "the numbers grow with level" is the whole of it.
+    effSkill(sk) {
+      if (!sk) return null;
+      if (sk.ult) return this.effSig();
+      const a = Object.assign({}, sk);
+      const lv = this.level - 1;
+      if (sk.dmgPerLevel)    a.dmg    = (sk.dmg || 0) + sk.dmgPerLevel * lv;
+      if (sk.shieldPerLevel) a.shield = (sk.shield || 0) + sk.shieldPerLevel * lv;
+      return a;
+    }
 
     // The signature's numbers after level scaling and whichever upgrades are held.
     effSig() {
@@ -630,8 +732,7 @@ window.RC = window.RC || {};
     effAtk(game) {
       let d = this.def.dmg + this._up(game, 'atk') * RC.CFG.UP_ATK_STEP;
       if (this.hero) d += (this.level - 1) * ((this.def.grow && this.def.grow.dmg) || 0);
-      if (this.rail > 0 && this.def.ability) d += this.def.ability.dmgBonus || 0;
-      if (this.surge > 0) d *= 1.5;
+      if (this.dmgMul) d *= this.dmgMul;                            // 소환 강화 (Angry Brood 등)
       const t = this.terr(game);                                   // 고지대 = 화력 우위
       if (t && t.high) d *= (RC.CFG.TERRAIN.high.atk || 1);
       return d;
@@ -639,33 +740,32 @@ window.RC = window.RC || {};
     effArmor(game) {
       let a = (this.def.armor || 0) + this._up(game, 'arm') * RC.CFG.UP_ARM_STEP;
       if (this.hero) a += (this.level - 1) * ((this.def.grow && this.def.grow.armor) || 0);
-      if (this.bulwark > 0 && this.def.ability) a += this.def.ability.armorBonus || 0;
+      if (this.auraArmorT > 0) a += this.auraArmor || 0;                // 실드러/드롭십 오라
       if (this.acidStacks > 0) a -= this.acidStacks * this.acidShred;   // 산성 = 갑옷 부식
+      if (this.shredStk > 0) a -= this.shredStk * this.shredAmt;        // 장갑 파쇄 (같은 화폐)
       return Math.max(0, a);
     }
     effRange(game) {
       let r = this.def.range;
-      if (this.rail > 0 && this.def.ability) r += this.def.ability.rangeBonus || 0;
       const t = this.terr(game);                                   // 고지대 = 사거리 우위
       if (t && t.high) r *= (RC.CFG.TERRAIN.high.range || 1);
       else if (t && t.low) r *= (RC.CFG.TERRAIN.low.range || 1);   // 저지대 = 사거리 손해
       return r;
     }
     effSplash(game) {
-      let s = this.def.splash || 0;
-      if (this.rail > 0 && this.def.ability) s += this.def.ability.splashBonus || 0;
-      return s;
+      return this.def.splash || 0;
     }
     effCd(game) {
       let c = this.def.cd;
-      if (this.surge > 0 && this.def.ability) c *= (this.def.ability.fire || 0.5);
+      if (this.haste > 0) c *= this.hasteFire || 1;
       if (this.slow > 0) c *= 1.5;
       c /= (1 + this._up(game, 'spd') * RC.CFG.UP_SPD_ATK);   // 기동 강화 = 공속↑
       return c;
     }
     effSpeed(game) {
       let s = this.speed;
-      if (this.surge > 0 && this.def.ability) s *= (this.def.ability.spd || 1.3);
+      if (this.frozen > 0) return 0;                           // 동결 — 완전 정지
+      if (this.haste > 0) s *= this.hasteSpd || 1;
       if (this.slow > 0) s *= 0.5;
       s *= (1 + this._up(game, 'spd') * RC.CFG.UP_SPD_MOVE);  // 기동 강화 = 이속↑
       const t = this.terr(game);                               // 늪 = 진창에 발이 묶인다
@@ -700,9 +800,9 @@ window.RC = window.RC || {};
       // 연출 감쇠 — atkAnim은 0.22초, hurt는 0.18초에 걸쳐 1→0
       if (this.atkAnim > 0) this.atkAnim = Math.max(0, this.atkAnim - dt / 0.22);
       if (this.hurt > 0)    this.hurt    = Math.max(0, this.hurt    - dt / 0.18);
-      this.abilityCd = Math.max(0, this.abilityCd - dt);
       if (this.hero) {
         this.sigCd = Math.max(0, this.sigCd - dt);
+        for (const k in this.skillCd) if (this.skillCd[k] > 0) this.skillCd[k] = Math.max(0, this.skillCd[k] - dt);
         // The idle trickle. Everything else about the charge rewards fighting; this is
         // the floor that stops a player who is losing badly — few units, little damage —
         // from being locked out of the one button that could turn it around.
@@ -713,9 +813,7 @@ window.RC = window.RC || {};
       if (this.guard) RC.tickGuard(this, dt);
       this.castFx = Math.max(0, this.castFx - dt);
       this.critFx = Math.max(0, this.critFx - dt);
-      this.surge = Math.max(0, this.surge - dt);
-      this.bulwark = Math.max(0, this.bulwark - dt);
-      this.rail = Math.max(0, this.rail - dt);
+      this.haste = Math.max(0, this.haste - dt);
       this.slow = Math.max(0, this.slow - dt);
 
       // 에너지 재생
@@ -739,25 +837,30 @@ window.RC = window.RC || {};
       // Aether — 플라즈마 실드 재충전 (마지막 피격 후 SHIELD_DELAY 초 경과 시)
       RC.tickShield(this, dt);
 
-      // 글룹 — 타고난 재생 (전투 중엔 절반). 산성에 타 죽는 중이면 멈춤
-      if (this.def.regen && this.hp < this.maxHp && this.acidStacks <= 0) {
+      // 글룹 — 타고난 재생 (전투 중엔 절반). 독에 타 죽는 중이면 멈춤
+      if (this.def.regen && this.hp < this.maxHp && this.acidStacks <= 0 && this.venomStk <= 0) {
         const inCombat = this.state === 'attack' || !!this.foe;
         this.hp = Math.min(this.maxHp, this.hp + this.def.regen * (inCombat ? 0.5 : 1) * dt);
       }
 
-      // 산성 지속 피해 + 만료
-      if (this.acidStacks > 0) {
-        this.acidT -= dt;
-        this.hp -= this.acidStacks * this.acidDmg * dt;
+      // 상태이상 감쇠 + 지속 피해 (산성 / 맹독·화상)
+      const dot = RC.tickStatus(this, dt);
+      if (dot > 0) {
+        this.hp -= dot;
         if (this.hp <= 0) { this.hp = 0; this.dead = true; }
-        if (this.acidT <= 0) { this.acidStacks = 0; this.acidDmg = 0; this.acidShred = 0; }
       }
 
-      // 이동 속도 갱신 (뿌리내림 시 0)
-      this.curSpeed = this.rail > 0 ? 0 : this.effSpeed(game);
+      // 아우라 패시브 — 초당 4회만 갱신한다. 매 프레임 전군을 훑으면 큰 교전에서
+      // 이것 하나가 프레임을 잡아먹고, 0.25초 해상도로도 눈에는 똑같이 보인다.
+      if (this.def.passive) {
+        this._auraT -= dt;
+        if (this._auraT <= 0) { const step = 0.25; this._auraT = step; this._passiveAura(step, game); }
+      }
 
-      // AI 유닛 자동 스킬 시전 (영웅 포함)
-      if ((this.def.ability || this.def.hero) && game.isAI && game.isAI(this.owner)) this._autoCast(dt, game);
+      this.curSpeed = this.effSpeed(game);
+
+      // AI 영웅 자동 시전 — 유닛은 더 이상 시전할 것이 없다 (전부 패시브)
+      if (this.def.hero && game.isAI && game.isAI(this.owner)) this._autoCast(dt, game);
 
       // 죽은 대상 정리
       if (this.foe && this.foe.dead) this.foe = null;
@@ -808,12 +911,19 @@ window.RC = window.RC || {};
         }
       }
       // 길찾기 — 장애물/건물을 우회한다 (지상). 공중은 직진.
-      if (this.navigate(dt, game, this.target.x, this.target.y, 4)) this.stop();
+      if (this.navigate(dt, game, this.target.x, this.target.y, 4)) {
+        // 수송선 — 목적지에 닿으면 알아서 내린다. Unload used to be the one unit ability
+        // you actually had to press, which made it the one unit ability people forgot.
+        // "Go there" already means "go there and let them out"; there is no other reason
+        // to send a loaded dropship somewhere.
+        if (this.cargo && this.cargo.length) this._applyAbility(game, { id: 'unload' });
+        this.stop();
+      }
     }
 
     // 이동 중 응사 — 명령을 바꾸지 않고, 사거리 안에 있고 쿨타임이 찼을 때만 한 발.
     _returnFire(game) {
-      if (this.cd > 0 || this.rail > 0) return;
+      if (this.cd > 0 || this.frozen > 0) return;
       const reach = this.effRange(game);
       if (reach <= 0) return;
       const e = game.findNearestEnemy(this, reach + 26);
@@ -861,7 +971,7 @@ window.RC = window.RC || {};
         return;
       }
       this.facing = Math.atan2(this.foe.y - this.y, this.foe.x - this.x);
-      if (this.cd <= 0) this._fireAt(this.foe, game);
+      if (this.cd <= 0 && this.frozen <= 0) this._fireAt(this.foe, game);   // 동결 중엔 못 쏜다
     }
 
     // 한 발 발사 — 사거리/방향 판정은 호출한 쪽 책임. _attack과 이동 중 응사가 공유한다.
@@ -871,10 +981,23 @@ window.RC = window.RC || {};
       this.atkAnim = 1;                        // 공격 모션 트리거 (근접=돌진 / 원거리=반동)
       this.facing = Math.atan2(foe.y - this.y, foe.x - this.x);
       let dmg = this.effAtk(game);
+      const pas = this.def.passive;
+      // 마무리 일격 (Falcon Jet) — 이미 다친 대상에게 훨씬 크게 들어간다. 방어력 계산
+      // 전에 곱해야 장갑 높은 적에게도 "끝내주는" 느낌이 남는다.
+      if (pas && pas.id === 'execute' && foe.maxHp && foe.hp / foe.maxHp <= (pas.below || 0.35)) {
+        dmg *= pas.mul || 1.8;
+      }
+      // 공성 (Bastion) — 건물에 대한 추가 피해
+      if (pas && pas.siege && foe.kind === 'building') dmg *= pas.siege;
       // 치명 타격 업그레이드 — 확률적 2배
       const critLvl = this._up(game, 'crit');
       let crit = false;
-      if (critLvl > 0 && Math.random() < critLvl * RC.CFG.UP_CRIT_CHANCE) {
+      // 고유 치명 (Bladesworn) — 업그레이드와 별개로 굴린다. 둘 다 터져도 배수는 한 번만
+      // 적용된다: 두 배의 두 배는 암살자가 아니라 사고다.
+      if (pas && pas.id === 'crit' && Math.random() < (pas.chance || 0.3)) {
+        dmg *= pas.mul || 2; crit = true; this.critFx = 0.25;
+        if (RC.Audio) RC.Audio.play('crit');
+      } else if (critLvl > 0 && Math.random() < critLvl * RC.CFG.UP_CRIT_CHANCE) {
         dmg *= RC.CFG.UP_CRIT_MULT; crit = true; this.critFx = 0.25;
         if (RC.Audio) RC.Audio.play('crit');
         // A small screen "punch" on YOUR own crits — throttled so a crit-stacked
@@ -901,6 +1024,10 @@ window.RC = window.RC || {};
       game.fx.push({ x: this.x, y: this.y, tx: hx, ty: hy,
                      t: crit ? 0.14 : 0.09, owner: this.owner, splash: splash, crit: crit });
       if (RC.Audio) RC.Audio.play('shoot');
+      // 스트레이프 (Hoverwing) — 쏜 직후 가속. 치고 빠지는 기체라 발사가 곧 이탈이다.
+      if (pas && pas.id === 'swift') {
+        this.haste = pas.dur || 1.8; this.hasteSpd = pas.mul || 1.35; this.hasteFire = 1;
+      }
       if (game.marks && (crit || this.hero)) game.marks.push({ dmg: Math.round(dmg), x: foe.x, y: foe.y - (foe.r || 10) - 4, crit: crit, t: 0.8 });
       if (this.foe && this.foe.dead) this.foe = null;
     }
@@ -911,10 +1038,16 @@ window.RC = window.RC || {};
       // towers and death bursts — so the under-attack alert has to be raised from both
       // or it would miss the majority of the game. See game._maybeAlert.
       if (game._maybeAlert && !foe.dead) game._maybeAlert(foe, this.owner);
+      // 건물도 산성/파쇄로 장갑이 깎인다 — 유닛만 깎이면 공성에서 두 상태이상이 사라진다.
       const armor = foe.kind === 'unit' ? foe.effArmor(game)
-                  : (foe.def && foe.def.armor ? foe.def.armor : 0);
+                  : Math.max(0, ((foe.def && foe.def.armor) || 0)
+                               - (foe.acidStacks || 0) * (foe.acidShred || 0)
+                               - (foe.shredStk || 0) * (foe.shredAmt || 0));
       const cover = game.coverMul ? game.coverMul(foe) : 1;   // 숲에 숨은 대상은 덜 아프다
-      const dealt = Math.max(1, (dmg - armor) * cover);
+      // 표식 — 표식을 찍은 유닛만이 아니라 모두가 더 아프게 때린다. 그래서 Spark Cannon
+      // 한 기가 군대 전체의 화력을 올리는 유닛이 된다.
+      const amp = (foe.markT > 0) ? (1 + (foe.markAmp || 0)) : 1;
+      const dealt = Math.max(1, (dmg - armor) * cover * amp);
       // Dealing damage charges the signature, and a kill is worth a visible jump — the
       // meter should move when the player can see why it moved.
       if (this.hero && this.charge != null && this.charge < 1) {
@@ -923,6 +1056,16 @@ window.RC = window.RC || {};
         if (wasAlive && foe.hp - dealt <= 0) this.charge = Math.min(1, this.charge + (RC.HERO.chargeKill || 0));
       }
       if (this.def.acid) RC.applyAcid(foe, this.def.acid);   // 글룹 — 산성 중첩
+      this._passiveHit(foe, dealt, game);                    // 고유 패시브 (냉기/맹독/파쇄/…)
+      // 가시 껍질 — 방어자의 패시브다. _hit을 되부르지 않고 직접 피해를 넣는 것은
+      // 서로 가시를 가진 두 유닛이 무한히 되받아치는 것을 막기 위해서다.
+      const fp = foe.def && foe.def.passive;
+      const thorn = fp && (fp.id === 'thorns' ? fp.pct : fp.thorns);
+      if (thorn && this.kind === 'unit' && !this.dead && RC.dist(this.x, this.y, foe.x, foe.y) < 220) {
+        RC.dealDamage(this, dealt * thorn);
+        this.hitFlash = 0.1;
+        if (this.hp <= 0) { this.hp = 0; this.dead = true; }
+      }
       if (foe.kind === 'unit') {
         RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
         foe.hitFlash = 0.12;
@@ -936,6 +1079,150 @@ window.RC = window.RC || {};
       } else {
         foe.damage(dealt);
         foe.hitFlash = 0.09;                                  // 건물 피격 섬광
+      }
+    }
+
+    // ── 고유 패시브 ─────────────────────────────────────────────────────
+    // Two entry points and that is the whole system: _passiveHit runs on every landed
+    // attack, _passiveAura runs four times a second on units whose passive is a presence
+    // rather than an event. Anything a unit does beyond attacking goes through one of
+    // these — there is no third path and no button.
+    _passiveHit(foe, dealt, game) {
+      const p = this.def.passive;
+      if (!p || !foe || foe.dead) return;
+      switch (p.id) {
+        case 'chill': RC.applyChill(foe, p); break;
+        case 'venom': RC.applyVenom(foe, p); break;
+        // Burn is venom with a different colour. Keeping it a separate id costs one line
+        // here and buys a Rattler that reads as incendiary instead of as a snake.
+        case 'burn':  RC.applyVenom(foe, { dmg: p.dmg, dur: p.dur, max: p.max, fire: true }); break;
+        case 'shred': RC.applyShred(foe, p); break;
+        case 'mark':  RC.applyMark(foe, p); break;
+        case 'lifesteal': {
+          // 건물에서는 못 빤다. You cannot drink from a wall, and more to the point a
+          // swarm that heals off whatever it is chewing becomes unkillable exactly when
+          // it is chewing the thing you need it to stop chewing: one Globling on the Rift
+          // Crystal out-healed a Volt Trooper shooting it, forever.
+          if (foe.kind !== 'unit') break;
+          const gain = dealt * (p.pct || 0.3);
+          if (p.toShield && this.maxShield && this.shield < this.maxShield) RC.restoreShield(this, gain);
+          else if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + gain);
+          break;
+        }
+        case 'knock': {
+          if (foe.kind !== 'unit' || foe.def.flying) break;
+          const a = Math.atan2(foe.y - this.y, foe.x - this.x);
+          const d = p.dist || 24;
+          foe.x = Math.max(foe.r, Math.min(RC.CFG.WORLD_W - foe.r, foe.x + Math.cos(a) * d));
+          foe.y = Math.max(foe.r, Math.min(RC.CFG.WORLD_H - foe.r, foe.y + Math.sin(a) * d));
+          break;
+        }
+        // Chain and cleave re-enter _hit, so they are fenced behind _arc. Without it a
+        // chain would arc off its own arc and one Volt Trooper would clear a map.
+        case 'chain': {
+          if (this._arc || foe.kind !== 'unit') break;
+          this._arc = true;
+          let jumps = p.jumps || 1;
+          let from = foe;
+          const struck = new Set([foe.id]);
+          while (jumps-- > 0) {
+            let best = null, bd = p.range || 90;
+            for (const u of game.units) {
+              if (u.dead || struck.has(u.id) || !game.areEnemies(u.owner, this.owner)) continue;
+              const d = RC.dist(from.x, from.y, u.x, u.y);
+              if (d < bd) { bd = d; best = u; }
+            }
+            if (!best) break;
+            struck.add(best.id);
+            game.fx.push({ x: from.x, y: from.y, tx: best.x, ty: best.y, t: 0.12, owner: this.owner, arc: true });
+            this._hit(best, dealt * (p.pct || 0.4), game);
+            from = best;
+          }
+          this._arc = false;
+          break;
+        }
+        case 'cleave': {
+          if (this._arc) break;
+          this._arc = true;
+          for (const u of game.units) {
+            if (u === foe || u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(foe.x, foe.y, u.x, u.y) > (p.radius || 60)) continue;
+            this._hit(u, dealt * (p.pct || 0.5), game);
+          }
+          this._arc = false;
+          break;
+        }
+      }
+    }
+
+    _passiveAura(dt, game) {
+      const p = this.def.passive;
+      if (!p) return;
+      const R = p.radius || 0;
+      switch (p.id) {
+        // Field Repair — the old Emergency Weld, minus the button. It still reaches
+        // BUILDINGS, which is the whole reason a worker was worth selecting in a siege.
+        case 'mender': {
+          const want = p.targets || 1;
+          const pool = [];
+          const scan = (e) => {
+            if (e.dead || e === this || e.owner !== this.owner) return;
+            if (isHealer(e)) return;                       // 힐러끼리는 못 살린다 — HEAL_AURA 참조
+            if (RC.dist(this.x, this.y, e.x, e.y) > R) return;
+            const missing = (e.maxHp - e.hp) + (p.shield && e.maxShield ? (e.maxShield - e.shield) : 0);
+            if (missing > 0) pool.push({ e, missing });
+          };
+          game.units.forEach(scan);
+          game.buildings.forEach(b => { if (b.done) scan(b); });
+          if (!pool.length) return;
+          pool.sort((a, b) => b.missing - a.missing);
+          for (let i = 0; i < Math.min(want, pool.length); i++) {
+            const e = pool[i].e;
+            if (e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + (p.hps || 6) * dt);
+            if (p.shield && e.maxShield) RC.restoreShield(e, p.shield * dt);
+            // Deterministic, NOT Math.random(). Cosmetics must never draw from the RNG:
+            // the sim is seeded and shared, so one stray roll here silently reshuffles
+            // crits, wave composition and every other random decision downstream.
+            if (Math.floor(game.time * 4) % 3 === 0) {
+              game.fx.push({ abil: 'heal', ax: e.x, ay: e.y, t: 0.3, radius: (e.r || 14) + 4, owner: this.owner });
+            }
+          }
+          return;
+        }
+        case 'bloom': {
+          for (const u of game.units) {
+            if (u.dead || u.owner !== this.owner || u.hp >= u.maxHp) continue;
+            if (isHealer(u)) continue;                     // 힐러끼리는 못 살린다
+            if (RC.dist(this.x, this.y, u.x, u.y) > R) continue;
+            u.hp = Math.min(u.maxHp, u.hp + (p.hps || 4) * dt);
+          }
+          return;
+        }
+        case 'shieldaura': {
+          for (const u of game.units) {
+            if (u.dead || u.owner !== this.owner || !u.maxShield || u.shield >= u.maxShield) continue;
+            if (RC.dist(this.x, this.y, u.x, u.y) > R) continue;
+            RC.restoreShield(u, (p.sps || 12) * dt);
+          }
+          return;
+        }
+        // Armour auras write a SHORT-LIVED field rather than a permanent one, so the buff
+        // falls off on its own the moment the source dies or walks away. Nothing has to
+        // remember to remove it.
+        case 'guardaura':
+        case 'ferry': {
+          if (p.cargoHeal && this.cargo) {
+            for (const u of this.cargo) { if (u && !u.dead && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + p.cargoHeal * dt); }
+          }
+          if (!p.armor) return;
+          for (const u of game.units) {
+            if (u.dead || u === this || u.owner !== this.owner) continue;
+            if (RC.dist(this.x, this.y, u.x, u.y) > R) continue;
+            u.auraArmor = Math.max(u.auraArmor || 0, p.armor);
+            u.auraArmorT = 0.35;                 // 갱신 주기(0.25s)보다 살짝 길게
+          }
+          return;
+        }
       }
     }
 
@@ -1003,139 +1290,69 @@ window.RC = window.RC || {};
     }
 
     // ── 스킬 시전 ────────────────────────────────────
+    // Only heroes cast. Every other unit's ability is a passive (see _passiveHit /
+    // _passiveAura), so canCast on a Volt Trooper is false and always will be — the
+    // HUD, the hotkeys and the AI all read this one answer.
+    skills() { return this.def.skills || (this.def.sig ? [this.def.sig] : []); }
+
+    skillByKey(key) {
+      if (!this.hero) return null;
+      const list = this.skills();
+      if (!key) return null;
+      const k = String(key).toLowerCase();
+      return list.find(s => (s.key || '').toLowerCase() === k) || null;
+    }
+
+    // The ultimate answers to the charge meter; Q and E answer to energy and a cooldown.
+    // Two currencies on purpose: the cheap buttons should be pressed constantly, and the
+    // expensive one should be the thing you are saving for.
+    skillReady(sk) {
+      if (!sk || !this.hero || this.downed) return false;
+      if (sk.ult) return this.sigCd <= 0 && this.charge >= 1;
+      return (this.skillCd[sk.id] || 0) <= 0 && this.energy >= (sk.cost || 0);
+    }
+
     canCast(game, key) {
-      // Heroes have exactly one ability and it answers to any key — the hotkey, the HUD
-      // button and the kid's big button all arrive here, and none of them should have to
-      // know which letter this particular hero uses.
-      if (this.hero) return this.sigReady();
-      const ab = this.def.ability;
-      return !!ab && this.abilityCd <= 0 && this.energy >= ab.cost;
+      if (!this.hero) return false;
+      if (key) return this.skillReady(this.skillByKey(key));
+      return this.skills().some(s => this.skillReady(s));
     }
 
     cast(game, key) {
-      if (this.hero) {
-        if (!this.sigReady()) return false;
-        const ab = this.effSig();
-        if (!ab || !this._applyAbility(game, ab)) return false;
+      if (!this.hero) return false;
+      // No key means "the signature" — the kid button and the AI both call it that way.
+      const sk = this.skillByKey(key) || (key ? null : this.def.sig);
+      if (!sk || !this.skillReady(sk)) return false;
+      const ab = sk.ult ? this.effSig() : this.effSkill(sk);
+      if (!ab || !this._applyAbility(game, ab)) return false;
+      if (sk.ult) {
         // Charge is spent whether or not it killed anything. A refund on a "bad" cast
         // would quietly teach the player to only ever fire it at a perfect moment, which
         // is the opposite of the decision this ability is for.
         this.charge = 0;
         this.sigCd = RC.HERO.sigCd || 1.5;
         this.castFx = 0.9;
-        game.shake(ab.shake || 0.6);
-        game.notify(this.def.name + ' — ' + ab.name + '!');
-        return true;
+      } else {
+        this.energy -= sk.cost || 0;
+        this.skillCd[sk.id] = sk.cd || 0;
+        this.castFx = 0.5;
       }
-      const ab = this.def.ability;
-      if (!ab || this.abilityCd > 0 || this.energy < ab.cost) return false;
-      if (!this._applyAbility(game, ab)) return false;   // 대상이 없으면 소모 안 함
-      this.energy -= ab.cost;
-      this.abilityCd = ab.cd;
-      this.castFx = 0.4;
+      game.shake(ab.shake || 0.4);
+      game.notify(this.def.name + ' — ' + ab.name + '!');
       return true;
     }
 
     _applyAbility(game, ab) {
       switch (ab.id) {
-        case 'weld': {   // 렌치봇 — 가장 다친 근처 아군 수리
-          let best = null, worst = 0;
-          const scan = (e) => {
-            if (e.dead || e === this || e.owner !== this.owner) return;
-            if (RC.dist(this.x, this.y, e.x, e.y) > ab.radius) return;
-            const missing = e.maxHp - e.hp;
-            if (missing > worst) { worst = missing; best = e; }
-          };
-          game.units.forEach(scan);
-          game.buildings.forEach(b => { if (b.done) scan(b); });
-          if (!best || worst <= 0) return false;
-          best.hp = Math.min(best.maxHp, best.hp + ab.heal);
-          game.fx.push({ abil: 'heal', ax: best.x, ay: best.y, t: 0.5, radius: 22, owner: this.owner });
-          if (game.marks) game.marks.push({ dmg: ab.heal, heal: true, x: best.x, y: best.y - (best.r || 10) - 4, t: 0.8 });
-          return true;
-        }
-        case 'surge': {  // 볼트병 — 과부하 사격
-          this.surge = ab.dur;
-          this.hp = Math.max(1, this.hp - (ab.hpCost || 0));
-          return true;
-        }
-        case 'bulwark': { // 실드러 — 방벽 전개 + 도발
-          this.bulwark = ab.dur;
-          for (const u of game.units) {
-            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            // 도발은 그 유닛의 주인이 내린 명령이 아니다 — 목줄이 걸린 자동 교전으로 취급한다
-            if (RC.dist(this.x, this.y, u.x, u.y) <= ab.radius && u.canFight()) u.engage(this);
-          }
-          return true;
-        }
-        case 'raillock': { // 스파크캐논 — 조준 사격 (고정 폭격)
-          this.rail = ab.dur;
-          return true;
-        }
-        case 'warp': {   // 호버윙 — 점멸 부스터
-          const nx = this.x + Math.cos(this.facing) * ab.dist;
-          const ny = this.y + Math.sin(this.facing) * ab.dist;
-          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.35, radius: this.r, owner: this.owner });
-          this.x = Math.max(this.r, Math.min(RC.CFG.WORLD_W - this.r, nx));
-          this.y = Math.max(this.r, Math.min(RC.CFG.WORLD_H - this.r, ny));
-          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.35, radius: this.r, owner: this.owner });
-          return true;
-        }
-        case 'mend': {   // 패치봇 나노 치유 / 오라클·아콘 실드 재충전 (범위)
-          let any = false;
-          for (const u of game.units) {
-            if (u.dead || u.owner !== this.owner) continue;
-            if (RC.dist(this.x, this.y, u.x, u.y) > ab.radius) continue;
-            // Aether 계열 — 실드를 먼저 채우고, 체력이 빈 만큼 추가로 회복
-            if (ab.shieldHeal && u.maxShield && u.shield < u.maxShield) {
-              RC.restoreShield(u, ab.shieldHeal);
-              any = true;
-            }
-            if (u.hp < u.maxHp) {
-              u.hp = Math.min(u.maxHp, u.hp + ab.heal);
-              any = true;
-            }
-          }
-          if (!any) return false;
-          game.fx.push({ abil: 'heal', ax: this.x, ay: this.y, t: 0.45, radius: ab.radius, owner: this.owner });
-          if (game.marks) game.marks.push({ dmg: ab.heal, heal: true, x: this.x, y: this.y - (this.r || 10) - 4, t: 0.8 });
-          return true;
-        }
-        case 'nova': {   // 펄스코일 — 정전 파동 (범위 교란)
-          let any = false;
-          for (const u of game.units) {
-            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(this.x, this.y, u.x, u.y) > ab.radius) continue;
-            this._hit(u, ab.dmg, game);
-            if (u.maxEnergy) u.energy = Math.max(0, u.energy - (ab.drain || 0));
-            u.slow = Math.max(u.slow, ab.slowDur || 0);
-            any = true;
-          }
-          game.fx.push({ abil: 'nova', ax: this.x, ay: this.y, t: 0.5, radius: ab.radius, owner: this.owner });
-          return any;
-        }
-        case 'salvo': {   // 래틀러 헬기 — 로켓 일제사 (범위 폭격)
-          let cx = this.x + Math.cos(this.facing) * 90, cy = this.y + Math.sin(this.facing) * 90;
-          if (this.foe && !this.foe.dead) { cx = this.foe.x; cy = this.foe.y; }
-          let any = false;
-          for (const u of game.units) {
-            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(cx, cy, u.x, u.y) <= ab.radius) { this._hit(u, ab.dmg, game); any = true; }
-          }
-          game.fx.push({ abil: 'salvo', ax: cx, ay: cy, t: 0.4, radius: ab.radius, owner: this.owner });
-          return any;
-        }
-        case 'afterburn': {   // 팰컨 제트 — 애프터버너 (자가 가속)
-          this.surge = ab.dur;
-          return true;
-        }
-        case 'leap': {   // 워든 시그니처 — 도약 강타 (LoL Malphite: Unstoppable Force)
-          // 앞으로(또는 표적을 향해) 뛰어들어 착지 지점에 광역 피해 + 적을 잠시 비틀거리게(slow=스턴 대용)
-          let tx = this.x + Math.cos(this.facing) * ab.dist;
-          let ty = this.y + Math.sin(this.facing) * ab.dist;
+        // ── Q: Ground Slam (Ironclad Warden) ──
+        // A gap-closer that ends in a freeze. The Warden's whole answer is "hold on", and
+        // the thing it lacked was any way to REACH the fight it was supposed to hold.
+        case 'slam': {
+          let tx = this.x + Math.cos(this.facing) * (ab.dist || 190);
+          let ty = this.y + Math.sin(this.facing) * (ab.dist || 190);
           if (this.foe && !this.foe.dead) {
             const a = Math.atan2(this.foe.y - this.y, this.foe.x - this.x);
-            const reach = Math.min(RC.dist(this.x, this.y, this.foe.x, this.foe.y), ab.dist);
+            const reach = Math.min(RC.dist(this.x, this.y, this.foe.x, this.foe.y), ab.dist || 190);
             tx = this.x + Math.cos(a) * reach; ty = this.y + Math.sin(a) * reach;
           }
           tx = Math.max(this.r, Math.min(RC.CFG.WORLD_W - this.r, tx));
@@ -1144,20 +1361,116 @@ window.RC = window.RC || {};
           this.x = tx; this.y = ty;
           for (const u of game.units) {
             if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(tx, ty, u.x, u.y) > ab.radius) continue;
-            this._hit(u, ab.dmg, game);
-            u.slow = Math.max(u.slow || 0, ab.stun || 0);   // 착지 충격 — 잠시 비틀거림
+            if (RC.dist(tx, ty, u.x, u.y) > (ab.radius || 150)) continue;
+            this._hit(u, ab.dmg || 55, game);
+            u.frozen = Math.max(u.frozen || 0, ab.freeze || 1.1);
+            u.freezeFx = 0.3;
           }
           for (const b of game.buildings) {
             if (b.dead || !b.done || !game.areEnemies(b.owner, this.owner)) continue;
-            if (RC.dist(tx, ty, b.x, b.y) > ab.radius + b.r) continue;
-            this._hit(b, ab.dmg * 0.6, game);
+            if (RC.dist(tx, ty, b.x, b.y) > (ab.radius || 150) + b.r) continue;
+            this._hit(b, (ab.dmg || 55) * 0.6, game);
           }
-          game.fx.push({ abil: 'salvo', ax: tx, ay: ty, t: 0.45, radius: ab.radius, owner: this.owner });
-          if (game.shake) game.shake(0.35);
-          return true;   // 이동기이므로 적이 없어도 시전됨
+          game.fx.push({ abil: 'salvo', ax: tx, ay: ty, t: 0.45, radius: ab.radius || 150, owner: this.owner });
+          return true;                     // 이동기 — 적이 없어도 시전된다
         }
-        case 'devour': {   // 매트리아크 시그니처 — 포식성 산 (LoL Cassiopeia: Twin Fang)
+
+        // ── E: Crystal Shockwave (Ironclad Warden) ──
+        // Bulwark's twin, and deliberately built out of the same parts: it is centred on
+        // whatever the hero is defending (_domeHost — the crystal in Crystal Guard, the
+        // hero itself otherwise) and it shoves outward FROM that point, never from the
+        // Warden. Pushing away from the hero scatters enemies wherever the hero happens to
+        // be standing; pushing away from the objective always clears the thing you care
+        // about, which is the only thing the button is for.
+        //
+        // Flyers are shoved too. They are above the terrain, not above a pressure wave,
+        // and a shockwave that politely ignored the air wing would read as broken to the
+        // six-year-old who just watched everything else get thrown.
+        case 'shock': {
+          const from = this._domeHost(game) || this;
+          const R = ab.radius || 340;
+          let hit = 0;
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(from.x, from.y, u.x, u.y) > R) continue;
+            this._hit(u, ab.dmg || 35, game);
+            u.slow = Math.max(u.slow || 0, ab.slowDur || 1.5);
+            // Direction is measured from the origin, so a unit standing exactly on it has
+            // no direction to be thrown in — fall back to its own facing rather than NaN.
+            const a2 = (u.x === from.x && u.y === from.y)
+                     ? u.facing : Math.atan2(u.y - from.y, u.x - from.x);
+            const push = ab.push || 170;
+            u.x = Math.max(u.r, Math.min(RC.CFG.WORLD_W - u.r, u.x + Math.cos(a2) * push));
+            u.y = Math.max(u.r, Math.min(RC.CFG.WORLD_H - u.r, u.y + Math.sin(a2) * push));
+            // Whatever it was walking towards is now behind it — drop the order so it has
+            // to re-approach instead of teleporting its target back into range next tick.
+            u.path = null; u._pathGoal = null;
+            hit++;
+          }
+          if (!hit) return false;          // 밀어낼 적이 없으면 소모하지 않는다
+          game.fx.push({ abil: 'aegis', ax: from.x, ay: from.y, t: 0.9, radius: R, owner: this.owner });
+          return true;
+        }
+
+        // ── Q: Venom Spray (Brood Matriarch) ──
+        // Almost no burst. It is a bet that the fight lasts six more seconds, which is
+        // exactly the bet the whole Gloop faction is built on.
+        case 'spray': {
+          let any = false;
+          const apply = (e) => {
+            this._hit(e, ab.dmg || 34, game);
+            RC.applyVenom(e, ab.venom || { dmg: 9, dur: 6, max: 4 });
+            RC.applyVenom(e, ab.venom || { dmg: 9, dur: 6, max: 4 });   // 두 겹 — 즉시 체감되도록
+            any = true;
+          };
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(this.x, this.y, u.x, u.y) <= (ab.radius || 175)) apply(u);
+          }
+          for (const b of game.buildings) {
+            if (b.dead || !b.done || !game.areEnemies(b.owner, this.owner)) continue;
+            if (RC.dist(this.x, this.y, b.x, b.y) <= (ab.radius || 175) + b.r) apply(b);
+          }
+          if (!any) return false;
+          game.fx.push({ abil: 'nova', ax: this.x, ay: this.y, t: 0.5, radius: ab.radius || 175, owner: this.owner });
+          return true;
+        }
+
+        // ── Q: Phase Shift (Radiant Archon) ──
+        // The reposition doubles as the sustain: the shield comes back on ARRIVAL, so the
+        // escape and the heal are the same button and cannot be greedily separated.
+        case 'blink': {
+          const nx = this.x + Math.cos(this.facing) * (ab.dist || 265);
+          const ny = this.y + Math.sin(this.facing) * (ab.dist || 265);
+          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.35, radius: this.r, owner: this.owner });
+          this.x = Math.max(this.r, Math.min(RC.CFG.WORLD_W - this.r, nx));
+          this.y = Math.max(this.r, Math.min(RC.CFG.WORLD_H - this.r, ny));
+          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.35, radius: this.r, owner: this.owner });
+          if (ab.shield && this.maxShield) RC.restoreShield(this, ab.shield);
+          return true;
+        }
+
+        // ── E: Static Prison (Radiant Archon) ──
+        // Lands on the thickest knot rather than under the hero, for the same reason the
+        // Rift Nova does: the player is choosing WHEN, and the sim should not waste that
+        // choice on whichever two stragglers happen to be underfoot.
+        case 'prison': {
+          const at = this._pressurePoint(game, (ab.radius || 175) * 2.4) || { x: this.x, y: this.y };
+          let any = false;
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+            if (RC.dist(at.x, at.y, u.x, u.y) > (ab.radius || 175)) continue;
+            this._hit(u, ab.dmg || 30, game);
+            u.frozen = Math.max(u.frozen || 0, ab.freeze || 1.8);
+            u.freezeFx = 0.35;
+            any = true;
+          }
+          if (!any) return false;
+          game.fx.push({ abil: 'nova', ax: at.x, ay: at.y, t: 0.6, radius: ab.radius || 175, owner: this.owner });
+          return true;
+        }
+
+        case 'devour': {   // 매트리아크 E — 포식 (주변 적을 물어뜯고 그만큼 회복)
           // 주변 적에게 광역 피해(+매트리아크 산성은 _hit이 자동 적용). 명중한 적 수만큼 자신을 회복한다.
           let hits = 0;
           for (const u of game.units) {
@@ -1174,53 +1487,6 @@ window.RC = window.RC || {};
             if (game.marks) game.marks.push({ dmg: Math.round(healed), heal: true, x: this.x, y: this.y - (this.r || 10) - 4, t: 0.8 });
           }
           game.fx.push({ abil: 'nova', ax: this.x, ay: this.y, t: 0.5, radius: ab.radius, owner: this.owner });
-          return true;
-        }
-        case 'riftblast': {   // 아콘 시그니처 — 리프트 서지 (LoL Kassadin: Riftwalk)
-          // 전방으로 순간이동한 뒤 도착 지점에서 광역 폭발. 재배치 + 폭발을 한 번에.
-          let tx = this.x + Math.cos(this.facing) * ab.dist;
-          let ty = this.y + Math.sin(this.facing) * ab.dist;
-          if (this.foe && !this.foe.dead) {
-            const a = Math.atan2(this.foe.y - this.y, this.foe.x - this.x);
-            const reach = Math.min(RC.dist(this.x, this.y, this.foe.x, this.foe.y) + ab.radius * 0.5, ab.dist);
-            tx = this.x + Math.cos(a) * reach; ty = this.y + Math.sin(a) * reach;
-          }
-          tx = Math.max(this.r, Math.min(RC.CFG.WORLD_W - this.r, tx));
-          ty = Math.max(this.r, Math.min(RC.CFG.WORLD_H - this.r, ty));
-          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.35, radius: this.r, owner: this.owner });
-          this.x = tx; this.y = ty;
-          game.fx.push({ abil: 'warp', ax: tx, ay: ty, t: 0.35, radius: this.r, owner: this.owner });
-          for (const u of game.units) {
-            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(tx, ty, u.x, u.y) > ab.radius) continue;
-            this._hit(u, ab.dmg, game);
-          }
-          game.fx.push({ abil: 'nova', ax: tx, ay: ty, t: 0.45, radius: ab.radius, owner: this.owner });
-          return true;   // 이동기이므로 적이 없어도 시전됨
-        }
-        // ── ULTIMATES ─────────────────────────────────────────────────────
-        case 'barrage': {   // 아이언클래드 워든 — 궤도 폭격
-          // Lands on the current foe if there is one, otherwise straight ahead.
-          let cx = this.x + Math.cos(this.facing) * 150, cy = this.y + Math.sin(this.facing) * 150;
-          if (this.foe && !this.foe.dead) { cx = this.foe.x; cy = this.foe.y; }
-          cx = Math.max(0, Math.min(RC.CFG.WORLD_W, cx));
-          cy = Math.max(0, Math.min(RC.CFG.WORLD_H, cy));
-          let any = false;
-          for (const u of game.units) {
-            if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(cx, cy, u.x, u.y) > ab.radius) continue;
-            this._hit(u, ab.dmg, game);
-            u.slow = Math.max(u.slow || 0, ab.stun || 0);   // survivors are left reeling
-            any = true;
-          }
-          for (const b of game.buildings) {
-            if (b.dead || !b.done || !game.areEnemies(b.owner, this.owner)) continue;
-            if (RC.dist(cx, cy, b.x, b.y) > ab.radius) continue;
-            this._hit(b, ab.dmg * 0.6, game);             // buildings take a reduced share
-            any = true;
-          }
-          // The ult always fires — a miss is the player's call, not a refund case.
-          game.fx.push({ abil: 'barrage', ax: cx, ay: cy, t: 1.1, radius: ab.radius, owner: this.owner });
           return true;
         }
         // ── SIGNATURE: Bulwark (Ironclad Warden) ──
@@ -1307,53 +1573,6 @@ window.RC = window.RC || {};
           return true;
         }
 
-        case 'swarm': {   // 브루드 매트리아크 — 무리 부화
-          const type = ab.spawn || 'globling';
-          if (!RC.UNITS[type]) return false;
-          const n = Math.max(1, ab.count | 0);
-          for (let i = 0; i < n; i++) {
-            const a = (i / n) * Math.PI * 2 + this.facing;
-            const d = (ab.radius || 100) * (0.45 + 0.55 * ((i % 3) / 2));
-            const nx = Math.max(20, Math.min(RC.CFG.WORLD_W - 20, this.x + Math.cos(a) * d));
-            const ny = Math.max(20, Math.min(RC.CFG.WORLD_H - 20, this.y + Math.sin(a) * d));
-            const u = new RC.Unit(type, nx, ny, this.owner);
-            u.temp = ab.life || 25;      // hatchlings are free but expire (no supply, no upkeep)
-            u.free = true;
-            u.summoned = true;           // 렌더러가 임시 유닛임을 표시
-            game.units.push(u);
-            game.fx.push({ abil: 'warp', ax: nx, ay: ny, t: 0.4, radius: u.r + 8, owner: this.owner });
-          }
-          game.fx.push({ abil: 'swarm', ax: this.x, ay: this.y, t: 0.9, radius: ab.radius, owner: this.owner });
-          return true;
-        }
-        case 'aegis': {   // 레이디언트 아콘 — 이지스 폭풍
-          let hitAny = false;
-          for (const u of game.units) {
-            if (u.dead) continue;
-            const d = RC.dist(this.x, this.y, u.x, u.y);
-            if (d > ab.radius) continue;
-            if (game.areEnemies(u.owner, this.owner)) {
-              this._hit(u, ab.dmg, game);
-              // blast them outward from the Archon
-              const a = Math.atan2(u.y - this.y, u.x - this.x);
-              const push = (1 - d / ab.radius) * 70;
-              u.x = Math.max(u.r, Math.min(RC.CFG.WORLD_W - u.r, u.x + Math.cos(a) * push));
-              u.y = Math.max(u.r, Math.min(RC.CFG.WORLD_H - u.r, u.y + Math.sin(a) * push));
-              hitAny = true;
-            } else if (u.owner === this.owner) {
-              if (u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + (ab.heal || 0));
-              if (u.maxShield) RC.restoreShield(u, ab.shieldGrant || 0);
-            }
-          }
-          for (const b of game.buildings) {
-            if (b.dead || b.owner !== this.owner || !b.done) continue;
-            if (RC.dist(this.x, this.y, b.x, b.y) > ab.radius) continue;
-            if (b.maxShield) RC.restoreShield(b, ab.shieldGrant || 0);
-          }
-          void hitAny;   // the ult fires whether or not an enemy was in range
-          game.fx.push({ abil: 'aegis', ax: this.x, ay: this.y, t: 1.0, radius: ab.radius, owner: this.owner });
-          return true;
-        }
         case 'unload': {   // 페리 수송선 — 전원 하차
           if (!this.cargo || !this.cargo.length) return false;
           const list = this.cargo.slice();
@@ -1409,48 +1628,37 @@ window.RC = window.RC || {};
       return best ? { x: best.x, y: best.y } : null;
     }
 
-    // AI 영웅 자동 시전 — 하나뿐인 시그니처를 값어치할 때만
+    // AI 영웅 자동 시전 — 스킬마다 "지금 쓸 값어치가 있나"를 따로 묻는다.
+    // Q and E are cheap and come back, so their bar is low: a real fight is enough. The
+    // ultimate is the one thing worth holding, so it keeps the higher bar it always had.
     _heroAutoCast(game) {
-      const sig = this.def.sig;
-      if (!sig || !this.sigReady()) return;
-      const r = sig.radius || 240;
       const home = this._domeHost(game);
-      let foes = 0;
-      for (const u of game.units) {
-        if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-        // The dome is judged by pressure on what it protects; the other two by pressure
-        // near the hero, which is where they will land.
-        const ax = (sig.id === 'dome' && home) ? home.x : this.x;
-        const ay = (sig.id === 'dome' && home) ? home.y : this.y;
-        if (RC.dist(ax, ay, u.x, u.y) <= r) foes++;
+      for (const sk of this.skills()) {
+        if (!this.skillReady(sk)) continue;
+        const r = sk.radius || sk.dist || 240;
+        // Defensive skills are judged by pressure on what they protect; everything else by
+        // pressure near the hero, which is where it will land.
+        const guarding = (sk.id === 'dome' || sk.id === 'shock');
+        const ax = (guarding && home) ? home.x : this.x;
+        const ay = (guarding && home) ? home.y : this.y;
+        let foes = 0;
+        for (const u of game.units) {
+          if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
+          if (RC.dist(ax, ay, u.x, u.y) <= r) foes++;
+        }
+        // The brood is reinforcement — worth it the moment a real fight starts. A moment
+        // spent on two stragglers is a moment wasted for everything else.
+        const need = sk.ult ? (sk.id === 'brood' ? 2 : 4) : 2;
+        if (foes >= need && this.cast(game, sk.key)) return;   // 한 번에 하나씩
       }
-      // The brood is reinforcement — worth it the moment a real fight starts. The other
-      // two are moments, and a moment spent on two stragglers is a moment wasted.
-      const need = sig.id === 'brood' ? 2 : 4;
-      if (foes >= need) this.cast(game, sig.key);
     }
 
-    // AI 유닛 자동 시전 — 상황에 맞을 때만
+    // AI 자동 시전 — 영웅만 시전할 것이 있다. 나머지는 전부 패시브라 부를 일이 없다.
     _autoCast(dt, game) {
       this._castTry -= dt;
       if (this._castTry > 0) return;
       this._castTry = 0.5;
-      if (this.hero) { this._heroAutoCast(game); return; }
-      if (!this.canCast(game)) return;
-      const id = this.def.ability.id;
-      if (id === 'unload') return;                                            // 수송선은 자동 하차 안 함
-      const fighting = this.foe && !this.foe.dead;
-      if (id === 'mend' || id === 'weld') { this.cast(game); return; }       // 대상 없으면 내부에서 취소됨
-      if (id === 'nova' || id === 'bulwark' || id === 'salvo') {              // 적이 여럿 근처일 때
-        let near = 0;
-        for (const u of game.units) {
-          if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-          if (RC.dist(this.x, this.y, u.x, u.y) <= this.def.ability.radius) near++;
-        }
-        if (near >= 2) this.cast(game);
-        return;
-      }
-      if (fighting) this.cast(game);   // surge / raillock / warp — 교전 중
+      if (this.hero) this._heroAutoCast(game);
     }
   }
 

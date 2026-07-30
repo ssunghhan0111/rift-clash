@@ -188,6 +188,31 @@ RC.KidsUI = (function () {
 #kid-sig:active { transform:scale(.93); }
 #kid-sig.down { opacity:.4; }
 @keyframes kidsigpulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+/* ── The two small hero buttons ────────────────────────────────────────────
+   Stacked above the big one, and deliberately half its size: the ring is the thing
+   worth waiting for, and these two are the thing you press all the time. Same shape
+   so a kid reads them as the same kind of object. */
+#kid-qe { position:absolute; right:46px; bottom:230px; display:none;
+          flex-direction:column; gap:8px; pointer-events:auto; }
+#kid-qe.on { display:flex; }
+#kid-qe .b { width:64px; height:64px; border-radius:50%; cursor:pointer; position:relative;
+             display:flex; align-items:center; justify-content:center;
+             background:radial-gradient(circle at 50% 38%, #2c3d63, #131c31);
+             border:3px solid rgba(255,255,255,.16); color:#eaf2ff; font-size:26px;
+             user-select:none; -webkit-tap-highlight-color:transparent;
+             transition:transform .1s, border-color .15s, box-shadow .2s; }
+#kid-qe .b .ring { position:absolute; inset:-3px; border-radius:50%; pointer-events:none;
+                   background:conic-gradient(#4fd6e8 calc(var(--c,0) * 1turn),
+                                             rgba(255,255,255,.10) 0);
+                   mask:radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+                   -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); }
+#kid-qe .b.ready { border-color:#7ef0a0; box-shadow:0 0 0 3px rgba(126,240,160,.2), 0 0 20px rgba(126,240,160,.4); }
+#kid-qe .b.off { opacity:.42; }
+#kid-qe .b:active { transform:scale(.92); }
+@media (max-width:820px), (max-height:560px) {
+  #kid-qe { right:25px; bottom:104px; gap:6px; }
+  #kid-qe .b { width:48px; height:48px; font-size:20px; }
+}
 /* Upgrade badges — the run's story in three emoji. */
 #kid-sig .ups { position:absolute; top:-10px; left:50%; transform:translateX(-50%);
                 display:flex; gap:3px; font-size:15px; filter:drop-shadow(0 2px 3px rgba(0,0,0,.7)); }
@@ -258,6 +283,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       <div id="kid-shop"></div>
       <div id="kid-build"></div>
       <div id="kid-placing">Tap where you want it!</div>
+      <div id="kid-qe"></div>
       <div id="kid-sig">
         <div class="ring"></div>
         <div class="ups"></div>
@@ -301,6 +327,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       sigLb: root.querySelector('#kid-sig .lb'),
       sigRing: root.querySelector('#kid-sig .ring'),
       sigUps: root.querySelector('#kid-sig .ups'),
+      qe: root.querySelector('#kid-qe'),
       build: root.querySelector('#kid-build'),
       placing: root.querySelector('#kid-placing'),
     };
@@ -440,7 +467,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
   function renderSig(h) {
     const s = h.sig;
     els.sig.classList.toggle('on', !!s);
-    if (!s) return;
+    if (!s) { renderQE(null); return; }
     const sig2 = s.id + '|' + s.ic + '|' + s.ups.join('');
     if (sig2 !== sigShown) {
       sigShown = sig2;
@@ -448,12 +475,45 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       els.sigUps.textContent = s.ups.join('');
       els.sig.title = s.name + ' — ' + s.kid;
     }
+    renderQE(s);
     els.sigRing.style.setProperty('--c', s.charge.toFixed(3));
     els.sig.classList.toggle('ready', !!s.ready);
     els.sig.classList.toggle('down', !!s.downed);
     // The label is the only text on the button, so it says the one thing that changes:
     // whether pressing it right now would do anything.
     els.sigLb.textContent = s.downed ? 'GONE' : s.ready ? 'TAP!' : Math.round(s.charge * 100) + '%';
+  }
+
+  // The two tactical buttons. Built once per hero and then only re-styled, because
+  // rebuilding a node under a finger mid-tap swallows the tap.
+  let qeShown = '';
+  function renderQE(s) {
+    const list = (s && !s.downed) ? (s.skills || []) : [];
+    els.qe.classList.toggle('on', list.length > 0);
+    const key = list.map(k => k.key + k.ic).join('|');
+    if (key !== qeShown) {
+      qeShown = key;
+      els.qe.innerHTML = '';
+      for (const sk of list) {
+        const b = document.createElement('div');
+        b.className = 'b';
+        b.innerHTML = `<div class="ring"></div><span>${sk.ic}</span>`;
+        b.title = sk.name + ' — ' + (sk.kid || '');
+        b.addEventListener('pointerdown', ev => {
+          ev.preventDefault();
+          const h = g && g.heroOf && g.heroOf[g.playerOwner];
+          if (!h || h.dead || h.downed) return;
+          RC.cmd(g, { t: 'cast', ids: [h.id], key: sk.key.toLowerCase() });
+        });
+        els.qe.appendChild(b);
+      }
+    }
+    const nodes = els.qe.children;
+    for (let i = 0; i < list.length && i < nodes.length; i++) {
+      nodes[i].classList.toggle('ready', !!list[i].ready);
+      nodes[i].classList.toggle('off', !list[i].ready);
+      nodes[i].querySelector('.ring').style.setProperty('--c', list[i].cd.toFixed(3));
+    }
   }
 
   // ── Reward cards ──────────────────────────────────────────────────────────

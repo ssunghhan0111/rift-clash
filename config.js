@@ -236,99 +236,149 @@ RC.COLORS = {
   select:    '#8ef2b0',
 };
 
+// ── 유닛 고유 능력 (unit passives) ────────────────────────────────────────
+// Units have NO buttons. Everything a unit "does" beyond attacking is a passive that
+// fires off its own attacks, its presence, or its death. Three reasons:
+//
+//   · An active on a unit is a cooldown to babysit, PER UNIT. Twelve Volt Troopers meant
+//     twelve Overcharges, and in practice nobody ever pressed them — the AI auto-cast was
+//     the only code path that used them at all.
+//   · Passives move the decision to COMPOSITION. Bringing Pulse Coils means your army
+//     freezes things; bringing Chaingunners means it strips armour. You decide once, at
+//     the factory, and then you fight.
+//   · It leaves the clicking to the hero, who is one unit and can carry the attention.
+//
+// A passive is `passive: { id, ...numbers }` on the unit def. `id` selects the behaviour
+// in Unit._passiveHit / _passiveAura / _passiveShot (entities.js); every other field is
+// that behaviour's tuning. RC.PASSIVE below is the display half only — icon, name, and
+// the two descriptions — so adding a number to a unit never means touching the UI.
+//
+// Statuses a passive can inflict, all of which stack and all of which the renderer draws:
+//   chill  → slow, and enough stacks freeze the target solid for a moment
+//   venom  → damage over time, refreshed on every hit
+//   shred  → armour reduction (the same currency Gloop's acid spends)
+//   mark   → the target takes MORE damage from everyone, not just from the marker
+RC.PASSIVE = {
+  mender:     { ic: '🔧', name: 'Field Repair',  kid: 'Fixes your hurt guys nearby.',
+                desc: 'Continuously repairs the most-damaged nearby ally — no button, it just works.' },
+  bloom:      { ic: '🌱', name: 'Spore Bloom',   kid: 'Nearby friends heal up.',
+                desc: 'Leaks regenerative spores that heal every nearby ally at once.' },
+  shieldaura: { ic: '🔷', name: 'Shield Font',   kid: 'Nearby friends get their bubbles back.',
+                desc: 'Bathes nearby allies in energy, recharging their plasma shields even mid-fight.' },
+  guardaura:  { ic: '🛡️', name: 'Bulwark Field', kid: 'Friends next to it are tougher.',
+                desc: 'Nearby allies gain armour, and attackers take a share of their own hit back.' },
+  chill:      { ic: '❄️', name: 'Cryo Coils',    kid: 'Its shots make enemies slow — then FROZEN.',
+                desc: 'Every hit chills. Enough stacked chill freezes the target solid for a moment.' },
+  venom:      { ic: '🧪', name: 'Venom',         kid: 'Its bite keeps hurting after it hits.',
+                desc: 'Hits inject venom that eats away at health for several seconds and stacks.' },
+  burn:       { ic: '🔥', name: 'Incendiary',    kid: 'Sets enemies on fire.',
+                desc: 'Rounds ignite the target, burning it for a few seconds after impact.' },
+  shred:      { ic: '🪚', name: 'Armour Shred',  kid: 'Chews through enemy armour.',
+                desc: 'Sustained fire peels armour off the target, so everything else hits harder too.' },
+  mark:       { ic: '🎯', name: 'Ranging Mark',  kid: 'Paints a target so everyone hurts it more.',
+                desc: 'Whatever it hits takes extra damage from your entire army for a few seconds.' },
+  chain:      { ic: '⚡', name: 'Arc Chain',     kid: 'Its zap jumps to another enemy.',
+                desc: 'Each shot arcs to a second nearby enemy for part of the damage.' },
+  cleave:     { ic: '💦', name: 'Splatter',      kid: 'Splashes on the guys standing next to it.',
+                desc: 'Hits splatter onto enemies packed around the target — acid and all.' },
+  lifesteal:  { ic: '🩸', name: 'Leech',         kid: 'Heals itself when it hits.',
+                desc: 'Converts part of every hit into its own health.' },
+  thorns:     { ic: '🌵', name: 'Caustic Hide',  kid: 'Hurts anything that hits it.',
+                desc: 'Attackers take a share of their own damage back through its caustic hide.' },
+  crit:       { ic: '🗡️', name: 'Killing Edge',  kid: 'Sometimes hits SUPER hard.',
+                desc: 'A large chance for any strike to land as a critical hit.' },
+  execute:    { ic: '☠️', name: 'Finisher',      kid: 'Finishes off hurt enemies fast.',
+                desc: 'Deals far more damage to enemies already low on health.' },
+  knock:      { ic: '💥', name: 'Concussive',    kid: 'Punches enemies backwards.',
+                desc: 'Shells shove the target back, and hit buildings far harder than flesh.' },
+  swift:      { ic: '💨', name: 'Strafe Run',    kid: 'Speeds up right after it shoots.',
+                desc: 'Accelerates for a moment after every attack — built to hit and run.' },
+  ferry:      { ic: '🚁', name: 'Field Hospital', kid: 'Heals whoever is riding inside.',
+                desc: 'Patches up the units it is carrying, and stiffens the armour of anyone nearby.' },
+};
+
 // ── 유닛 ──────────────────────────────────────────────
 // hp, dmg, range, cd(공격 쿨), speed, r, cost, time, supply, energy
-// ability: { id, name, key, cost(에너지), cd(재사용), ... }
+// passive: { id, ... }  — see RC.PASSIVE above. Units have no castable abilities.
 RC.UNITS = {
   wrench: {
     id: 'wrench', name: 'Wrench Bot', role: 'Worker',
     hp: 60, dmg: 4, range: 18, cd: 1.2, speed: 100, r: 12, sight: 120,
     cost: 50, time: 11, supply: 1, armor: 0, energy: 60,
     worker: true, key: 'Q',
-    ability: { id: 'weld', name: 'Emergency Weld', key: 'G', cost: 30, cd: 6, radius: 140, heal: 130, target: 'repair',
-               desc: 'Instantly repairs the most-damaged nearby ally (unit or building).' },
-    desc: 'Mines shards and constructs buildings. Can repair allies with Emergency Weld.'
+    passive: { id: 'mender', hps: 6, radius: 130 },
+    desc: 'Mines shards and constructs buildings. Trickle-repairs the most damaged thing beside it.'
   },
   volt: {
     id: 'volt', name: 'Volt Trooper', role: 'Infantry',
     hp: 110, dmg: 9, range: 78, cd: 0.85, speed: 88, r: 14, sight: 200,
     cost: 60, time: 15, supply: 1, armor: 0, energy: 60, key: 'Q',
-    ability: { id: 'surge', name: 'Overcharge', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 15, spd: 1.3, fire: 0.5,
-               desc: 'Greatly boosts attack and move speed for 5s (costs some HP).' },
-    desc: 'Basic ranged infantry. Can briefly go into overdrive with Overcharge.'
+    passive: { id: 'chain', pct: 0.45, range: 92, jumps: 1 },
+    desc: 'Basic ranged infantry. Its bolts arc to a second enemy, so massed Volts shred packed lines.'
   },
   shielder: {
     id: 'shielder', name: 'Shieldbearer', role: 'Shield Tank',
     hp: 260, dmg: 7, range: 24, cd: 1.1, speed: 64, r: 18, sight: 170,
     cost: 110, time: 24, supply: 2, armor: 3, energy: 70, key: 'W',
-    ability: { id: 'bulwark', name: 'Bulwark', key: 'C', cost: 30, cd: 12, dur: 6, armorBonus: 6, radius: 210,
-               desc: 'Sharply raises armor for 6s and taunts nearby enemies.' },
-    desc: 'Frontline damage-soaker. Protects allies with Bulwark.'
+    passive: { id: 'guardaura', armor: 2, radius: 150, thorns: 0.25 },
+    desc: 'Frontline damage-soaker. Everything standing behind it is armoured, and hitting it hurts.'
   },
   spark: {
     id: 'spark', name: 'Spark Cannon', role: 'Siege',
     hp: 90, dmg: 26, range: 150, cd: 2.2, speed: 52, r: 16, sight: 185,
     cost: 150, time: 30, supply: 2, armor: 0, energy: 70, splash: 42, key: 'E',
-    ability: { id: 'raillock', name: 'Focus Fire', key: 'V', cost: 35, cd: 8, dur: 5, rangeBonus: 80, dmgBonus: 14, splashBonus: 18,
-               desc: 'Range and power surge for 5s, but cannot move.' },
-    desc: 'Long-range siege unit. Bombards from afar with Focus Fire.'
+    passive: { id: 'mark', amp: 0.25, dur: 5 },
+    desc: 'Long-range siege unit. Its shells paint a target that your whole army then hits harder.'
   },
   hover: {
     id: 'hover', name: 'Hoverwing', role: 'Air',
     hp: 90, dmg: 12, range: 90, cd: 0.8, speed: 130, r: 14,
     cost: 120, time: 22, supply: 2, armor: 0, energy: 60, flying: true, sight: 300, key: 'Q',
-    ability: { id: 'warp', name: 'Blink Booster', key: 'X', cost: 20, cd: 5, dist: 230,
-               desc: 'Teleports in the direction it is facing.' },
-    desc: 'Fast air unit. Dives in or escapes with Blink Booster.'
+    passive: { id: 'swift', mul: 1.35, dur: 1.8 },
+    desc: 'Fast air unit that accelerates the instant it fires — it is always leaving as it shoots.'
   },
   patch: {
     id: 'patch', name: 'Patch Bot', role: 'Repair Support',
     hp: 100, dmg: 5, range: 60, cd: 1.0, speed: 96, r: 14, sight: 205,
     cost: 90, time: 20, supply: 2, armor: 1, energy: 110, key: 'Q',
-    ability: { id: 'mend', name: 'Nano Heal', key: 'Z', cost: 40, cd: 3, radius: 155, heal: 45,
-               desc: 'Heals all nearby allied units at once.' },
-    desc: 'Support unit that heals nearby allies.'
+    passive: { id: 'mender', hps: 13, radius: 175, targets: 2 },
+    desc: 'Support unit. Constantly mends the three most-wounded allies around it.'
   },
   pulse: {
     id: 'pulse', name: 'Pulse Coil', role: 'Disruptor',
     hp: 85, dmg: 6, range: 105, cd: 1.3, speed: 82, r: 15, sight: 215,
     cost: 130, time: 24, supply: 2, armor: 0, energy: 130, key: 'W',
-    ability: { id: 'nova', name: 'Static Pulse', key: 'A', cost: 45, cd: 9, radius: 170, dmg: 22, drain: 60, slowDur: 4,
-               desc: 'Drains enemy energy, deals damage, and slows nearby foes.' },
-    desc: 'Caster that disrupts enemies. Static Pulse neutralizes packed groups.'
+    passive: { id: 'chill', slow: 1.6, max: 4, freeze: 1.1 },
+    desc: 'Disruptor. Every coil-shot chills; four stacks and the target freezes where it stands.'
   },
   chaingunner: {
     id: 'chaingunner', name: 'Chaingunner', role: 'Heavy Gunner',
     hp: 145, dmg: 6, range: 100, cd: 0.32, speed: 78, r: 15, sight: 195,
     cost: 95, time: 19, supply: 2, armor: 1, energy: 70, key: 'R',
-    ability: { id: 'surge', name: 'Full Auto', key: 'D', cost: 30, cd: 11, dur: 5, hpCost: 0, spd: 0.9, fire: 0.45,
-               desc: 'Opens up with both barrels — a huge burst of fire rate for 5s.' },
-    desc: 'Twin-gun trooper that shreds groups with a stream of rapid fire. Slow, but relentless.'
+    passive: { id: 'shred', amt: 1, dur: 4, max: 5 },
+    desc: 'Twin-gun trooper. Its stream of fire peels armour clean off whatever it is pointed at.'
   },
   // ── 신규 항공 ──
   heli: {
     id: 'heli', name: 'Rattler Heli', role: 'Gunship',
     hp: 150, dmg: 17, range: 105, cd: 1.0, speed: 118, r: 16, sight: 255,
     cost: 150, time: 24, supply: 3, armor: 1, energy: 80, flying: true, splash: 20, key: 'W',
-    ability: { id: 'salvo', name: 'Rocket Salvo', key: 'B', cost: 40, cd: 9, radius: 95, dmg: 34,
-               desc: 'Rains rockets around a target point for area damage.' },
-    desc: 'Ground-attack gunship. Rocket Salvo wipes out clustered enemies.'
+    passive: { id: 'burn', dmg: 5, dur: 4, max: 3 },
+    desc: 'Ground-attack gunship firing incendiary rockets that leave the target burning.'
   },
   jet: {
     id: 'jet', name: 'Falcon Jet', role: 'Air Superiority',
     hp: 120, dmg: 20, range: 120, cd: 0.7, speed: 170, r: 15,
     cost: 175, time: 26, supply: 3, armor: 0, energy: 70, flying: true, sight: 300, key: 'E',
-    ability: { id: 'afterburn', name: 'Afterburner', key: 'N', cost: 25, cd: 11, dur: 4, spd: 1.6, fire: 0.55,
-               desc: 'Move and attack speed spike for 4s.' },
-    desc: 'Very fast fighter. Hits and runs, striking both air and ground.'
+    passive: { id: 'execute', below: 0.35, mul: 1.8 },
+    desc: 'Very fast fighter. Falls on anything already wounded and finishes it outright.'
   },
   dropship: {
     id: 'dropship', name: 'Ferry Dropship', role: 'Transport',
     hp: 220, dmg: 0, range: 0, cd: 1, speed: 130, r: 19, sight: 270,
     cost: 150, time: 24, supply: 3, armor: 1, energy: 0, flying: true, transport: 8, key: 'R',
-    ability: { id: 'unload', name: 'Unload All', key: 'U', cost: 0, cd: 1,
-               desc: 'Drops off every unit aboard.' },
-    desc: 'Carries ground units over obstacles and enemies. Select units, then right-click (tap) the dropship to board.'
+    passive: { id: 'ferry', cargoHeal: 14, armor: 1, radius: 140 },
+    desc: 'Carries ground units over obstacles and enemies, healing them on the way. Select units, then right-click (tap) the dropship to board.'
   },
 
   // ══ Gloop faction units — Acid & Regeneration ══════════
@@ -338,52 +388,48 @@ RC.UNITS = {
     hp: 60, dmg: 4, range: 18, cd: 1.2, speed: 104, r: 12, sight: 120,
     cost: 50, time: 11, supply: 1, armor: 0, energy: 60,
     worker: true, regen: 2, race: 'gloop', key: 'Q',
-    ability: { id: 'weld', name: 'Slime Patch', key: 'G', cost: 30, cd: 6, radius: 140, heal: 120, target: 'repair',
-               desc: 'Instantly seals the most-damaged nearby ally with slime.' },
-    desc: 'Mines shards and grows structures. Slowly regenerates on its own.'
+    passive: { id: 'bloom', hps: 4, radius: 140 },
+    desc: 'Mines shards and grows structures. Regenerates, and leaks spores that heal the swarm around it.'
   },
   globling: {
     id: 'globling', name: 'Globling', role: 'Swarm Melee',
     hp: 70, dmg: 7, range: 20, cd: 0.7, speed: 132, r: 12, sight: 160,
     cost: 40, time: 8, supply: 1, armor: 0, energy: 50, regen: 5, race: 'gloop',
     acid: { dmg: 2, dur: 4, shred: 1, max: 5 }, key: 'Q',
-    ability: { id: 'surge', name: 'Frenzy', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 0, spd: 1.4, fire: 0.55,
-               desc: 'Move and attack speed surge for 5s.' },
-    desc: 'Cheap, fast swarm melee. Bites apply acid and it heals itself.'
+    passive: { id: 'lifesteal', pct: 0.35 },
+    desc: 'Cheap, fast swarm melee. Bites apply acid and feed it — a big enough swarm never stops healing.'
   },
   spitter: {
     id: 'spitter', name: 'Spitter', role: 'Acid Ranged',
     hp: 90, dmg: 11, range: 120, cd: 1.0, speed: 86, r: 14, sight: 205,
     cost: 65, time: 14, supply: 1, armor: 0, energy: 80, regen: 3, race: 'gloop',
     acid: { dmg: 4, dur: 5, shred: 2, max: 5 }, key: 'W',
-    ability: { id: 'nova', name: 'Corrosive Spray', key: 'A', cost: 40, cd: 9, radius: 150, dmg: 16, drain: 0, slowDur: 2,
-               desc: 'Sprays acid over nearby enemies, damaging and slowing them.' },
-    desc: 'Ranged acid-spitter. Melts armor to amplify the whole army’s damage.'
+    passive: { id: 'cleave', pct: 0.5, radius: 62 },
+    desc: 'Ranged acid-spitter. Its spray splatters onto everything crowded around the target.'
   },
   bloat: {
     id: 'bloat', name: 'Bloat', role: 'Acid Tank',
     hp: 300, dmg: 10, range: 22, cd: 1.3, speed: 58, r: 18, sight: 150,
     cost: 105, time: 22, supply: 2, armor: 2, energy: 0, regen: 6, race: 'gloop',
     acid: { dmg: 3, dur: 4, shred: 1, max: 5 }, deathBurst: { radius: 110, dmg: 40 }, key: 'E',
-    desc: 'Giant slime that soaks damage. Regenerates fast and bursts with acid on death.'
+    passive: { id: 'thorns', pct: 0.35 },
+    desc: 'Giant slime that soaks damage. Regenerates fast, splashes back at whatever bites it, and bursts with acid on death.'
   },
   hydra: {
     id: 'hydra', name: 'Venom Hydra', role: 'Venom Artillery',
     hp: 165, dmg: 15, range: 150, cd: 1.35, speed: 72, r: 17, sight: 185,
     cost: 120, time: 24, supply: 2, armor: 1, energy: 90, regen: 4, race: 'gloop',
     acid: { dmg: 7, dur: 6, shred: 3, max: 6 }, key: 'R',
-    ability: { id: 'nova', name: 'Venom Burst', key: 'A', cost: 45, cd: 9, radius: 165, dmg: 24, drain: 0, slowDur: 3,
-               desc: 'Every head spits at once — a wide cloud that damages and slows.' },
-    desc: 'Three-headed serpent that hurls venom from far away. Its bite melts armour faster than anything else in the swarm.'
+    passive: { id: 'venom', dmg: 8, dur: 6, max: 4 },
+    desc: 'Three-headed serpent that hurls venom from far away. What it hits keeps dying long after the shot lands.'
   },
   floater: {
     id: 'floater', name: 'Floater', role: 'Air Bomber',
     hp: 130, dmg: 16, range: 100, cd: 1.1, speed: 122, r: 16,
     cost: 135, time: 22, supply: 2, armor: 0, energy: 80, regen: 3, race: 'gloop',
     flying: true, sight: 255, splash: 18, acid: { dmg: 3, dur: 4, shred: 1, max: 4 }, key: 'Q',
-    ability: { id: 'salvo', name: 'Spore Barrage', key: 'B', cost: 40, cd: 9, radius: 95, dmg: 30,
-               desc: 'Drops acid spores on a target point for area damage.' },
-    desc: 'Drifting air unit that drops acid spores. Melts clumped enemies.'
+    passive: { id: 'burn', dmg: 4, dur: 5, max: 3 },
+    desc: 'Drifting air unit that drops caustic spores which keep eating after they land.'
   },
 
   // ══ Aether faction units — Plasma Shields & Warp-in ════
@@ -395,63 +441,56 @@ RC.UNITS = {
     hp: 50, dmg: 5, range: 18, cd: 1.2, speed: 102, r: 12, sight: 125,
     cost: 55, time: 12, supply: 1, armor: 0, energy: 60,
     worker: true, shield: 30, race: 'aether', key: 'Q',
-    ability: { id: 'weld', name: 'Restore Matrix', key: 'G', cost: 30, cd: 6, radius: 140, heal: 125, target: 'repair',
-               desc: 'Channels energy to instantly mend the most-damaged nearby ally.' },
-    desc: 'Mines shards and warps structures into place. Protected by a plasma shield.'
+    passive: { id: 'mender', hps: 6, radius: 130, shield: 8 },
+    desc: 'Mines shards and warps structures into place. Channels a steady mend into whatever is hurt beside it.'
   },
   ardent: {
     id: 'ardent', name: 'Ardent', role: 'Melee Vanguard',
     hp: 105, dmg: 17, range: 22, cd: 0.8, speed: 96, r: 14, sight: 175,
     cost: 80, time: 16, supply: 2, armor: 1, energy: 60,
     shield: 70, race: 'aether', key: 'Q',
-    ability: { id: 'surge', name: 'Zeal', key: 'D', cost: 25, cd: 10, dur: 5, hpCost: 0, spd: 1.45, fire: 0.5,
-               desc: 'Blazing charge — big move and attack speed boost for 5s.' },
-    desc: 'Shielded melee warrior. Hits far harder than swarm infantry and charges with Zeal.'
+    passive: { id: 'lifesteal', pct: 0.3, toShield: true },
+    desc: 'Shielded melee warrior. Every blow pours back into its own plasma shield.'
   },
   lancer: {
     id: 'lancer', name: 'Void Lancer', role: 'Ranged Support',
     hp: 100, dmg: 19, range: 128, cd: 1.15, speed: 82, r: 15, sight: 215,
     cost: 125, time: 22, supply: 2, armor: 1, energy: 80,
     shield: 90, race: 'aether', key: 'W',
-    ability: { id: 'warp', name: 'Phase Step', key: 'X', cost: 20, cd: 6, dist: 235,
-               desc: 'Blinks a short distance — dive in or slip out of a fight.' },
-    desc: 'Long-range shielded striker. Phase Step makes it brutally hard to pin down.'
+    passive: { id: 'mark', amp: 0.22, dur: 4 },
+    desc: 'Long-range shielded striker whose lance-fire leaves a target the rest of your army carves open.'
   },
   bastion: {
     id: 'bastion', name: 'Bastion', role: 'Heavy Siege',
     hp: 190, dmg: 42, range: 140, cd: 2.0, speed: 56, r: 18, sight: 180,
     cost: 195, time: 32, supply: 4, armor: 3, energy: 70,
     shield: 160, splash: 38, race: 'aether', key: 'E',
-    ability: { id: 'raillock', name: 'Anchor Field', key: 'V', cost: 35, cd: 8, dur: 5, rangeBonus: 75, dmgBonus: 18, splashBonus: 16,
-               desc: 'Locks down and unleashes vastly stronger long-range fire for 5s.' },
-    desc: 'Walking siege platform with an enormous shield bank. The Aether battering ram.'
+    passive: { id: 'knock', dist: 26, siege: 1.5 },
+    desc: 'Walking siege platform with an enormous shield bank. Its shells hurl infantry back and tear buildings apart.'
   },
   seraph: {
     id: 'seraph', name: 'Seraph', role: 'Air Superiority',
     hp: 110, dmg: 23, range: 118, cd: 0.75, speed: 158, r: 15,
     cost: 185, time: 26, supply: 4, armor: 0, energy: 80,
     shield: 110, flying: true, sight: 300, race: 'aether', key: 'Q',
-    ability: { id: 'afterburn', name: 'Solar Wind', key: 'N', cost: 25, cd: 11, dur: 4, spd: 1.55, fire: 0.55,
-               desc: 'Rides a solar current — move and attack speed spike for 4s.' },
-    desc: 'Swift shielded interceptor. Strikes air and ground, then blazes back out.'
+    passive: { id: 'chain', pct: 0.4, range: 95, jumps: 1 },
+    desc: 'Swift shielded interceptor. Its beam forks to a second target on every pass.'
   },
   bladesworn: {
     id: 'bladesworn', name: 'Bladesworn', role: 'Blade Assassin',
     hp: 95, dmg: 24, range: 24, cd: 0.55, speed: 122, r: 13, sight: 200,
     cost: 110, time: 18, supply: 2, armor: 0, energy: 70,
     shield: 65, race: 'aether', key: 'R',
-    ability: { id: 'warp', name: 'Shadow Step', key: 'X', cost: 20, cd: 5, dist: 260,
-               desc: 'Flickers forward in a blink to land on a target — or slip away.' },
-    desc: 'Lightning-fast duellist with two razor knives. Fragile, but nothing cuts faster.'
+    passive: { id: 'crit', chance: 0.3, mul: 2.2 },
+    desc: 'Lightning-fast duellist with two razor knives. Fragile, but a third of its cuts land lethal.'
   },
   oracle: {
     id: 'oracle', name: 'Oracle', role: 'Shield Support',
     hp: 95, dmg: 8, range: 100, cd: 1.2, speed: 92, r: 14, sight: 240,
     cost: 140, time: 24, supply: 2, armor: 0, energy: 140,
     shield: 80, race: 'aether', key: 'W',
-    ability: { id: 'mend', name: 'Shield Overflow', key: 'Z', cost: 40, cd: 3, radius: 160, heal: 55, shieldHeal: 70,
-               desc: 'Floods nearby allies with energy, restoring shields and health.' },
-    desc: 'Support caster that recharges the whole army’s shields mid-fight.'
+    passive: { id: 'shieldaura', sps: 14, radius: 185 },
+    desc: 'Support caster whose mere presence recharges the whole army’s shields, even mid-fight.'
   },
 
   // ══ Heroes — one per race. Gain XP from nearby enemy kills, level up (skills rank up
@@ -462,10 +501,29 @@ RC.UNITS = {
     cost: 0, time: 0, supply: 0, armor: 3, energy: 200, key: 'H',
     grow: { hp: 70, dmg: 4, armor: 0.5 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
-    // ── SIGNATURE ── The Warden's answer is HOLD ON. See RC.SIG below for the shape
-    //    every hero's ability shares and why there is only one of them.
+    passive: { id: 'guardaura', armor: 2, radius: 170, thorns: 0.2 },
+    // ── KIT ── Three buttons. Q and E are tactical: they cost energy and come back on a
+    //    cooldown, so they are used often and cheaply. R is the signature — it charges
+    //    from FIGHTING and is the moment you save for. See RC.SIG below.
+    q: {
+      id: 'slam', ic: '🔨', name: 'Ground Slam', key: 'Q', slot: 'q', cost: 45, cd: 9,
+      kid: 'Jumps in and freezes everyone!',
+      desc: 'Leaps at the fight and lands hard enough to freeze everything around the impact.',
+      dist: 190, radius: 150, dmg: 55, dmgPerLevel: 5, freeze: 1.1, shake: 0.35,
+    },
+    // Bulwark's twin. Both are measured from the CRYSTAL rather than from the Warden,
+    // and both answer the same question — "the crystal is about to die" — in opposite
+    // ways: the dome eats the damage, the shockwave removes the thing dealing it. The
+    // damage here is almost an afterthought on purpose. This is time, not a wave clear;
+    // an E that killed the wave would make the ultimate redundant.
+    e: {
+      id: 'shock', ic: '🌊', name: 'Crystal Shockwave', key: 'E', slot: 'e', cost: 55, cd: 15,
+      kid: 'BOOM! Shoves all the bad guys away from the crystal!',
+      desc: 'Slams a pulse out from the crystal, hurling every enemy around it far back and leaving them reeling.',
+      radius: 340, push: 170, dmg: 35, dmgPerLevel: 3, slowDur: 1.5, shake: 0.6,
+    },
     sig: {
-      id: 'dome', ic: '🛡️', name: 'Bulwark', key: 'R',
+      id: 'dome', ic: '🛡️', name: 'Bulwark', key: 'R', slot: 'r', ult: true,
       // Kid-facing. One line, present tense, says what you will SEE happen.
       kid: 'Puts a big shield bubble on the crystal!',
       desc: 'Slams the ground and throws a shield dome over the crystal, soaking every hit for a few seconds.',
@@ -488,9 +546,23 @@ RC.UNITS = {
     acid: { dmg: 4, dur: 5, shred: 2, max: 6 },
     grow: { hp: 55, dmg: 4, armor: 0.4 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
-    // ── SIGNATURE ── The Matriarch's answer is MORE FRIENDS, NOW.
+    passive: { id: 'lifesteal', pct: 0.3 },
+    // ── KIT ── Q poisons, E eats, R hatches. See the Warden above for why Q/E run on
+    //    energy and a cooldown while R runs on the fight-charge meter.
+    q: {
+      id: 'spray', ic: '🧪', name: 'Venom Spray', key: 'Q', slot: 'q', cost: 40, cd: 8,
+      kid: 'Sprays poison that keeps hurting!',
+      desc: 'A wide venom spray — light on impact, but what it coats keeps dying for six seconds.',
+      radius: 175, dmg: 34, dmgPerLevel: 3, venom: { dmg: 9, dur: 6, max: 4 }, shake: 0.25,
+    },
+    e: {
+      id: 'devour', ic: '🩸', name: 'Devour', key: 'E', slot: 'e', cost: 50, cd: 12,
+      kid: 'Eats the bad guys to heal herself!',
+      desc: 'Rips into everything around her and feeds — the more it hits, the more she heals.',
+      radius: 165, dmg: 40, dmgPerLevel: 4, slowDur: 1.2, heal: 45, healCap: 4, shake: 0.3,
+    },
     sig: {
-      id: 'brood', ic: '🥚', name: 'Hatch the Brood', key: 'R',
+      id: 'brood', ic: '🥚', name: 'Hatch the Brood', key: 'R', slot: 'r', ult: true,
       kid: 'Hatches a bunch of babies to fight for you!',
       desc: 'Splits the ground open where the fight is thickest and hatches free globlings that fight for a while.',
       count: 5, countPerLevel: 0.4, maxCount: 12, spawn: 'globling', life: 26, radius: 130, shake: 0.5,
@@ -511,11 +583,26 @@ RC.UNITS = {
     cost: 0, time: 0, supply: 0, armor: 2, energy: 220, shield: 320, key: 'H',
     grow: { hp: 45, dmg: 5, armor: 0.4, shield: 55 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
+    passive: { id: 'shieldaura', sps: 10, radius: 170 },
+    // ── KIT ── Q repositions, E locks a group down, R clears the crystal. See the Warden
+    //    above for why Q/E run on energy and a cooldown while R runs on fight-charge.
+    q: {
+      id: 'blink', ic: '🌀', name: 'Phase Shift', key: 'Q', slot: 'q', cost: 35, cd: 7,
+      kid: 'Zaps somewhere else and gets a new bubble!',
+      desc: 'Folds space to reappear ahead — and comes out the other side with its shield restored.',
+      dist: 265, shield: 120, shieldPerLevel: 16, shake: 0.15,
+    },
+    e: {
+      id: 'prison', ic: '❄️', name: 'Static Prison', key: 'E', slot: 'e', cost: 55, cd: 13,
+      kid: 'Freezes a whole group of bad guys!',
+      desc: 'Snaps a lattice of static shut around a knot of enemies, freezing every one of them solid.',
+      radius: 175, dmg: 30, dmgPerLevel: 3, freeze: 1.8, shake: 0.35,
+    },
     // ── SIGNATURE ── The Archon's answer is MAKE SPACE. The shove is measured from the
     //    CRYSTAL rather than from the Archon, so it always clears the thing you are
     //    defending instead of scattering enemies wherever the hero happens to stand.
     sig: {
-      id: 'riftnova', ic: '⚡', name: 'Rift Nova', key: 'R',
+      id: 'riftnova', ic: '⚡', name: 'Rift Nova', key: 'R', slot: 'r', ult: true,
       kid: 'Blasts the bad guys away from the crystal!',
       desc: 'A radiant shockwave that damages every enemy caught in it and hurls them back away from the crystal.',
       radius: 240, dmg: 70, dmgPerLevel: 8, push: 95, slowDur: 1.5, shake: 0.8,
@@ -532,19 +619,33 @@ RC.UNITS = {
   },
 };
 
+// ── Hero skill bars ──────────────────────────────────────────────────────────
+// `def.skills` is the ordered bar the HUD and the hotkeys read: [Q, E, R]. The R entry
+// is the SAME OBJECT as `def.sig`, not a copy — the ultimate IS the signature, so every
+// place that already reasoned about `def.sig` (Crystal Guard's upgrade cards, the kid
+// charge button, the AI's "is it worth it yet" check) keeps working untouched.
+for (const _hid of ['warden', 'matriarch', 'archon']) {
+  const _h = RC.UNITS[_hid];
+  _h.skills = [_h.q, _h.e, _h.sig];
+  delete _h.q; delete _h.e;
+}
+
 // ── Hero signature abilities ──────────────────────────────────────────────────
-// Every hero has exactly ONE, and it replaces the old three-skills-plus-an-ultimate
-// panel. The reasons are all the same reason:
+// The signature is the hero's ULTIMATE — one per hero, slot R, and the only ability in
+// the game that does not run on a cooldown. Two things make it different from Q and E:
 //
-//   · Four cooldowns is a bar of icons to read mid-fight. One is a decision.
-//   · Crystal Guard hid the whole panel (it lives inside #hud), and auto-cast only ran
-//     for AI owners — so a kid had a levelling hero that could never use anything.
-//   · With one ability per hero, each hero can be a genuinely different ANSWER rather
-//     than three variations on "area damage": the Warden holds the line, the Matriarch
-//     adds bodies, the Archon makes space. Which faction you pick now changes how you play.
+//   · It charges from FIGHTING, not from time. Spending it early costs nothing when a
+//     meter refills on its own schedule, so "now or save it?" is only a real question
+//     when the meter fills fastest in the fight you are already in.
+//   · It carries the three upgrades. Q and E are constants you learn once; the signature
+//     is the thing that grows, and it is what makes the Warden hold, the Matriarch swarm
+//     and the Archon shove rather than three flavours of "area damage".
+//
+// Q and E sit beside it on energy plus a cooldown, so the hero always has SOMETHING to
+// press — the old single-button hero spent most of a match with nothing to do.
 //
 // Shared shape:
-//   sig.key      hotkey (all three use R, so there is one key to learn)
+//   sig.key      hotkey — always R, so the ultimate is one key across every hero
 //   sig.kid      one line a six-year-old can read — what you will SEE happen
 //   sig.desc     the grown-up line
 //   sig.ups[]    three upgrades unique to that hero. In Crystal Guard they arrive as
@@ -571,6 +672,9 @@ RC.HERO = {
   killRange: 260,
   sigCd: 1.5,                // brief lockout after a cast, so a double-tap cannot double-fire
   upLevels: [3, 6, 9],       // where the three upgrades unlock OUTSIDE Crystal Guard
+  // Q/E scale with level the same way the signature does, so a level-10 hero's whole bar
+  // is worth pressing rather than just its ultimate.
+  skillKeys: ['Q', 'E', 'R'],
 };
 
 // ── Buildings ─────────────────────────────────────────

@@ -13,8 +13,11 @@
 // icons", the cross-checks in the middle are what fail: each hero is asserted to do its own
 // thing AND to not do the other two's.
 //
-// Also covers the charge economy that replaced energy-plus-cooldown, and both routes by
-// which the nine upgrades are earned (reward cards in Crystal Guard, levels everywhere else).
+// The signature sits at slot R of a three-button kit. Q and E are the TACTICAL pair: they
+// run on energy plus a cooldown so they are pressed constantly, while R runs on the charge
+// meter so it is the one thing worth saving. This suite covers both currencies, and both
+// routes by which the nine signature upgrades are earned (reward cards in Crystal Guard,
+// levels everywhere else).
 const path = require('path');
 global.window = global;
 ['config', 'maps', 'pathfind', 'entities', 'game', 'ai', 'daily', 'survival', 'kids', 'net_core']
@@ -51,7 +54,19 @@ head('One signature per hero, and the old panel is gone');
   const defs = ['warden', 'matriarch', 'archon'].map(t => RC.UNITS[t]);
   for (const d of defs) {
     ok(!!d.sig, d.name + ' has a signature ability');
-    ok(!d.skills && !d.ult, d.name + ' no longer carries the old skills/ultimate');
+    // ── The three-button kit ──
+    ok((d.skills || []).length === 3, d.name + ' has a three-button kit, has ' + (d.skills || []).length);
+    ok(d.skills[2] === d.sig, d.name + ' slot R IS the signature — the same object, not a copy');
+    ok(d.skills[2].ult === true, d.name + ' slot R is flagged as the ultimate');
+    ok(d.skills.slice(0, 2).every(s => !s.ult), d.name + ' Q and E are not ultimates');
+    ok(d.skills.map(s => s.key).join('') === 'QER', d.name + ' kit is bound to Q/E/R, got ' + d.skills.map(s => s.key).join(''));
+    ok(d.skills.slice(0, 2).every(s => s.cost > 0 && s.cd > 0),
+       d.name + ' Q and E both cost energy AND take a cooldown — two brakes, not one');
+    ok(d.sig.cost == null && d.sig.cd == null,
+       d.name + ' the ultimate has neither, because it runs on the charge meter instead');
+    ok(d.skills.every(s => s.kid && s.kid.length < 70 && s.ic && s.desc),
+       d.name + ' every button has an icon, a kid line and a grown-up line');
+    ok(new Set(d.skills.map(s => s.id)).size === 3, d.name + ' its three ability ids are distinct');
     ok(!!d.sig.kid && d.sig.kid.length < 60, d.name + ' has a short kid-facing line: "' + d.sig.kid + '"');
     ok((d.sig.ups || []).length === 3, d.name + ' has three upgrades, has ' + (d.sig.ups || []).length);
     ok(new Set(d.sig.ups.map(u => u.id)).size === 3, d.name + ' upgrade ids are distinct');
@@ -60,12 +75,15 @@ head('One signature per hero, and the old panel is gone');
   const ids = defs.map(d => d.sig.id);
   ok(new Set(ids).size === 3, 'the three signatures are different abilities: ' + ids.join(', '));
   ok(new Set(defs.map(d => d.sig.key)).size === 1, 'they all share one hotkey, so there is one key to learn');
-  // The Spitter already owns 'nova'; a duplicate case label in _applyAbility is silently
-  // unreachable rather than an error, which is exactly how this broke the first time.
-  const unitAbilityIds = Object.keys(RC.UNITS)
-    .map(k => RC.UNITS[k].ability && RC.UNITS[k].ability.id).filter(Boolean);
-  ok(!ids.some(i => unitAbilityIds.includes(i)),
-     'no signature id collides with a regular unit ability (' + ids.join(',') + ')');
+  // Every id in the game reaches the same switch in _applyAbility, and a DUPLICATE case
+  // label there is silently unreachable rather than an error — which is exactly how this
+  // broke the first time ('riftnova' had to be renamed off the Spitter's old 'nova').
+  const allSkillIds = defs.flatMap(d => d.skills.map(s => s.id));
+  ok(new Set(allSkillIds).size === allSkillIds.length,
+     'no two abilities anywhere share an id (' + allSkillIds.join(',') + ')');
+  // And nothing outside a hero can reach that switch at all: units are passive-only now.
+  const casters = Object.keys(RC.UNITS).filter(k => RC.UNITS[k].ability);
+  ok(casters.length === 0, 'no unit has a castable ability any more, found [' + casters.join(',') + ']');
 }
 
 // ── Warden — Bulwark: a guard pool on the objective ────────────────────────
@@ -209,6 +227,102 @@ head('Charge — fills by fighting, faster than by waiting');
   const h5 = hero(g5, 'warden', 1050, 1000, 1);
   h5.downed = true;
   ok(h5.sigReady() === false && h5.cast(g5, 'r') === false, 'a downed hero cannot cast');
+}
+
+// ── The tactical pair: Q and E ─────────────────────────────────────────────
+// The ultimate has its own economy and its own suite above. These two share a different
+// one — energy plus a cooldown — and the point of testing them separately is that the two
+// economies must not leak into each other: spending Q must never touch the charge meter,
+// and a full charge meter must never make Q free.
+head('Q and E — energy plus a cooldown, and nothing to do with the charge meter');
+{
+  const g = makeGame();
+  crystal(g, 1000, 1000);
+  const h = hero(g, 'warden', 1050, 1000, 1);
+  const q = h.def.skills[0], e = h.def.skills[1];
+  for (let i = 0; i < 8; i++) enemy(g, 1000 + i * 12, 1010);   // something to hit
+
+  h.energy = h.maxEnergy; h.charge = 1;
+  ok(h.skillReady(q), 'a full hero can press Q');
+  const charge0 = h.charge;
+  ok(h.cast(g, 'q') === true, 'Q fires');
+  ok(h.charge === charge0, 'and it did NOT spend the ultimate\'s charge');
+  ok(h.energy < h.maxEnergy, 'it spent energy instead (' + Math.round(h.energy) + '/' + h.maxEnergy + ')');
+  ok(h.skillCd[q.id] > 0, 'and it went on cooldown (' + h.skillCd[q.id] + 's)');
+  ok(h.skillReady(q) === false && h.cast(g, 'q') === false, 'so it cannot be pressed again straight away');
+
+  // Energy alone is not enough — the cooldown is a second, independent brake.
+  h.energy = h.maxEnergy;
+  ok(h.skillReady(q) === false, 'refilling energy does not skip the cooldown');
+  h.skillCd[q.id] = 0;
+  h.energy = (q.cost || 0) - 1;
+  ok(h.skillReady(q) === false, 'and clearing the cooldown does not conjure the energy');
+  ok(h.charge === charge0, 'a full charge meter never pays for Q either');
+
+  // The ultimate is unaffected by any of that.
+  ok(h.sigReady() === true, 'pressing Q left the ultimate ready — the two economies are separate');
+
+  // Cooldowns tick down on their own.
+  h.skillCd[q.id] = 2; h.energy = h.maxEnergy;
+  for (let i = 0; i < 30 * 3; i++) h.update(1 / 30, g);
+  ok((h.skillCd[q.id] || 0) === 0 && h.skillReady(q), 'a cooldown runs out by itself');
+
+  // Level scaling reaches Q and E, not just the signature.
+  const lo = hero(makeGame(), 'warden', 0, 0, 1).effSkill(q);
+  const hi = hero(makeGame(), 'warden', 0, 0, 10).effSkill(q);
+  ok(hi.dmg > lo.dmg, 'Q hits harder at level 10 than at level 1 (' + lo.dmg + ' -> ' + hi.dmg + ')');
+
+  // A downed hero has no buttons at all, not just no ultimate.
+  const gd = makeGame(); crystal(gd, 1000, 1000);
+  const hd = hero(gd, 'warden', 1050, 1000, 1);
+  hd.downed = true;
+  ok(hd.def.skills.every(sk => hd.skillReady(sk) === false), 'a downed hero cannot press anything');
+}
+
+// ── Crystal Shockwave — the objective is the origin ────────────────────────
+// The Warden's E is Bulwark's twin and has to obey Bulwark's rule: it is measured from the
+// CRYSTAL, never from the hero. Shoving away from the hero scatters enemies wherever the
+// hero happens to be standing; shoving away from the objective always clears the thing you
+// are defending, which is the entire reason to press it.
+head('Warden — Crystal Shockwave (make space, measured from the crystal)');
+{
+  const g = makeGame();
+  const c = crystal(g, 1000, 1000);
+  // The hero stands well off to one side. If the push came from the Warden, the enemy
+  // between it and the crystal would be shoved TOWARDS the crystal — the exact bug.
+  const h = hero(g, 'warden', 1400, 1000, 5);
+  h.energy = h.maxEnergy;
+  const foe = enemy(g, 1080, 1000);          // between the crystal and the hero
+  const d0 = Math.hypot(foe.x - c.x, foe.y - c.y);
+  const hp0 = foe.hp;
+  ok(h.cast(g, 'e') === true, 'the shockwave fires');
+  const d1 = Math.hypot(foe.x - c.x, foe.y - c.y);
+  ok(d1 > d0 + 100, 'the enemy was hurled AWAY from the crystal (' + Math.round(d0) + 'px -> ' + Math.round(d1) + 'px)');
+  ok(foe.hp < hp0, 'and took some damage on the way');
+  ok(foe.hp > hp0 * 0.5, 'but not much — this buys time, it does not clear the wave');
+  ok(foe.slow > 0, 'survivors are left reeling');
+  ok(!c.guard, 'it grants no shield — that is Bulwark\'s job, and they must stay different');
+
+  // Nothing to shove means nothing spent. A panic button that eats its cooldown on an
+  // empty field is a panic button you learn not to trust.
+  const g2 = makeGame();
+  crystal(g2, 1000, 1000);
+  const h2 = hero(g2, 'warden', 1050, 1000, 5);
+  h2.energy = h2.maxEnergy;
+  ok(h2.cast(g2, 'e') === false, 'it refuses to fire with no enemy in range');
+  ok(h2.energy === h2.maxEnergy, 'and it cost nothing');
+  ok(!h2.skillCd[h2.def.skills[1].id], 'and started no cooldown');
+
+  // Flyers are above the terrain, not above a pressure wave.
+  const g3 = makeGame();
+  const c3 = crystal(g3, 1000, 1000);
+  const h3 = hero(g3, 'warden', 1400, 1000, 5);
+  h3.energy = h3.maxEnergy;
+  const air = new RC.Unit('hover', 1080, 1000, 2);
+  g3.units.push(air);
+  const a0 = Math.hypot(air.x - c3.x, air.y - c3.y);
+  h3.cast(g3, 'e');
+  ok(Math.hypot(air.x - c3.x, air.y - c3.y) > a0 + 100, 'air units get thrown too');
 }
 
 // ── Upgrades: two routes, never both ───────────────────────────────────────

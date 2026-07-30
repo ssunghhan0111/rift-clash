@@ -556,12 +556,12 @@ RC.Input = (function () {
       return;
     }
 
-    // ability / hero-signature hotkey — cast on selected units of mine whose key matches
+    // 영웅 스킬 단축키 (Q / E / R). 유닛에는 더 이상 시전할 스킬이 없다 — 전부 패시브.
+    // This sits ABOVE the build and train hotkeys on purpose: Q/E/R are also building and
+    // production keys, and a selected hero can do neither, so the hero always wins the key.
     const casters = g.selection.filter(s =>
-      s.kind === 'unit' && s.owner === me && (
-        (s.def.ability && s.def.ability.key.toLowerCase() === k) ||
-        (s.def.hero && s.def.sig && s.def.sig.key.toLowerCase() === k)     // signature (R)
-      ));
+      s.kind === 'unit' && s.owner === me && s.def.hero &&
+      (s.def.skills || []).some(sk => (sk.key || '').toLowerCase() === k));
     if (casters.length) { RC.cmd(g, { t: 'cast', ids: casters.map(u => u.id), key: k }); snd('cast'); return; }
 
     // attack-move: 'A' then click (only when no selected unit uses 'A' for an ability)

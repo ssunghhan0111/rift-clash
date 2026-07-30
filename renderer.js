@@ -1992,17 +1992,73 @@ RC.Renderer = (function () {
       ctx.beginPath(); ctx.arc(0, 0, u.r + 3, 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
     };
-    if (u.surge > 0) ring('#ff6b57');          // 과부하 = 빨강
-    else if (u.rail > 0) ring('#f0a02a');      // 조준 사격 = 주황
-    else if (u.bulwark > 0) {                  // 방벽 = 파란 실드 아크
-      ctx.strokeStyle = '#6fd3ff'; ctx.lineWidth = 3; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(t * 5);
+    if (u.haste > 0) ring('#ff6b57');           // 가속 = 빨강
+    else if (u.auraArmorT > 0) {                // 장갑 오라 = 파란 실드 아크
+      ctx.strokeStyle = '#6fd3ff'; ctx.lineWidth = 3; ctx.globalAlpha = 0.5 + 0.25 * Math.sin(t * 5);
       ctx.beginPath(); ctx.arc(0, 0, u.r + 5, -Math.PI * 0.75, Math.PI * 0.75); ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    if (u.slow > 0) {                           // 정전 = 보라 점선
-      ctx.strokeStyle = '#c88bff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.globalAlpha = 0.8;
+    // ── 동결 ── The one status that stops a unit dead, so it gets the loudest tell in
+    // the game: a solid ice shell rather than a ring you have to look for.
+    if (u.frozen > 0) {
+      ctx.fillStyle = 'rgba(150,225,255,0.42)';
+      ctx.beginPath(); ctx.arc(0, 0, u.r + 3, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#bff0ff'; ctx.lineWidth = 2.2; ctx.globalAlpha = 0.95;
+      ctx.beginPath(); ctx.arc(0, 0, u.r + 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 1.4; ctx.globalAlpha = 0.8;
+      for (let i = 0; i < 6; i++) {              // 성에 결정
+        const a = i * (Math.PI / 3) + 0.3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * u.r * 0.35, Math.sin(a) * u.r * 0.35);
+        ctx.lineTo(Math.cos(a) * (u.r + 2), Math.sin(a) * (u.r + 2));
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    } else if (u.slow > 0 || u.chillStk > 0) {   // 둔화/냉기 = 하늘색 점선
+      ctx.strokeStyle = u.chillStk > 0 ? '#8fd8ff' : '#c88bff';
+      ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.globalAlpha = 0.8;
       ctx.beginPath(); ctx.arc(0, 0, u.r + 4, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    // ── 표식 ── Drawn as a bracket rather than another ring: mark is the one status that
+    // is a message to the PLAYER ("hit this one"), not a thing happening to the unit.
+    if (u.markT > 0) {
+      ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 2; ctx.globalAlpha = 0.85;
+      const rr = u.r + 7;
+      for (let i = 0; i < 4; i++) {
+        const a0 = i * (Math.PI / 2) + 0.25;
+        ctx.beginPath(); ctx.arc(0, 0, rr, a0, a0 + 0.5); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    // ── 맹독 / 화상 ── Same maths as acid, so it gets the same shape and a different
+    // hue: purple for venom, orange for fire. Three statuses that all mean "it is still
+    // dying" should look related.
+    if (u.venomStk > 0) {
+      const k = Math.min(1, u.venomStk / 4);
+      const hot = u.venomFire;
+      ctx.strokeStyle = hot ? '#ffab4a' : '#c07dff';
+      ctx.lineWidth = 1.5 + k * 1.5; ctx.globalAlpha = 0.35 + 0.45 * k;
+      ctx.beginPath(); ctx.arc(0, 0, u.r + 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = hot ? '#ff8a3d' : '#a25cff'; ctx.globalAlpha = 0.75;
+      for (let i = 0; i < u.venomStk; i++) {
+        const a = -t * 2.4 + i * (Math.PI * 2 / 4);
+        ctx.beginPath(); ctx.arc(Math.cos(a) * (u.r + 6), Math.sin(a) * (u.r + 6), 1.9, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    // ── 장갑 파쇄 ── Chips flaking off the outline. Reads as "its armour is coming apart"
+    // without adding a fourth coloured ring to an already busy unit.
+    if (u.shredStk > 0) {
+      ctx.strokeStyle = '#ffd9a0'; ctx.lineWidth = 2; ctx.globalAlpha = 0.7;
+      for (let i = 0; i < u.shredStk; i++) {
+        const a = t * 1.1 + i * (Math.PI * 2 / 5);
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * (u.r + 1), Math.sin(a) * (u.r + 1));
+        ctx.lineTo(Math.cos(a + 0.22) * (u.r + 5), Math.sin(a + 0.22) * (u.r + 5));
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
     }
     if (u.acidStacks > 0) {                      // 산성 = 초록 방울 링 (중첩 수만큼 진하게)
       const k = Math.min(1, u.acidStacks / 5);
@@ -3191,6 +3247,26 @@ RC.Renderer = (function () {
           ctx.beginPath(); ctx.arc(f.ax + Math.cos(a) * rr, f.ay + Math.sin(a) * rr, 2.5 * (1 - prog), 0, Math.PI * 2); ctx.fill();
         }
       }
+      ctx.restore();
+      return;
+    }
+    // 연쇄 번개 — 본 사격이 아니라 튄 것이므로 총구 화염도, 탄착도 그리지 않는다.
+    if (f.arc) {
+      const a = Math.max(0, Math.min(1, f.t / 0.12));
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = 'rgba(190,235,255,0.9)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(f.x, f.y);
+      // A couple of kinks, seeded off the endpoints so the same bolt doesn't jitter.
+      const seg = 3, dx = (f.tx - f.x) / seg, dy = (f.ty - f.y) / seg;
+      for (let i = 1; i <= seg; i++) {
+        const j = (i < seg) ? ((Math.sin((f.x + i * 7.3 + f.ty) * 1.7) * 7)) : 0;
+        ctx.lineTo(f.x + dx * i - dy / 40 * j, f.y + dy * i + dx / 40 * j);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.globalAlpha = 1;
       ctx.restore();
       return;
     }

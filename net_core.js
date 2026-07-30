@@ -65,11 +65,10 @@ window.RC = window.RC || {};
       case 'cancelQueue': { const b = byId(game.buildings, c.bid); if (b && b.owner === owner) game.cancelQueueAt(b, c.i); break; }
       case 'cancelBuild': { const b = game.buildings.find(x => x.id === c.bid && !x.dead); if (b && b.owner === owner) game.cancelBuild(b); break; }
       case 'cast': {
-        const us = ownUnits(game, owner, c.ids);
-        us.forEach(u => {
-          if (u.def.hero) u.cast(game, c.key);
-          else if (u.def.ability && u.def.ability.key.toLowerCase() === c.key) u.cast(game);
-        });
+        // Only heroes cast now — every other unit's ability is a passive, so a client
+        // asking a Volt Trooper to cast is either stale or lying, and either way the
+        // answer is the same: nothing happens.
+        ownUnits(game, owner, c.ids).forEach(u => { if (u.def.hero) u.cast(game, c.key); });
         break;
       }
       case 'rally': {
@@ -130,9 +129,14 @@ window.RC = window.RC || {};
       else if (st < 0) d.s = u.state;
       const carry = u.carry || 0;            if (carry) d.c = carry;
       const en = Math.round(u.energy || 0);  if (en) d.e = en;
-      const b = (u.surge > 0 ? 1 : 0) | (u.rail > 0 ? 2 : 0) | (u.bulwark > 0 ? 4 : 0) | (u.slow > 0 ? 8 : 0);
+      // 상태 비트 — 렌더러가 링을 그리는 데만 쓴다. 정확한 남은 시간은 필요 없다.
+      const b = (u.haste > 0 ? 1 : 0) | (u.auraArmorT > 0 ? 2 : 0) | (u.frozen > 0 ? 4 : 0) | (u.slow > 0 ? 8 : 0);
       if (b) d.b = b;
       if (u.acidStacks) d.a = u.acidStacks;
+      if (u.venomStk) d.vn = u.venomStk | (u.venomFire ? 16 : 0);   // 상위 비트 = 화상 색
+      if (u.shredStk) d.sr = u.shredStk;
+      if (u.chillStk) d.cl = u.chillStk;
+      if (u.markT > 0) d.mk = 1;
       if (u.cargo && u.cargo.length) d.cg = u.cargo.length;
       if (u.hitFlash > 0) d.hf = 1;
       if (u.maxShield) { d.sh = Math.round(u.shield); d.sm = Math.round(u.maxShield); }
@@ -199,8 +203,10 @@ window.RC = window.RC || {};
       u.state = (typeof d.s === 'number') ? STATES[d.s] : (d.s || 'idle');
       u.carry = d.c || 0; u.energy = d.e || 0;
       const bf = d.b || 0;
-      u.surge = (bf & 1) ? 1 : 0; u.rail = (bf & 2) ? 1 : 0; u.bulwark = (bf & 4) ? 1 : 0; u.slow = (bf & 8) ? 1 : 0;
+      u.haste = (bf & 1) ? 1 : 0; u.auraArmorT = (bf & 2) ? 1 : 0; u.frozen = (bf & 4) ? 1 : 0; u.slow = (bf & 8) ? 1 : 0;
       u.acidStacks = d.a || 0; u.hitFlash = d.hf ? 0.12 : 0;
+      u.venomStk = (d.vn || 0) & 15; u.venomFire = !!((d.vn || 0) & 16);
+      u.shredStk = d.sr || 0; u.chillStk = d.cl || 0; u.markT = d.mk ? 1 : 0;
       // 실드는 서버가 권위 — 클라이언트는 값만 반영하고 반짝임만 로컬로 연출
       if (d.sm) { if (d.sh < u.shield) u.shieldFx = 0.18; u.shield = d.sh; u.maxShield = d.sm; }
       u.cargo = u.def.transport ? new Array(d.cg || 0) : null;

@@ -522,7 +522,8 @@ window.RC = window.RC || {};
       u._processedDeath = false;
       u.hp = u.maxHp;
       u.energy = u.maxEnergy || 0;
-      u.acidStacks = 0; u.slow = 0; u.surge = 0; u.rail = 0; u.bulwark = 0;
+      RC.initStatus(u);                       // 산성/맹독/파쇄/냉기/표식 전부 초기화
+      u.slow = 0; u.haste = 0;
       u.skillCd = {};
       u.x = core.x + (Math.random() * 40 - 20);
       u.y = core.y + core.h / 2 + 44;

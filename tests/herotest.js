@@ -31,10 +31,11 @@ console.log('=== heroes offline ===');
   const defs = Object.values(RC.UNITS).filter(u => u.hero);
   ok(defs.length === 3, 'expected 3 hero definitions, found ' + defs.length);
   defs.forEach(d => {
-    ok(!!d.ult, d.name + ' has no ultimate');
+    ok(!!d.sig, d.name + ' has no signature');
     ok((d.skills || []).length === 3, d.name + ' should have 3 skills, has ' + (d.skills || []).length);
+    ok(d.skills[2] === d.sig, d.name + ' slot R should be the signature itself');
   });
-  console.log('  defined: ' + defs.map(d => d.name + ' / ' + d.ult.name).join(' · ') + ' ✓');
+  console.log('  defined: ' + defs.map(d => d.name + ' / ' + d.skills.map(s => s.name).join('+')).join(' · ') + ' ✓');
 
   // 1v1: both sides get one
   const vs = new RC.Game(RC.getMap('earth'), RC.MODES['1v1']);
@@ -58,13 +59,23 @@ console.log('=== heroes offline ===');
   ok(sh[0].def.race === 'gloop', 'the survival hero should match the chosen faction, got ' + sh[0].def.race);
   console.log('  2v2: 4 heroes · survival: ' + sh[0].def.name + ' (matches the Gloop pick) ✓');
 
-  // levelling and the ultimate gate
+  // Levelling, and what levelling now buys. The ultimate is no longer gated behind a
+  // level — it is gated behind the charge meter, which is a thing you EARN in the fight
+  // rather than a thing you wait for. What levels buy instead is bigger numbers on the
+  // whole kit and the three signature upgrades.
   const h = sh[0];
-  ok(h.level === 1 && h.ultRank() === 0, 'a fresh hero should be level 1 with the ult locked');
+  ok(h.level === 1, 'a fresh hero should be level 1');
+  ok(h.sigReady() === false, 'and its signature is not ready, because nothing has charged it');
+  const q = h.def.skills[0];
+  const lo = h.effSkill(q).dmg;
+  const upsAt1 = h.def.sig.ups.filter(u => h.hasUp(u.id)).length;
   for (let i = 0; i < 40; i++) h.gainXp(100);
   ok(h.level > 1, 'the hero never levelled');
-  ok(h.ultRank() > 0, 'the ultimate never unlocked (level ' + h.level + ')');
-  console.log('  levelling works: reached level ' + h.level + ', ultimate unlocked ✓');
+  ok(h.effSkill(q).dmg > lo, 'levelling never made its Q hit harder (' + lo + ' -> ' + h.effSkill(q).dmg + ')');
+  ok(h.def.sig.ups.filter(u => h.hasUp(u.id)).length > upsAt1, 'levelling never unlocked a signature upgrade');
+  h.charge = 1; h.sigCd = 0;
+  ok(h.sigReady() === true, 'and a full charge meter is what actually arms the signature');
+  console.log('  levelling works: reached level ' + h.level + ', Q scaled and upgrades unlocked ✓');
 }
 
 // ── the netcode carries a hero ────────────────────────────────────────────
@@ -74,21 +85,25 @@ console.log('\n=== a hero across the wire ===');
   g.heroesEnabled = true; g.reset();
   const h = heroesOf(g)[0];
   h.gainXp(500);
-  h.skillCd['f'] = 4.2;
+  const cdId = h.def.skills[0].id;                  // cooldowns are keyed by ability id
+  h.skillCd[cdId] = 4.2;
   const snap = RC.Net.serialize(g);
   const row = snap.U.find(u => u.hr);
   ok(!!row, 'the snapshot carries no hero state at all');
   ok(row.hr.l === h.level, 'hero level did not serialize (' + (row.hr && row.hr.l) + ' vs ' + h.level + ')');
-  ok(row.hr.cd && row.hr.cd.f > 0, 'skill cooldowns did not serialize');
+  ok(row.hr.cd && row.hr.cd[cdId] > 0, 'skill cooldowns did not serialize');
 
   const c = new RC.Game(RC.getMap('earth'), RC.MODES['1v1']);
   RC.Net.applySnapshot(c, snap);
   const ch = heroesOf(c)[0];
   ok(!!ch, 'the client rebuilt no hero from the snapshot');
   ok(ch.level === h.level, 'the client sees the wrong hero level (' + ch.level + ' vs ' + h.level + ')');
-  ok(Math.abs((ch.skillCd.f || 0) - 4.2) < 0.2, 'the client sees the wrong cooldown');
-  ok(ch.ultRank() === h.ultRank(), 'the client disagrees about whether the ultimate is ready');
-  console.log('  level ' + h.level + ', a 4.2s cooldown and the ult gate all survive the snapshot ✓');
+  ok(Math.abs((ch.skillCd[cdId] || 0) - 4.2) < 0.2, 'the client sees the wrong cooldown');
+  // The charge meter is server-owned: without it in the snapshot an online player's ring
+  // would sit empty all match while the server happily fired their signature.
+  ok(Math.abs(ch.charge - h.charge) < 0.02, 'the client sees the wrong signature charge');
+  ok(ch.sigReady() === h.sigReady(), 'the client disagrees about whether the signature is ready');
+  console.log('  level ' + h.level + ', a 4.2s cooldown and the charge meter all survive the snapshot ✓');
 }
 
 // ── online, two real browsers ─────────────────────────────────────────────
@@ -177,19 +192,22 @@ const BASE = 'http://127.0.0.1:' + PORT + '/index.html';
   ok(panel.cmds.length >= 3, 'the online hero has no skill buttons (' + panel.cmds.join(', ') + ')');
   console.log('  selected "' + panel.name + '" → skills: ' + panel.cmds.join(', ') + ' ✓');
 
-  // A level-1 hero only has its first skill unlocked, and that skill is an area
-  // attack that needs something to hit — so a cast at the spawn point is refused
-  // by design, on the server exactly as it is offline. To prove the command
-  // really crosses the wire, march both heroes at each other first and cast for
-  // real once an enemy is inside the blast radius.
+  // A level-1 hero has its whole Q/E pair available — they are gated by energy and a
+  // cooldown, not by level — while the signature is gated by a charge meter that a hero
+  // fresh out of the gate has not filled. Both of the tactical two are area effects that
+  // need something to hit, so a cast at the spawn point is refused by design, on the
+  // server exactly as it is offline. To prove the command really crosses the wire, march
+  // both heroes at each other and cast for real once an enemy is inside the radius.
   const gate = await a.evaluate(() => {
     const g = window.GAME;
     const mine = g.units.find(u => (u.hero || u.def.hero) && u.owner === g.playerOwner);
-    return { ranks: mine.def.skills.map((s, i) => mine.heroRank(i)), energy: Math.round(mine.energy) };
+    return { ready: mine.def.skills.map(sk => mine.skillReady(sk)),
+             energy: Math.round(mine.energy), charge: mine.charge };
   });
-  ok(gate.ranks[0] > 0, 'a level-1 hero should have its first skill unlocked');
-  ok(gate.ranks[1] === 0 && gate.ranks[2] === 0, 'a level-1 hero should not have its later skills yet');
-  console.log('  level-1 skill gate online matches offline: ranks ' + gate.ranks.join('/') + ', energy ' + gate.energy + ' ✓');
+  ok(gate.ready[0] === true && gate.ready[1] === true, 'a level-1 hero should have both tactical skills available');
+  ok(gate.ready[2] === false, 'but not its signature — that has to be charged by fighting');
+  console.log('  level-1 kit online matches offline: ready ' + gate.ready.join('/') +
+              ', energy ' + gate.energy + ', charge ' + gate.charge.toFixed(2) + ' ✓');
 
   const march = p => p.evaluate(() => {
     const g = window.GAME;
@@ -216,12 +234,14 @@ const BASE = 'http://127.0.0.1:' + PORT + '/index.html';
   const cast = await a.evaluate(async () => {
     const g = window.GAME;
     const mine = g.units.find(u => (u.hero || u.def.hero) && u.owner === g.playerOwner);
-    const key = mine.def.skills[0].key.toLowerCase();      // the one skill a level-1 hero has
+    const sk = mine.def.skills[0];                         // Q — always available, costs energy
+    const key = sk.key.toLowerCase();
     const before = Math.round(mine.energy);
     RC.cmd(g, { t: 'cast', ids: [mine.id], key });
     await new Promise(r => setTimeout(r, 1500));
     const after = g.units.find(u => u.id === mine.id);
-    return { key, before, cdAfter: after ? (after.skillCd[key] || 0) : -1, energyAfter: after ? Math.round(after.energy) : -1 };
+    return { key, before, cdAfter: after ? (after.skillCd[sk.id] || 0) : -1,
+             energyAfter: after ? Math.round(after.energy) : -1 };
   });
   ok(cast.cdAfter > 0, 'casting a hero skill online did not put it on cooldown (the server ignored it)');
   ok(cast.energyAfter < cast.before, 'the server did not spend the hero energy (' + cast.before + ' → ' + cast.energyAfter + ')');

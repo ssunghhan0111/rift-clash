@@ -749,6 +749,16 @@ window.RC = window.RC || {};
   const TUT_TABS = ['Overview', 'Modes', 'Factions', 'Units'];
   // 종족 판정 — race가 없는 정의는 기본(Forge) 소속. 3종족 이상에서도 동작한다.
   const raceOf = d => d.race || 'forge';
+  // 고유 능력 한 줄. 유닛은 전부 패시브이고, 영웅만 Q/E/R 버튼을 가진다.
+  function passiveLine(d) {
+    const out = [];
+    const p = d.passive && RC.PASSIVE[d.passive.id];
+    if (p) out.push(`<div class="tc-abil">${p.ic} ${p.name} — ${p.desc}</div>`);
+    for (const sk of (d.skills || [])) {
+      out.push(`<div class="tc-abil">[${sk.key}] ${sk.ic} ${sk.name} — ${sk.desc || ''}</div>`);
+    }
+    return out.join('');
+  }
   function unitCard(d) {
     const bits = [`HP ${d.hp}`];
     if (d.shield) bits.push(`SHLD ${d.shield}`);
@@ -762,7 +772,7 @@ window.RC = window.RC || {};
       <div><span class="tc-name">${d.name}</span><span class="tc-role">${d.role || ''}</span></div>
       <div class="tc-stats">${bits.join(' · ')}</div>
       <div class="tc-desc">${d.desc || ''}</div>
-      ${d.ability ? `<div class="tc-abil">✦ ${d.ability.name} — ${d.ability.desc || ''}</div>` : ''}
+      ${passiveLine(d)}
     </div>`;
   }
   function bldCard(d) {
