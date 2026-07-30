@@ -419,11 +419,27 @@ head('NO RTS — the simplifications hold');
      'income is about INCOME per second');
   // Only the two starter buildings exist: the crystal and the one base.
   ok(gk.buildings.length === 2, 'a solo run starts with exactly the crystal and one base, has ' + gk.buildings.length);
-  ok(RC.KID_BUILD.length === 2, 'a kid may build exactly two things');
-  ok(RC.KID_BUILD.every(b => RC.BUILDINGS[b.t]), 'both are real buildings');
-  ok(RC.KID_BUILD.every(b => !RC.BUILDINGS[b.t].produces || !RC.BUILDINGS[b.t].produces.length),
-     'neither of them produces units — defence only, no base-building tree');
-  ok(!RC.BUILDABLE.includes('rampart'), 'the wall is Crystal Guard only and never leaks into Versus/Survival');
+  // The build list is defence only, and it follows the RACE — a Gloop kid puts up Venom
+  // Spires. The entry with no `t` is the tower placeholder that kidBuildFor() fills in.
+  const kb = RC.kidBuildFor('forge');
+  ok(kb.length >= 4, 'a kid has a real set of things to build, has ' + kb.length);
+  ok(kb.every(b => RC.BUILDINGS[b.t]), 'every entry is a real building');
+  ok(kb.every(b => !RC.BUILDINGS[b.t].produces || !RC.BUILDINGS[b.t].produces.length),
+     'none of them produces units — defence only, no base-building tree');
+  ok(kb.filter(b => RC.BUILDINGS[b.t].tower).length === 1, 'exactly one of them is a tower');
+  ok(kb.filter(b => RC.BUILDINGS[b.t].wall).length >= 3, 'and the rest are walls to choose between');
+  // The tower entry resolves per race rather than being hard-coded to the Forge one.
+  const towerOf = r => RC.kidBuildFor(r).find(b => RC.BUILDINGS[b.t].tower).t;
+  ok(towerOf('forge') === 'stonethrower' && towerOf('gloop') === 'venomspire' &&
+     towerOf('aether') === 'prismlaser', 'the tower follows the chosen race');
+  // Walls that only make sense in this mode must never turn up in Versus or Survival,
+  // where they would rebalance two tuned modes by accident.
+  const kidOnly = Object.keys(RC.BUILDINGS).filter(k => RC.BUILDINGS[k].kidOnly);
+  ok(kidOnly.length >= 3, 'there are Crystal-Guard-only walls, got ' + kidOnly.length);
+  ok(kidOnly.every(k => !RC.BUILDABLE.includes(k)), 'and none of them leaks into Versus/Survival');
+  for (const r of ['forge', 'gloop', 'aether']) {
+    ok(RC.RACES[r].buildable.every(t => !RC.BUILDINGS[t].kidOnly), r + ' cannot build the kid walls either');
+  }
   ok(gk.buildings.every(b => b.done), 'both start finished — there is nothing to build');
 }
 
@@ -443,7 +459,7 @@ head('THE OPENING HAS TEETH');
   ok(K.CFG.POP <= 24, 'the army cannot snowball to invulnerability (cap ' + K.CFG.POP + ')');
   ok(K.CFG.WAVE_HEAL <= 0.04, 'chip damage is not erased between waves (' + Math.round(K.CFG.WAVE_HEAL * 100) + '% heal)');
   // A tower has to be a real alternative to a fighter, or nobody will ever build one.
-  const tower = RC.KID_BUILD.find(b => b.t === 'guardtower');
+  const tower = RC.kidBuildFor('forge').find(b => RC.BUILDINGS[b.t].tower);
   const fighter = K.costOf(K.kitOf('forge').starters[0].t);
   console.log('  tower ' + tower.cost + ' shards vs a Tank at ' + fighter + ' — one is genuinely the other');
   ok(tower.cost >= fighter * 0.8 && tower.cost <= fighter * 2.5,
@@ -465,7 +481,8 @@ head('BUILDING — a fort around the crystal');
   ok(!!K.workerOf(gb, 1), 'the run starts with a builder');
   ok(K.buildCap(gb) >= 2, 'and room to build something, cap ' + K.buildCap(gb));
   ok(K.buildUsed(gb, 1) === 0, 'nothing built yet');
-  ok(gb.res[1].shard >= RC.KID_BUILD[1].cost, 'the opening shards cover at least a wall');
+  const cheapest = Math.min(...RC.kidBuildFor('forge').filter(b => RC.BUILDINGS[b.t].wall).map(b => b.cost));
+  ok(gb.res[1].shard >= cheapest, 'the opening shards cover at least the cheapest wall (' + cheapest + ')');
 
   // The ring is the rule, and it is enforced with a sentence rather than a silent no.
   ok(K.inBuildRing(gb, near.x, near.y), 'a spot beside the crystal is inside the ring');
@@ -477,13 +494,12 @@ head('BUILDING — a fort around the crystal');
 
   // A real build.
   const sh0 = gb.res[1].shard;
-  ok(K.build(gb, 'guardtower', near.x, near.y, 1) === true, 'a tower goes up beside the crystal');
+  ok(K.build(gb, 'stonethrower', near.x, near.y, 1) === true, 'a tower goes up beside the crystal');
   ok(K.buildUsed(gb, 1) === 1, 'and takes a slot');
-  const kidCost = RC.KID_BUILD.find(b => b.t === 'guardtower').cost;
+  const kidCost = RC.kidBuildFor('forge').find(b => b.t === 'stonethrower').cost;
   ok(Math.abs((sh0 - gb.res[1].shard) - kidCost) < 0.001,
-     'it cost the KID price (' + kidCost + '), not the Versus price (' + RC.BUILDINGS.guardtower.cost + ')');
-  ok(RC.BUILDINGS.guardtower.cost !== kidCost, 'and those two really are different');
-  ok(RC.BUILDINGS.guardtower.cost === 120, 'the Versus price was left alone for other modes');
+     'it cost the KID price (' + kidCost + '), not the Versus price (' + RC.BUILDINGS.stonethrower.cost + ')');
+  ok(RC.BUILDINGS.stonethrower.cost !== kidCost, 'and those two really are different');
 
   // The slot cap holds, and it grows as waves are cleared.
   const capNow = K.buildCap(gb);
@@ -498,10 +514,21 @@ head('BUILDING — a fort around the crystal');
   ok(K.buildCap(gb) > capNow, 'clearing waves earns more slots (' + capNow + ' -> ' + K.buildCap(gb) + ')');
 
   // A wall is a wall: it blocks, it does not shoot.
-  const ramp = RC.BUILDINGS.rampart;
-  ok(!ramp.tower && !ramp.dmg, 'the wall has no weapon');
-  ok(ramp.hp > RC.BUILDINGS.guardtower.hp * 0.8, 'but it is tough — it is meant to be chewed through');
-  ok(ramp.cost < RC.KID_BUILD[0].cost, 'and cheaper than a tower');
+  const walls = RC.kidBuildFor('forge').filter(b => RC.BUILDINGS[b.t].wall);
+  ok(walls.every(b => !RC.BUILDINGS[b.t].tower && !RC.BUILDINGS[b.t].dmg), 'no wall has a weapon');
+  // The whole point of five walls is that they are bad at DIFFERENT things. If they were
+  // ranked — cheapest is worst at everything, priciest is best at everything — there would
+  // be one correct wall and the other four would be a menu.
+  const hps = walls.map(b => RC.BUILDINGS[b.t].hp);
+  ok(Math.max(...hps) > Math.min(...hps) * 3, 'the toughest wall is far tougher than the flimsiest');
+  ok(new Set(walls.map(b => b.cost)).size >= 4, 'and they are priced apart, not four flavours of the same wall');
+  const special = walls.filter(b => RC.BUILDINGS[b.t].passive);
+  ok(special.length >= 2, 'at least two walls do something beyond having health, got ' + special.length);
+  // Cheapest-and-weakest and priciest-and-toughest have to line up, or "save up for the
+  // good one" is not a lesson the prices are actually teaching.
+  const byCost = walls.slice().sort((a, b2) => a.cost - b2.cost);
+  ok(RC.BUILDINGS[byCost[0].t].hp === Math.min(...hps), 'the cheapest wall really is the flimsiest');
+  ok(byCost[0].cost < RC.kidBuildFor('forge').find(b => RC.BUILDINGS[b.t].tower).cost, 'and walls start cheaper than a tower');
 
   // The builder walks back out free if it dies — losing it is a pause, not a run-ender.
   const w = K.workerOf(gb, 1);

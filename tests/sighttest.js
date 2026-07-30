@@ -39,12 +39,9 @@ console.log('=== per-unit sight ===');
   for (const k of keys) {
     const u = put(g, k, 500, 500, 1);
     ok(u.acquireRange(g) >= u.effRange(g), k + ': acquire (' + Math.round(u.acquireRange(g)) + ') < weapon range (' + Math.round(u.effRange(g)) + ')');
-    // ...including while an ability has extended that range
-    if (u.def.ability && u.def.ability.rangeBonus) {
-      u.rail = 5;
-      ok(u.acquireRange(g) >= u.effRange(g), k + ': acquire < range while its range ability is active');
-      u.rail = 0;
-    }
+    // There used to be a second pass here for Focus Fire / Anchor Field, the two abilities
+    // that temporarily extended a unit's range. Nothing extends range any more — unit
+    // abilities are all passives — so a unit's reach is a constant and one pass covers it.
   }
   console.log('  every unit can acquire at least as far as it can shoot ✓');
 }
@@ -245,7 +242,7 @@ console.log('\n=== fog uses the same per-unit sight ===');
     console.log('  fog and acquisition read the same value (' + Math.round(g._sightOf(u)) + ') ✓');
   }
   ok(g._baseSight({ kind: 'building', def: RC.BUILDINGS.core }) === RC.CFG.SIGHT_CORE, 'building sight fallback broke');
-  ok(g._baseSight({ kind: 'building', def: RC.BUILDINGS.guardtower }) === RC.BUILDINGS.guardtower.range + RC.CFG.SIGHT_TOWER_PAD, 'tower sight fallback broke');
+  ok(g._baseSight({ kind: 'building', def: RC.BUILDINGS.stonethrower }) === RC.BUILDINGS.stonethrower.range + RC.CFG.SIGHT_TOWER_PAD, 'tower sight fallback broke');
 }
 
 // ── 12. a real match runs, and units fight without being told to ──────────

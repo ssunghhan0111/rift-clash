@@ -295,6 +295,12 @@ RC.PASSIVE = {
                 desc: 'Accelerates for a moment after every attack — built to hit and run.' },
   ferry:      { ic: '🚁', name: 'Field Hospital', kid: 'Heals whoever is riding inside.',
                 desc: 'Patches up the units it is carrying, and stiffens the armour of anyone nearby.' },
+  // Buildings draw from the same vocabulary — a tower with `venom` behaves exactly like a
+  // Venom Hydra, which is the point. `mire` is the one entry no unit carries: it belongs
+  // to a wall, because slowing everything that walks past you is a thing a wall can do and
+  // a thing a unit standing in a fight should not.
+  mire:       { ic: '🌀', name: 'Sludge Field', kid: 'Bad guys walking near it go really slow.',
+                desc: 'Churns the ground around it, so every enemy that comes near crawls.' },
 };
 
 // ── 유닛 ──────────────────────────────────────────────
@@ -705,17 +711,39 @@ RC.BUILDINGS = {
     desc: 'Builds Patch Bots and Pulse Coils, and researches army-wide upgrades.'
   },
   // ── Towers ──
-  guardtower: {
-    id: 'guardtower', name: 'Guard Tower', hp: 520, w: 52, h: 52,
-    cost: 120, time: 16, supplyGiven: 0, produces: [], key: 'U',
-    tower: true, dmg: 16, range: 155, cd: 0.9, air: true,
-    desc: 'Defensive turret that auto-attacks ground and air.'
+  // ── Defence: one tower per race ──────────────────────────────────────────
+  // Forge used to have two (a cheap all-rounder plus a long-range siege battery) and the
+  // other two races had one each, which meant "how do I defend" had a different answer
+  // depending on who you picked — and the Forge answer was "both". One each, at the SAME
+  // hp / cost / damage / range / rate (RC.TOWER_BASE below), so the choice of race changes
+  // what your defence DOES, never how much of it you get:
+  //
+  //   Forge      hurls rock      — splash and a shove, good against a packed push
+  //   Gloop      spits venom     — little on impact, lethal to anything that lingers
+  //   Aether     fires a laser   — strips armour, so the army behind it hits harder too
+  //
+  // The passive is the entire difference, and it is the same passive vocabulary the units
+  // use (RC.PASSIVE), so a tower reads as a member of its faction rather than as furniture.
+  stonethrower: {
+    id: 'stonethrower', name: 'Stonethrower', hp: 520, w: 52, h: 52,
+    cost: 130, time: 16, supplyGiven: 0, produces: [], key: 'U',
+    tower: true, dmg: 18, range: 165, cd: 0.95, air: true, splash: 32,
+    passive: { id: 'knock', dist: 22 },
+    desc: 'Hurls boulders that burst on impact and shove survivors back. Hits ground and air.'
   },
-  arcbattery: {
-    id: 'arcbattery', name: 'Arc Battery', hp: 460, w: 60, h: 60,
-    cost: 200, time: 22, supplyGiven: 0, produces: [], key: 'I',
-    tower: true, dmg: 40, range: 235, cd: 2.4, splash: 46, air: false,
-    desc: 'Long-range splash siege turret. Build forward to pound enemy bases.'
+  // ── Defence: one wall per race ───────────────────────────────────────────
+  // A wall is the cheapest thing in the game and the most fun to place. It shoots nothing;
+  // it exists to decide WHERE a fight happens, which is the only decision a defender
+  // really gets to make. Small footprint on purpose so a row reads as a wall rather than
+  // as four sheds, and high hp per shard so blocking a lane is worth doing.
+  //
+  // Ranged units shoot straight over one — a wall is 42 deep and the shortest-ranged
+  // shooter in the game reaches 78 — so the intended shape is a wall with archers behind
+  // it, not a wall instead of an army.
+  rampart: {
+    id: 'rampart', name: 'Rampart', hp: 700, w: 42, h: 42,
+    cost: 40, time: 6, supplyGiven: 0, produces: [], key: 'I', wall: true,
+    desc: 'A block of riveted plate. Does not shoot — it just gets in the way.'
   },
 
   // ══ Gloop faction buildings ═══════════════════════════
@@ -744,11 +772,17 @@ RC.BUILDINGS = {
     cost: 200, time: 26, supplyGiven: 0, produces: [], research: true, race: 'gloop', key: 'Y',
     desc: 'Evolves (upgrades) the entire swarm.'
   },
-  acidtower: {
-    id: 'acidtower', name: 'Acid Tower', hp: 500, w: 54, h: 54,
-    cost: 120, time: 16, supplyGiven: 0, produces: [], race: 'gloop', key: 'U',
-    tower: true, dmg: 15, range: 160, cd: 0.9, air: true, acid: { dmg: 3, dur: 4, shred: 1, max: 4 },
-    desc: 'Defensive turret that spits acid at ground and air.'
+  venomspire: {
+    id: 'venomspire', name: 'Venom Spire', hp: 520, w: 52, h: 52,
+    cost: 130, time: 16, supplyGiven: 0, produces: [], race: 'gloop', key: 'U',
+    tower: true, dmg: 18, range: 165, cd: 0.95, air: true, regen: 4,
+    passive: { id: 'venom', dmg: 6, dur: 5, max: 4 },
+    desc: 'Living spire that spits venom at ground and air. What it hits keeps dying after it stops.'
+  },
+  carapace: {
+    id: 'carapace', name: 'Carapace Wall', hp: 620, w: 42, h: 42,
+    cost: 40, time: 6, supplyGiven: 0, produces: [], race: 'gloop', key: 'I', wall: true, regen: 7,
+    desc: 'A slab of grown chitin. Thinner than plate, but it knits itself back together.'
   },
 
   // ══ Aether faction buildings ══════════════════════════
@@ -779,11 +813,17 @@ RC.BUILDINGS = {
     cost: 210, time: 28, supplyGiven: 0, produces: ['oracle'], research: true, race: 'aether', key: 'Y',
     desc: 'Warps in Oracles and researches army-wide upgrades.'
   },
-  photonprism: {
-    id: 'photonprism', name: 'Photon Prism', hp: 380, shield: 320, w: 52, h: 52,
-    cost: 140, time: 17, supplyGiven: 0, produces: [], race: 'aether', key: 'U',
-    tower: true, dmg: 20, range: 165, cd: 0.95, air: true,
-    desc: 'Shielded defensive turret. Hits ground and air, and its shield regrows between attacks.'
+  prismlaser: {
+    id: 'prismlaser', name: 'Prism Laser', hp: 260, shield: 260, w: 52, h: 52,
+    cost: 130, time: 16, supplyGiven: 0, produces: [], race: 'aether', key: 'U',
+    tower: true, dmg: 18, range: 165, cd: 0.95, air: true,
+    passive: { id: 'shred', amt: 1, dur: 4, max: 4 },
+    desc: 'Focused beam turret. Cuts armour off whatever it touches, so your whole army hits it harder.'
+  },
+  aegiswall: {
+    id: 'aegiswall', name: 'Aegis Barrier', hp: 340, shield: 360, w: 42, h: 42,
+    cost: 40, time: 6, supplyGiven: 0, produces: [], race: 'aether', key: 'I', wall: true,
+    desc: 'A plate of hard light. Little substance behind the shield — but the shield comes back.'
   },
 
   // ── Survival objective ──
@@ -794,34 +834,79 @@ RC.BUILDINGS = {
   },
 };
 
-// Order of buildings a worker can construct (default = Forge)
-// ── Rampart ───────────────────────────────────────────────────────────────────
-// A wall. Cheap, tough, shoots nothing — it exists to be in the way, and to be the thing
-// a kid actually enjoys placing. Small footprint on purpose so a row of them reads as a
-// wall rather than as four sheds, and high hp per shard so blocking a lane is worth doing
-// even though a stray attacker will eventually chew through it.
+// ── Crystal Guard walls ───────────────────────────────────────────────────────
+// Five walls that are not just five hp numbers. A kid building a fort should be making a
+// CHOICE at every segment — cheap now or strong later, hurt them or hold them — and the
+// only way that is a choice is if the options are bad at different things.
 //
-// Deliberately NOT in RC.BUILDABLE: this is a Crystal Guard piece (see RC.KID_BUILD), and
-// dropping free walls into Versus and Survival would rebalance two tuned modes by accident.
-RC.BUILDINGS.rampart = {
-  id: 'rampart', name: 'Rampart', hp: 700, w: 42, h: 42,
-  cost: 30, time: 6, supplyGiven: 0, produces: [], key: 'W',
-  desc: 'A block of wall. Does not shoot — it just gets in the way.'
+// These live in Crystal Guard only. Dropping five wall types into Versus and Survival
+// would rebalance two tuned modes by accident; those two get the one plain race wall
+// (rampart / carapace / aegiswall above) and nothing else.
+//
+// hp per shard is deliberately NOT flat. The Log Fence is the worst value in the mode and
+// the Steel Wall is the best, because "save up for the good one" is a lesson worth
+// building into the prices. What the cheap one buys you is a wall RIGHT NOW.
+RC.BUILDINGS.logwall = {
+  id: 'logwall', name: 'Log Fence', hp: 300, w: 42, h: 42,
+  cost: 12, time: 3, supplyGiven: 0, produces: [], wall: true, kidOnly: true,
+  desc: 'Lashed-together logs. Cheap, quick, and it will not last.'
+};
+RC.BUILDINGS.steelwall = {
+  id: 'steelwall', name: 'Steel Wall', hp: 1900, w: 42, h: 42,
+  cost: 70, time: 9, supplyGiven: 0, produces: [], wall: true, kidOnly: true, armor: 3,
+  desc: 'Solid plate. The toughest thing you can put in front of the crystal, and the priciest.'
+};
+// Enemies bog down in the mud it churns out. Almost no health of its own: it is not there
+// to be hit, it is there to make the ground in front of the REAL wall miserable.
+RC.BUILDINGS.treadwall = {
+  id: 'treadwall', name: 'Sludge Belt', hp: 380, w: 42, h: 42,
+  cost: 40, time: 6, supplyGiven: 0, produces: [], wall: true, kidOnly: true,
+  passive: { id: 'mire', slow: 1.2, radius: 96 },
+  desc: 'Churns the ground into sludge. Anything walking near it crawls.'
+};
+// The one wall that fights back. Attacking it costs you, so it punishes exactly the
+// enemies that stop to chew rather than the ones that walk past.
+RC.BUILDINGS.spikewall = {
+  id: 'spikewall', name: 'Spike Wall', hp: 480, w: 42, h: 42,
+  cost: 45, time: 6, supplyGiven: 0, produces: [], wall: true, kidOnly: true,
+  passive: { id: 'thorns', pct: 0.45 },
+  desc: 'Bristling with spikes. Whatever bites it gets a mouthful back.'
 };
 
-RC.BUILDABLE = ['cell', 'factory', 'hoverpad', 'arclab', 'guardtower', 'arcbattery'];
+// Order of buildings a worker can construct (default = Forge)
+RC.BUILDABLE = ['cell', 'factory', 'hoverpad', 'arclab', 'stonethrower', 'rampart'];
 
 // ── What a Crystal Guard player may build ─────────────────────────────────────
-// Two things only, and both are defence. A kid gets the build-your-fort loop that makes
-// the mode worth replaying without any of the base-building tree the mode exists to avoid:
-// no production buildings, no supply, no tech. Prices are the kid prices, not the Versus
-// ones, because these compete for the same shards as fighters.
+// Defence only. A kid gets the build-your-fort loop that makes the mode worth replaying
+// without any of the base-building tree the mode exists to avoid: no production buildings,
+// no supply, no tech. Prices are the kid prices, not the Versus ones, because these compete
+// for the same shards as fighters.
+//
+// The tower entry has no `t`: it resolves to whichever tower the chosen race builds, so a
+// Gloop kid gets a Venom Spire and an Aether kid gets a Prism Laser without this list
+// having to know that. See RC.kidBuildFor().
 RC.KID_BUILD = [
-  { t: 'guardtower', ic: '🗼', role: 'Tower', cost: 70, time: 7,
+  { t: null, race: true, ic: '🗼', role: 'Tower', cost: 70, time: 7,
     kid: 'Shoots bad guys all by itself.' },
-  { t: 'rampart',    ic: '🧱', role: 'Wall',  cost: 25, time: 4,
-    kid: 'Blocks the way. Build a fence!' },
+  { t: 'logwall',   ic: '🪵', role: 'Log Fence',  cost: 12, time: 3,
+    kid: 'Super cheap! Breaks fast though.' },
+  { t: 'rampart',   ic: '🧱', role: 'Stone Wall', cost: 25, time: 4,
+    kid: 'A good solid wall. Build a fence!' },
+  { t: 'steelwall', ic: '🛡️', role: 'Steel Wall', cost: 70, time: 9,
+    kid: 'SUPER strong. Costs a lot.' },
+  { t: 'treadwall', ic: '🌀', role: 'Sludge Belt', cost: 40, time: 6,
+    kid: 'Makes bad guys walk really slowly!' },
+  { t: 'spikewall', ic: '🌵', role: 'Spike Wall', cost: 45, time: 6,
+    kid: 'Ouch! It hurts anything that bites it.' },
 ];
+
+// The kid build list with the race's tower filled in. One place knows how to do this, so
+// adding a fourth race means adding a tower to RC.RACES and nothing else.
+RC.kidBuildFor = function (raceId) {
+  const race = RC.RACES[raceId] || RC.RACES.forge;
+  const tower = (race.ai && race.ai.tower) || 'stonethrower';
+  return RC.KID_BUILD.map(b => b.race ? Object.assign({}, b, { t: tower }) : b);
+};
 
 // ── Factions ─────────────────────────────────────────
 // Each faction's core, worker, build list + AI role map (role -> actual type id).
@@ -831,39 +916,39 @@ RC.RACES = {
     id: 'forge', name: 'Forge', tint: '#f08a2a',
     blurb: 'Machine legion — the balanced all-rounder. The widest roster, army upgrades and towers, with Patch Bot / Pulse Coil support. Strong everywhere, extreme nowhere.',
     core: 'core', worker: 'wrench', hero: 'warden',
-    buildable: ['cell', 'factory', 'hoverpad', 'arclab', 'guardtower', 'arcbattery'],
+    buildable: ['cell', 'factory', 'hoverpad', 'arclab', 'stonethrower', 'rampart'],
     ai: {
       worker: 'wrench', supply: 'cell',
       barracks: 'factory', barracksUnits: ['volt', 'shielder', 'spark', 'chaingunner'],
       air: 'hoverpad', airUnits: ['hover', 'heli', 'jet'],
       tech: 'arclab', techUnits: ['patch', 'pulse'],
-      tower: 'guardtower',
+      tower: 'stonethrower',
     },
   },
   gloop: {
     id: 'gloop', name: 'Gloop', tint: '#5ddc7a',
     blurb: 'Acid swarm — cheap, fast, self-healing units you field in overwhelming numbers. Low supply means far bigger armies; attacks melt armor and no healers are needed. Quantity IS the strategy.',
     core: 'biocore', worker: 'slug', hero: 'matriarch',
-    buildable: ['membrane', 'hatchery', 'spire', 'evochamber', 'acidtower'],
+    buildable: ['membrane', 'hatchery', 'spire', 'evochamber', 'venomspire', 'carapace'],
     ai: {
       worker: 'slug', supply: 'membrane',
       barracks: 'hatchery', barracksUnits: ['globling', 'spitter', 'bloat', 'hydra'],
       air: 'spire', airUnits: ['floater'],
       tech: 'evochamber', techUnits: [],
-      tower: 'acidtower',
+      tower: 'venomspire',
     },
   },
   aether: {
     id: 'aether', name: 'Aether', tint: '#b98cff',
     blurb: 'Alien ascendants — a handful of shielded elites that warp in at forward Warp Conduits and hit like a siege. Heavy units eat supply, so you field FEW units — but each one is devastating.',
     core: 'nexus', worker: 'acolyte', hero: 'archon',
-    buildable: ['conduit', 'warpgate', 'astralgate', 'conclave', 'photonprism'],
+    buildable: ['conduit', 'warpgate', 'astralgate', 'conclave', 'prismlaser', 'aegiswall'],
     ai: {
       worker: 'acolyte', supply: 'conduit',
       barracks: 'warpgate', barracksUnits: ['ardent', 'lancer', 'bastion', 'bladesworn'],
       air: 'astralgate', airUnits: ['seraph'],
       tech: 'conclave', techUnits: ['oracle'],
-      tower: 'photonprism',
+      tower: 'prismlaser',
     },
   },
 };

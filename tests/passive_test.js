@@ -58,34 +58,60 @@ head('Every unit has a passive, and every passive is real');
   const unknown = units.filter(k => !RC.PASSIVE[RC.UNITS[k].passive.id]);
   ok(unknown.length === 0, 'every passive id has a catalogue entry, unknown [' + unknown.join(',') + ']');
 
+  // Buildings draw from the same catalogue — a Venom Spire really is a Venom Hydra that
+  // cannot walk — so an entry counts as used if anything at all carries it.
   const entries = Object.keys(RC.PASSIVE);
   const used = new Set(units.map(k => RC.UNITS[k].passive.id));
+  for (const k in RC.BUILDINGS) if (RC.BUILDINGS[k].passive) used.add(RC.BUILDINGS[k].passive.id);
   const orphan = entries.filter(k => !used.has(k));
   ok(orphan.length === 0, 'no catalogue entry is unused, orphans [' + orphan.join(',') + ']');
+
+  const badBld = Object.keys(RC.BUILDINGS)
+    .filter(k => RC.BUILDINGS[k].passive && !RC.PASSIVE[RC.BUILDINGS[k].passive.id]);
+  ok(badBld.length === 0, 'every building passive has a catalogue entry too, unknown [' + badBld.join(',') + ']');
   ok(entries.every(k => RC.PASSIVE[k].ic && RC.PASSIVE[k].name && RC.PASSIVE[k].kid && RC.PASSIVE[k].desc),
      'every catalogue entry has an icon, a name, a kid line and a grown-up line');
 
-  // The engine handles it, or it does nothing at all. Driving each one through a real hit
-  // and a real aura tick is the only way to tell those two apart.
-  const g = makeGame();
+  // The engine handles it, or it does nothing at all — and from the outside those two look
+  // identical. Driving every catalogue entry through a real hit and a real aura tick is the
+  // only way to tell them apart. The tuning is lifted off whichever unit or building
+  // actually carries the id, so this stays honest as the numbers move.
+  const carrier = (id) => {
+    const u = Object.keys(RC.UNITS).find(k => RC.UNITS[k].passive.id === id);
+    if (u) return RC.UNITS[u].passive;
+    const b = Object.keys(RC.BUILDINGS).find(k => (RC.BUILDINGS[k].passive || {}).id === id);
+    return b ? RC.BUILDINGS[b].passive : null;
+  };
+  const snap = (a, b, ally) => JSON.stringify([b.hp, b.slow, b.frozen, b.venomStk, b.shredStk,
+    b.markT, Math.round(b.x), a.hp, a.haste, ally.hp, ally.auraArmorT, ally.shield]);
   const unhandled = [];
   for (const id of entries) {
+    const p = carrier(id);
     const g2 = makeGame();
-    const a = withPassive(g2, 'volt', Object.assign({ id }, RC.UNITS[Object.keys(RC.UNITS)
-      .find(k => RC.UNITS[k].passive.id === id)].passive), 1000, 1000, 1);
     const b = unit(g2, 'volt', 1030, 1000, 2);
     const ally = unit(g2, 'shielder', 1010, 1000, 1);
     ally.hp = 10;
-    const before = JSON.stringify([b.hp, b.slow, b.frozen, b.venomStk, b.shredStk, b.markT,
-                                   b.x, a.hp, a.haste, ally.hp, ally.auraArmorT, ally.shield]);
+    // Units drive the hit path and the aura path; a building-only passive drives the
+    // building's own aura instead, which is the only door it has.
+    const a = withPassive(g2, 'volt', Object.assign({ id }, p), 1000, 1000, 1);
+    const before = snap(a, b, ally);
     a._hit(b, 20, g2);
     a._passiveAura(0.25, g2);
-    const after = JSON.stringify([b.hp, b.slow, b.frozen, b.venomStk, b.shredStk, b.markT,
-                                  b.x, a.hp, a.haste, ally.hp, ally.auraArmorT, ally.shield]);
-    if (before === after) unhandled.push(id);
+    let changed = snap(a, b, ally) !== before;
+    if (!changed) {
+      const g3 = makeGame();
+      const b3 = unit(g3, 'volt', 1010, 1000, 2);
+      const ally3 = unit(g3, 'shielder', 1005, 1000, 1);
+      ally3.hp = 10;
+      const w = bld(g3, 'rampart', 1000, 1000, 1);
+      w.def = Object.assign({}, w.def, { passive: Object.assign({ id }, p) });
+      const b0 = snap(w, b3, ally3);
+      w._passiveAura(0.25, g3);
+      changed = snap(w, b3, ally3) !== b0;
+    }
+    if (!changed) unhandled.push(id);
   }
   ok(unhandled.length === 0, 'every passive changes something when it fires, inert [' + unhandled.join(',') + ']');
-  void g;
 }
 
 // ── Nothing but a hero can cast ────────────────────────────────────────────
@@ -504,6 +530,111 @@ head('Aura decorations do not draw from the seeded RNG');
     for (let i = 0; i < 50; i++) { g.time += 0.25; patch._passiveAura(0.25, g); }
     ok(rolls === 0, 'fifty aura ticks rolled the dice ' + rolls + ' times');
   } finally { Math.random = real; }
+}
+
+// ── Defence: one tower and one wall per race ───────────────────────────────
+// Forge used to have two towers and the other races one each, so "how do I defend" had a
+// different answer depending on who you picked. The rule now is that race changes what
+// your defence DOES and never how much of it you get — which is only true if the raw
+// numbers really are the same and only the passive differs.
+head('Towers — same numbers, different job');
+{
+  const towers = ['forge', 'gloop', 'aether'].map(r => RC.BUILDINGS[RC.RACES[r].ai.tower]);
+  ok(towers.every(Boolean), 'every race has a tower');
+  ok(new Set(towers.map(t => t.id)).size === 3, 'and they are three different buildings: ' +
+     towers.map(t => t.name).join(', '));
+  for (const k of ['cost', 'time', 'dmg', 'range', 'cd']) {
+    ok(new Set(towers.map(t => t[k])).size === 1, 'all three towers share the same ' + k +
+       ' (' + towers.map(t => t[k]).join('/') + ')');
+  }
+  ok(towers.every(t => t.air), 'all three answer air, so no race is simply blind to flyers');
+  ok(new Set(towers.map(t => (t.passive || {}).id || 'none')).size === 3,
+     'but each does a different thing on hit: ' + towers.map(t => (t.passive || {}).id).join(', '));
+  // Exactly one per race — the whole point of the change.
+  for (const r of ['forge', 'gloop', 'aether']) {
+    const n = RC.RACES[r].buildable.filter(t => RC.BUILDINGS[t].tower).length;
+    ok(n === 1, r + ' builds exactly one tower, builds ' + n);
+    const w = RC.RACES[r].buildable.filter(t => RC.BUILDINGS[t].wall).length;
+    ok(w === 1, r + ' builds exactly one wall, builds ' + w);
+  }
+
+  // A tower's passive has to actually fire. Towers deal damage through game.hurt rather
+  // than through Unit._hit, so this is a genuinely separate code path from every other
+  // passive check in this file — and it was not wired at all until it was.
+  const g = new RC.Game();
+  g.units = []; g.buildings = []; g.nodes = []; g.fx = []; g.marks = []; g.over = null;
+  g.teamMap = { 1: 0, 2: 1 };
+  const spire = new RC.Building('venomspire', 1000, 1000, 1, true);
+  g.buildings.push(spire);
+  const prey = new RC.Unit('volt', 1060, 1000, 2);
+  prey.def = Object.assign({}, prey.def, { regen: 0 });
+  g.units.push(prey);
+  for (let i = 0; i < 40 && !prey.venomStk; i++) spire.update(DT, g);
+  ok(prey.venomStk > 0, 'the Venom Spire actually poisons what it shoots');
+  const hp = prey.hp;
+  spire.foe = null; spire.def = Object.assign({}, spire.def, { tower: false });   // stop shooting
+  for (let i = 0; i < 30; i++) prey.update(DT, g);
+  ok(prey.hp < hp, 'and the venom keeps working after the tower stops firing');
+}
+
+// ── Walls ──────────────────────────────────────────────────────────────────
+// The one thing a wall must not do is wall in your own archers. A wall is 42 deep and the
+// shortest-ranged shooter in the game reaches 78, so the intended shape — a wall with
+// shooters behind it — has to work by construction rather than by luck.
+head('Walls — you can shoot over your own');
+{
+  const wallTypes = Object.keys(RC.BUILDINGS).filter(k => RC.BUILDINGS[k].wall);
+  ok(wallTypes.length >= 6, 'there are walls to choose between, got ' + wallTypes.length);
+  ok(wallTypes.every(k => !RC.BUILDINGS[k].tower && !RC.BUILDINGS[k].dmg), 'no wall shoots');
+  const deepest = Math.max(...wallTypes.map(k => RC.BUILDINGS[k].w));
+  const shortest = Math.min(...Object.keys(RC.UNITS)
+    .filter(k => !RC.UNITS[k].worker && RC.UNITS[k].range > 40).map(k => RC.UNITS[k].range));
+  ok(shortest > deepest, 'the shortest-ranged shooter (' + shortest +
+     ') outreaches the deepest wall (' + deepest + '), so archers are never walled in');
+
+  // And prove it in the sim rather than in arithmetic.
+  const g = new RC.Game();
+  g.units = []; g.buildings = []; g.nodes = []; g.fx = []; g.marks = []; g.over = null;
+  g.teamMap = { 1: 0, 2: 1 };
+  const wall = new RC.Building('rampart', 1000, 1000, 1, true);
+  g.buildings.push(wall);
+  const archer = new RC.Unit('spark', 1000 - wall.w / 2 - 20, 1000, 1);   // tucked in behind
+  const attacker = new RC.Unit('volt', 1000 + wall.w / 2 + 20, 1000, 2);  // chewing the front
+  g.units.push(archer, attacker);
+  attacker.def = Object.assign({}, attacker.def, { regen: 0 });
+  attacker.attackTarget(wall);
+  const hp0 = attacker.hp;
+  for (let i = 0; i < 30 * 6; i++) { archer.update(DT, g); attacker.update(DT, g); }
+  ok(attacker.hp < hp0, 'an archer behind the wall shot the enemy attacking its front (' +
+     Math.round(hp0) + ' -> ' + Math.round(attacker.hp) + ')');
+
+  // The Sludge Belt slows enemies and only enemies — a belt that bogged down the
+  // defenders standing behind it would be a trap the player builds for themselves.
+  const g2 = new RC.Game();
+  g2.units = []; g2.buildings = []; g2.nodes = []; g2.fx = []; g2.marks = []; g2.over = null;
+  g2.teamMap = { 1: 0, 2: 1 };
+  const belt = new RC.Building('treadwall', 1000, 1000, 1, true);
+  g2.buildings.push(belt);
+  const foe = new RC.Unit('volt', 1040, 1000, 2);
+  const friend = new RC.Unit('volt', 1040, 1010, 1);
+  const flyer = new RC.Unit('hover', 1040, 1020, 2);
+  g2.units.push(foe, friend, flyer);
+  belt.update(DT, g2);
+  ok(foe.slow > 0, 'an enemy near the Sludge Belt is slowed');
+  ok(friend.slow === 0, 'an ally standing in the same sludge is not');
+  ok(flyer.slow === 0, 'and a flyer is over it, not in it');
+
+  // The Spike Wall fights back without having a weapon.
+  const g3 = new RC.Game();
+  g3.units = []; g3.buildings = []; g3.nodes = []; g3.fx = []; g3.marks = []; g3.over = null;
+  g3.teamMap = { 1: 0, 2: 1 };
+  const spikes = new RC.Building('spikewall', 1000, 1000, 1, true);
+  g3.buildings.push(spikes);
+  const biter = new RC.Unit('globling', 1030, 1000, 2);
+  g3.units.push(biter);
+  const b0 = biter.hp;
+  biter._hit(spikes, 30, g3);
+  ok(biter.hp < b0, 'biting the Spike Wall costs the biter (' + Math.round(b0 - biter.hp) + ')');
 }
 
 // ── The whole thing still runs ─────────────────────────────────────────────

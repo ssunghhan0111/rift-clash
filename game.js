@@ -363,13 +363,21 @@ window.RC = window.RC || {};
       return t.forest ? (CFG.TERRAIN.forest.taken || 1) : 1;
     }
 
-    // 타워/광역 피해 적용 (방어력·반격 처리)
+    // 타워/광역 피해 적용 (방어력·반격 처리). 실제로 들어간 피해량을 돌려준다 —
+    // 타워 패시브(맹독/파쇄/충격)가 그 값을 필요로 한다.
     hurt(foe, dmg, owner, source) {
-      if (!foe || foe.dead) return;
+      if (!foe || foe.dead) return 0;
       this._maybeAlert(foe, owner);
       if (source && source.def && source.def.acid) RC.applyAcid(foe, source.def.acid);  // 산성 포탑
-      const armor = foe.kind === 'unit' ? foe.effArmor(this) : (foe.def && foe.def.armor ? foe.def.armor : 0);
-      const dealt = Math.max(1, (dmg - armor) * this.coverMul(foe));   // 숲 엄폐
+      // 건물도 산성/파쇄로 장갑이 깎인다 — 유닛만 깎이면 공성에서 두 상태이상이 사라진다.
+      const armor = foe.kind === 'unit' ? foe.effArmor(this)
+                  : Math.max(0, ((foe.def && foe.def.armor) || 0)
+                               - (foe.acidStacks || 0) * (foe.acidShred || 0)
+                               - (foe.shredStk || 0) * (foe.shredAmt || 0));
+      // 표식은 모든 피해 경로에 적용된다 — 타워와 광역기가 예외라면 표식은 "유닛의
+      // 평타에만 걸리는 버프"가 되어 버린다.
+      const amp = (foe.markT > 0) ? (1 + (foe.markAmp || 0)) : 1;
+      const dealt = Math.max(1, (dmg - armor) * this.coverMul(foe) * amp);   // 숲 엄폐
       if (foe.kind === 'unit') {
         RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
         foe.hitFlash = 0.12;
@@ -380,6 +388,7 @@ window.RC = window.RC || {};
         foe.damage(dealt);
         foe.hitFlash = 0.09;                                  // 건물 피격 섬광
       }
+      return dealt;
     }
 
     // ── Wind ──────────────────────────────────────────────────────────────

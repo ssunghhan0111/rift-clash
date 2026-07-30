@@ -160,15 +160,21 @@ RC.Kids = (function () {
     }
     return n;
   }
-  function kitBuild() { return RC.KID_BUILD || []; }
-  function buildDefOf(t) { return kitBuild().find(b => b.t === t) || null; }
+  // The build list depends on the race, because the tower does: a Gloop kid should be
+  // putting up Venom Spires, not somebody else's Stonethrower. The walls are shared —
+  // they are the mode's own toys rather than faction equipment.
+  function kitBuild(g, owner) {
+    const race = (g && g.raceOf) ? g.raceOf(owner == null ? g.playerOwner : owner) : 'forge';
+    return RC.kidBuildFor ? RC.kidBuildFor(race) : (RC.KID_BUILD || []);
+  }
+  function buildDefOf(g, t, owner) { return kitBuild(g, owner).find(b => b.t === t) || null; }
 
   // Why a build would be refused, as a sentence a six-year-old can act on. Returning the
   // REASON rather than a bare false is what lets the screen say "too far from the crystal"
   // instead of leaving a kid tapping a spot that will never work.
   function canBuild(g, t, x, y, owner) {
     if (owner == null) owner = g.playerOwner;
-    const bd = buildDefOf(t);
+    const bd = buildDefOf(g, t, owner);
     if (!bd) return 'You cannot build that';
     if (!inBuildRing(g, x, y)) return 'Build closer to the crystal!';
     if (buildUsed(g, owner) >= buildCap(g)) return 'No room for more — clear a wave to get another slot';
@@ -182,7 +188,7 @@ RC.Kids = (function () {
     const mine = owner === g.playerOwner;
     const why = canBuild(g, t, x, y, owner);
     if (why) { if (mine) g.notify(why); return false; }
-    const bd = buildDefOf(t);
+    const bd = buildDefOf(g, t, owner);
     const worker = workerOf(g, owner);
     // Kid prices and kid build times, exactly like the fighters — placeBuilding would
     // otherwise charge the Versus cost, which is more than a whole fighter.
@@ -311,6 +317,11 @@ RC.Kids = (function () {
     if (owner == null) owner = g.playerOwner;
     const race = g.raceOf ? g.raceOf(owner) : 'forge';
     const kit = kitOf(race);
+    // `name` is the REAL unit name and it is what the button shows. Crystal Guard used to
+    // label these Tank / Archer / Support, which is easier to read at six — and which meant
+    // a kid who graduated to Versus had never heard of a Shieldbearer and could not find
+    // the thing they had been playing for weeks. The role survives as the subtitle, so the
+    // shorthand is still there; it is just no longer the only word on the button.
     const out = kit.starters.map(s => ({
       t: s.t, role: s.role, ic: s.ic, blurb: s.blurb,
       name: (RC.UNITS[s.t] || {}).name || s.t,
@@ -888,7 +899,12 @@ RC.Kids = (function () {
       lanes: s.lanes || 1, laneMax: lanesOf(g).length,
       sig: sigHud(g, owner),
       build: {
-        items: kitBuild().map(b => ({ t: b.t, ic: b.ic, role: b.role, cost: b.cost, kid: b.kid })),
+        items: kitBuild(g, owner).map(b => ({
+          t: b.t, ic: b.ic, cost: b.cost, kid: b.kid,
+          // The real building name, for the same reason the shop shows the real unit
+          // name: a kid who learns "Venom Spire" here knows what it is in Versus too.
+          role: (RC.BUILDINGS[b.t] || {}).name || b.role,
+        })),
         used: buildUsed(g, owner), cap: buildCap(g),
         ring: buildRing(g),
         ringAt: g.crystal ? { x: g.crystal.x, y: g.crystal.y } : null,

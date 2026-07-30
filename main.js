@@ -778,14 +778,18 @@ window.RC = window.RC || {};
   function bldCard(d) {
     const bits = [`HP ${d.hp}`];
     if (d.shield) bits.push(`SHLD ${d.shield}`);
+    if (d.armor) bits.push(`ARM ${d.armor}`);
     bits.push(d.cost ? `${d.cost} shards` : 'free');
     if (d.supplyGiven) bits.push(`+${d.supplyGiven} pop`);
     if (d.warpBeacon) bits.push('warp beacon');
     if (d.tower) bits.push(`turret · ${d.dmg} dmg · rng ${d.range}`);
+    if (d.wall) bits.push('wall — does not shoot');
+    if (d.regen) bits.push(`regen ${d.regen}/s`);
     return `<div class="tut-card ${raceOf(d)}">
       <div><span class="tc-name">${d.name}</span></div>
       <div class="tc-stats">${bits.join(' · ')}</div>
       <div class="tc-desc">${d.desc || ''}</div>
+      ${passiveLine(d)}
     </div>`;
   }
   function tutRender(tab) {

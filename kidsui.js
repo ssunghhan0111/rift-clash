@@ -58,7 +58,7 @@ RC.KidsUI = (function () {
 #kid-shop { position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
             display:flex; gap:12px; pointer-events:auto; flex-wrap:wrap;
             justify-content:center; max-width:min(96vw,1000px); }
-.kid-buy { width:132px; min-height:96px; border-radius:18px; cursor:pointer;
+.kid-buy { width:138px; min-height:100px; border-radius:18px; cursor:pointer;
            background:linear-gradient(180deg,#243354,#16203a);
            border:3px solid rgba(255,255,255,.20); color:#eaf2ff;
            display:flex; flex-direction:column; align-items:center; gap:2px;
@@ -67,8 +67,10 @@ RC.KidsUI = (function () {
 .kid-buy:hover { filter:brightness(1.14); }
 .kid-buy:active { transform:scale(.95); }
 .kid-buy .ic   { font-size:27px; line-height:1; }
-.kid-buy .role { font-size:15px; font-weight:800; letter-spacing:.2px; }
-.kid-buy .nm   { font-size:10.5px; color:#9fb2d0; line-height:1.1; text-align:center; }
+.kid-buy .nm   { font-size:14px; font-weight:800; letter-spacing:.1px; line-height:1.12;
+                 text-align:center; }
+.kid-buy .role { font-size:10.5px; color:#9fb2d0; line-height:1.1; text-transform:uppercase;
+                 letter-spacing:.4px; }
 .kid-buy .cost { font-size:14px; font-weight:800; color:#ffd24a; margin-top:2px; }
 .kid-buy.poor { opacity:.45; }
 .kid-buy.poor .cost { color:#ff8f7d; }
@@ -132,9 +134,12 @@ RC.KidsUI = (function () {
    Left of the fighter shop and visibly a different KIND of thing: fighters walk out
    of the base on their own, buildings get put somewhere by you. The slot counter is
    the whole economy of it — a kid can see they have two of three used. */
+/* Six of these now (a tower and five walls), so the bar wraps and is capped at a
+   third of the screen — it shares the bottom edge with the fighter shop. */
 #kid-build { position:absolute; left:14px; bottom:14px; display:flex; gap:8px;
-             align-items:flex-end; pointer-events:auto; }
-.kid-bb { width:76px; min-height:78px; border-radius:16px; cursor:pointer;
+             align-items:flex-end; pointer-events:auto; flex-wrap:wrap;
+             max-width:min(34vw, 290px); }
+.kid-bb { width:84px; min-height:84px; border-radius:16px; cursor:pointer;
           background:linear-gradient(180deg,#3a3050,#1d1830);
           border:3px solid rgba(255,255,255,.20); color:#eaf2ff;
           display:flex; flex-direction:column; align-items:center; gap:1px;
@@ -143,7 +148,7 @@ RC.KidsUI = (function () {
 .kid-bb:hover { filter:brightness(1.14); }
 .kid-bb:active { transform:scale(.94); }
 .kid-bb .ic   { font-size:24px; line-height:1; }
-.kid-bb .role { font-size:13px; font-weight:800; }
+.kid-bb .role { font-size:11.5px; font-weight:800; line-height:1.1; text-align:center; }
 .kid-bb .cost { font-size:12.5px; font-weight:800; color:#ffd24a; }
 .kid-bb.poor  { opacity:.45; }
 .kid-bb.poor .cost { color:#ff8f7d; }
@@ -358,10 +363,12 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
         b.className = 'kid-buy';
         b.dataset.t = r.t;
         b.title = r.blurb || '';
+        // The real unit name is the headline and the role is the subtitle — see the note
+        // on roster() in kids.js for why round this way.
         b.innerHTML =
           `<div class="ic">${esc(r.ic)}</div>` +
-          `<div class="role">${esc(r.role)}</div>` +
           `<div class="nm">${esc(r.name)}</div>` +
+          `<div class="role">${esc(r.role)}</div>` +
           `<div class="cost">💎 ${r.cost}</div>` +
           (r.isNew ? `<div class="new">NEW!</div>` : '');
         // pointerdown, not click: on a tablet click waits ~300ms for a possible

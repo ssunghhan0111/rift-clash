@@ -550,8 +550,13 @@ RC.UI = (function () {
     return `${d.name} — ${d.desc}\n[${bits.join(' · ')}] · ${d.cost} shards · pop ${d.supply}`;
   }
   function bldTip(d) {
-    const extra = (d.shield ? ` · shield ${d.shield}` : '') + (d.warpBeacon ? ' · warp beacon' : '');
-    return `${d.name} — ${d.desc}\n${d.cost ? d.cost + ' shards' : 'free'}${d.supplyGiven ? ' · +' + d.supplyGiven + ' pop' : ''}${extra}`;
+    const extra = (d.shield ? ` · shield ${d.shield}` : '') + (d.warpBeacon ? ' · warp beacon' : '')
+                + (d.armor ? ` · armour ${d.armor}` : '') + (d.regen ? ` · regen ${d.regen}/s` : '');
+    // Towers and walls carry the same passives units do, and that passive IS the reason to
+    // pick one over another — so it belongs in the tooltip, not only in the description.
+    const p = d.passive && RC.PASSIVE[d.passive.id];
+    const line = p ? `\n${p.ic} ${p.name} — ${p.desc}` : '';
+    return `${d.name} — ${d.desc}\n${d.cost ? d.cost + ' shards' : 'free'}${d.supplyGiven ? ' · +' + d.supplyGiven + ' pop' : ''}${extra}${line}`;
   }
 
   function buildButtons() {

@@ -1069,7 +1069,7 @@ RC.Renderer = (function () {
         ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1; ctx.fillStyle = '#ffffff';
         ctx.beginPath(); ctx.arc(b.x - 2, b.y - 2, 3, 0, Math.PI * 2); ctx.fill();
-      } else if (b.type === 'photonprism') {
+      } else if (b.type === 'prismlaser') {
         // 포톤 프리즘 — 표적을 향해 도는 결정 렌즈 포탑 (지상·공중)
         const ang = b.foe ? Math.atan2(b.foe.y - b.y, b.foe.x - b.x) : -Math.PI / 2;
         ctx.save(); ctx.translate(b.x, b.y);
@@ -1081,31 +1081,143 @@ RC.Renderer = (function () {
         ctx.beginPath(); ctx.moveTo(4, -7); ctx.lineTo(22, 0); ctx.lineTo(4, 7); ctx.lineTo(-2, 0); ctx.closePath(); ctx.fill();
         ctx.fillStyle = PSI_HOT;
         ctx.beginPath(); ctx.arc(19, 0, 2.6, 0, Math.PI * 2); ctx.fill();
+        // 방금 쏜 빔의 잔상 — 이것 하나로 "레이저"가 읽힌다. 쿨다운 직후에만 짙다.
+        const hot = Math.max(0, 1 - (b.cd || 0) / Math.max(0.001, (b.def.cd || 1) * 0.35));
+        if (hot > 0 && b.foe) {
+          ctx.globalAlpha = hot * 0.75;
+          ctx.strokeStyle = PSI_HOT; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+          const reach = RC.dist(b.x, b.y, b.foe.x, b.foe.y);
+          ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(reach, 0); ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
         ctx.restore();
         const pulse = 0.6 + 0.4 * Math.abs(Math.sin(performance.now() / 400));
         ctx.globalAlpha = pulse; ctx.fillStyle = PSI;
         ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
-      } else if (b.type === 'guardtower' || b.type === 'arcbattery' || b.type === 'acidtower') {
-        // 타워 — 표적을 향해 회전하는 포신
-        const big = b.type === 'arcbattery';
-        const acid = b.type === 'acidtower';
+      } else if (b.type === 'stonethrower') {
+        // 투석기 — 표적을 향해 도는 팔에 바위를 얹고 있다. 총신이 아니라 팔이라는 것이
+        // 요점: 화약 냄새가 나는 포탑과 한눈에 구분되어야 한다.
         const ang = b.foe ? Math.atan2(b.foe.y - b.y, b.foe.x - b.x) : -Math.PI / 2;
         ctx.save();
         ctx.translate(b.x, b.y);
-        // 받침대
-        ctx.fillStyle = p.dark;
-        ctx.beginPath(); ctx.arc(0, 0, big ? 15 : 12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = p.dark;                                  // 받침대
+        ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
         ctx.rotate(ang);
-        // 포신
-        ctx.fillStyle = shade(p.body, -0.15);
-        ctx.fillRect(0, -(big ? 5 : 3.5), big ? 30 : 22, big ? 10 : 7);
-        ctx.fillStyle = p.trim;
-        ctx.fillRect(big ? 26 : 19, -(big ? 6 : 4.5), big ? 6 : 5, big ? 12 : 9);   // 총구
+        // 던지는 팔 — 발사 직후에는 뒤로 젖혀져 있다가 서서히 되감긴다
+        const wind = Math.max(0, Math.min(1, (b.cd || 0) / (b.def.cd || 1)));
+        ctx.rotate(-0.5 * wind);
+        ctx.strokeStyle = shade(p.body, -0.2); ctx.lineWidth = 6; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(17, -7); ctx.stroke();
+        // 얹혀 있는 바위 — 되감기는 동안에만 보인다
+        ctx.globalAlpha = 1 - wind * 0.85;
+        ctx.fillStyle = '#8d8577';
+        ctx.beginPath(); ctx.arc(19, -8, 5.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#a9a294';
+        ctx.beginPath(); ctx.arc(17.5, -9.5, 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
         ctx.restore();
-        // 발광 코어
-        ctx.fillStyle = acid ? '#7dff9e' : (big ? '#ffb24f' : C.node);
-        ctx.beginPath(); ctx.arc(b.x, b.y, big ? 6 : 5, 0, Math.PI * 2); ctx.fill();
+        // 돌더미 — 다음에 던질 것들
+        ctx.fillStyle = '#6f675c';
+        ctx.beginPath(); ctx.arc(b.x - 9, b.y + 8, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(b.x - 2, b.y + 10, 3.2, 0, Math.PI * 2); ctx.fill();
+      } else if (b.type === 'venomspire') {
+        // 맹독 첨탑 — 자라난 것. 맥동하는 독주머니 위에 표적을 향해 굽는 목이 달려 있다.
+        const tt = performance.now() / 1000;
+        const ang = b.foe ? Math.atan2(b.foe.y - b.y, b.foe.x - b.x) : -Math.PI / 2;
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        const breathe = 1 + 0.06 * Math.sin(tt * 2.1);
+        ctx.fillStyle = shade(GLOOP_TINT, -0.42);                // 뿌리
+        ctx.beginPath(); ctx.ellipse(0, 4, 15, 11, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = shade(GLOOP_TINT, -0.18);                // 독주머니
+        ctx.beginPath(); ctx.ellipse(0, 0, 11 * breathe, 12 * breathe, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.rotate(ang);
+        ctx.fillStyle = shade(GLOOP_TINT, -0.05);                // 굽은 목
+        ctx.beginPath();
+        ctx.moveTo(-2, -5); ctx.quadraticCurveTo(14, -9, 20, -2);
+        ctx.quadraticCurveTo(14, 2, -2, 5); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#c07dff';                                // 독니 끝
+        ctx.beginPath(); ctx.arc(19, -2, 3.2, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        // 방울져 떨어지는 독
+        ctx.globalAlpha = 0.5 + 0.4 * Math.abs(Math.sin(tt * 1.7));
+        ctx.fillStyle = '#a25cff';
+        ctx.beginPath(); ctx.arc(b.x, b.y - 1, 4.5, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (b.def.wall) {
+        // ── 벽 ──
+        // The body underneath is already drawn and already race-tinted, so each wall only
+        // needs the few marks that say what it is MADE of. That is the whole job: a kid
+        // laying a fort has to tell the cheap wall from the expensive one at a glance,
+        // from across the map, without reading anything.
+        const tt = performance.now() / 1000;
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        const hw = b.w / 2, hh = b.h / 2;
+        if (b.type === 'logwall') {
+          // 통나무 — 끝면의 나이테. 가장 싸고 가장 약하다.
+          ctx.fillStyle = '#6b4a2c';
+          for (let i = -1; i <= 1; i++) {
+            ctx.beginPath(); ctx.arc(i * hw * 0.58, 0, hw * 0.28, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.strokeStyle = '#8a6238'; ctx.lineWidth = 1.6;
+          for (let i = -1; i <= 1; i++) {
+            ctx.beginPath(); ctx.arc(i * hw * 0.58, 0, hw * 0.14, 0, Math.PI * 2); ctx.stroke();
+          }
+        } else if (b.type === 'steelwall') {
+          // 강철 — 두꺼운 테두리와 큼직한 리벳. 비싸 보여야 한다.
+          ctx.strokeStyle = '#cfd8e4'; ctx.lineWidth = 3.5;
+          ctx.strokeRect(-hw + 4, -hh + 4, b.w - 8, b.h - 8);
+          ctx.fillStyle = '#e6edf6';
+          for (const [rx, ry] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+            ctx.beginPath(); ctx.arc(rx * (hw - 8), ry * (hh - 8), 2.6, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.strokeStyle = 'rgba(255,255,255,.30)'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(-hw + 7, -hh + 9); ctx.lineTo(hw - 7, -hh + 9); ctx.stroke();
+        } else if (b.type === 'treadwall') {
+          // 진창 — 느리게 도는 벨트와 바깥으로 번지는 진흙. 반경이 눈에 보여야
+          // 아이가 "여기 밟으면 느려진다"를 배운다.
+          const R = (b.def.passive && b.def.passive.radius) || 96;
+          ctx.globalAlpha = 0.13 + 0.05 * Math.sin(tt * 1.6);
+          ctx.fillStyle = '#7a6a3f';
+          ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 0.5; ctx.strokeStyle = '#b6a05c'; ctx.lineWidth = 2;
+          ctx.setLineDash([6, 7]); ctx.lineDashOffset = -tt * 14;
+          ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
+          ctx.setLineDash([]); ctx.globalAlpha = 1;
+          ctx.fillStyle = '#4a4128';
+          ctx.fillRect(-hw + 3, -hh + 5, b.w - 6, b.h - 10);
+          ctx.strokeStyle = '#9c8a4e'; ctx.lineWidth = 2.4;
+          for (let i = 0; i < 4; i++) {
+            const off = ((tt * 12 + i * 9) % (b.w - 8)) - (hw - 4);
+            ctx.beginPath(); ctx.moveTo(off, -hh + 6); ctx.lineTo(off, hh - 6); ctx.stroke();
+          }
+        } else if (b.type === 'spikewall') {
+          // 가시 — 사방으로 뻗은 뾰족한 것들. 만지면 아프다는 뜻은 이 한 가지 모양이면 된다.
+          ctx.fillStyle = '#d8dde6';
+          const spike = (ax, ay, dx, dy) => {
+            ctx.beginPath();
+            ctx.moveTo(ax - dy * 3.2, ay + dx * 3.2);
+            ctx.lineTo(ax + dx * 8, ay + dy * 8);
+            ctx.lineTo(ax + dy * 3.2, ay - dx * 3.2);
+            ctx.closePath(); ctx.fill();
+          };
+          for (let i = -1; i <= 1; i++) {
+            spike(i * hw * 0.5, -hh, 0, -1);
+            spike(i * hw * 0.5, hh, 0, 1);
+            spike(-hw, i * hh * 0.5, -1, 0);
+            spike(hw, i * hh * 0.5, 1, 0);
+          }
+        } else {
+          // 기본 벽 (Rampart / Carapace / Aegis Barrier) — 벽돌 이음매.
+          ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(-hw + 3, 0); ctx.lineTo(hw - 3, 0); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, -hh + 3); ctx.lineTo(0, -1); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(-hw * 0.45, 1); ctx.lineTo(-hw * 0.45, hh - 3); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(hw * 0.45, 1); ctx.lineTo(hw * 0.45, hh - 3); ctx.stroke();
+        }
+        ctx.restore();
       } else if (b.type === 'crystal') {
         // 리프트 크리스탈 — 맥동하는 청록 결정 (지켜야 할 목표)
         const tt = performance.now() / 1000;

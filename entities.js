@@ -248,6 +248,99 @@ window.RC = window.RC || {};
   }
 
   // ── 건물 ────────────────────────────────────────────
+  // ── 고유 패시브: 명중 시 ────────────────────────────────────────────────
+  // Shared by units AND towers. A tower is a thing that attacks, so it should be able to
+  // carry the same vocabulary a unit does — that is what makes the Venom Spire read as
+  // part of the Gloop army rather than as scenery that happens to deal damage.
+  //
+  // `src` is whatever did the hitting. The effects that need to reach back into the
+  // attacker (chain, cleave) go through src._hit and so are guarded on it existing; a
+  // building has no _hit and simply skips them.
+  function passiveHit(src, foe, dealt, game) {
+    const p = src.def && src.def.passive;
+    if (!p || !foe || foe.dead) return;
+    switch (p.id) {
+      case 'chill': applyChill(foe, p); break;
+      case 'venom': applyVenom(foe, p); break;
+      // Burn is venom with a different colour. Keeping it a separate id costs one line
+      // here and buys a Rattler that reads as incendiary instead of as a snake.
+      case 'burn':  applyVenom(foe, { dmg: p.dmg, dur: p.dur, max: p.max, fire: true }); break;
+      case 'shred': applyShred(foe, p); break;
+      case 'mark':  applyMark(foe, p); break;
+      case 'lifesteal': {
+        // 건물에서는 못 빤다. You cannot drink from a wall, and more to the point a
+        // swarm that heals off whatever it is chewing becomes unkillable exactly when
+        // it is chewing the thing you need it to stop chewing: one Globling on the Rift
+        // Crystal out-healed a Volt Trooper shooting it, forever.
+        if (foe.kind !== 'unit' || src.kind !== 'unit') break;
+        const gain = dealt * (p.pct || 0.3);
+        if (p.toShield && src.maxShield && src.shield < src.maxShield) restoreShield(src, gain);
+        else if (src.hp < src.maxHp) src.hp = Math.min(src.maxHp, src.hp + gain);
+        break;
+      }
+      case 'knock': {
+        if (foe.kind !== 'unit' || foe.def.flying) break;
+        const a = Math.atan2(foe.y - src.y, foe.x - src.x);
+        const d = p.dist || 24;
+        foe.x = Math.max(foe.r, Math.min(RC.CFG.WORLD_W - foe.r, foe.x + Math.cos(a) * d));
+        foe.y = Math.max(foe.r, Math.min(RC.CFG.WORLD_H - foe.r, foe.y + Math.sin(a) * d));
+        break;
+      }
+      // Chain and cleave re-enter _hit, so they are fenced behind _arc. Without it a
+      // chain would arc off its own arc and one Volt Trooper would clear a map.
+      case 'chain': {
+        if (!src._hit || src._arc || foe.kind !== 'unit') break;
+        src._arc = true;
+        let jumps = p.jumps || 1;
+        let from = foe;
+        const struck = new Set([foe.id]);
+        while (jumps-- > 0) {
+          let best = null, bd = p.range || 90;
+          for (const u of game.units) {
+            if (u.dead || struck.has(u.id) || !game.areEnemies(u.owner, src.owner)) continue;
+            const d = dist(from.x, from.y, u.x, u.y);
+            if (d < bd) { bd = d; best = u; }
+          }
+          if (!best) break;
+          struck.add(best.id);
+          game.fx.push({ x: from.x, y: from.y, tx: best.x, ty: best.y, t: 0.12, owner: src.owner, arc: true });
+          src._hit(best, dealt * (p.pct || 0.4), game);
+          from = best;
+        }
+        src._arc = false;
+        break;
+      }
+      case 'cleave': {
+        if (!src._hit || src._arc) break;
+        src._arc = true;
+        for (const u of game.units) {
+          if (u === foe || u.dead || !game.areEnemies(u.owner, src.owner)) continue;
+          if (dist(foe.x, foe.y, u.x, u.y) > (p.radius || 60)) continue;
+          src._hit(u, dealt * (p.pct || 0.5), game);
+        }
+        src._arc = false;
+        break;
+      }
+    }
+  }
+  RC.passiveHit = passiveHit;
+
+  // ── 가시 / Thorns ───────────────────────────────────────────────────────
+  // The defender's passive, applied by whoever hit it. Damage is dealt directly rather
+  // than through _hit so that two thorned things trading blows cannot recurse — and so a
+  // Spike Wall can hurt an attacker without a wall needing an attack routine.
+  function passiveThorns(src, foe, dealt, game) {
+    const fp = foe.def && foe.def.passive;
+    const thorn = fp && (fp.id === 'thorns' ? fp.pct : fp.thorns);
+    if (!thorn || !src || src.kind !== 'unit' || src.dead) return;
+    if (dist(src.x, src.y, foe.x, foe.y) > (foe.r || 0) + 200) return;   // 사거리 밖이면 안 닿는다
+    dealDamage(src, dealt * thorn);
+    src.hitFlash = 0.1;
+    if (src.hp <= 0) { src.hp = 0; src.dead = true; }
+    void game;
+  }
+  RC.passiveThorns = passiveThorns;
+
   class Building {
     constructor(type, x, y, owner, prebuilt) {
       const d = RC.BUILDINGS[type];
@@ -287,6 +380,23 @@ window.RC = window.RC || {};
       if (this.buildProgress >= 1) { this.hp = this.maxHp; this.shield = this.maxShield; }
     }
 
+    // 건물 패시브 (존재형). 지금은 진창 하나뿐이지만, 벽이 "그냥 hp 덩어리"에서
+    // 벗어나는 것은 전부 이 문을 통한다.
+    _passiveAura(dt, game) {
+      const p = this.def.passive;
+      if (!p) return;
+      if (p.id === 'mire') {
+        // 적만 느려진다. A belt that bogged down the defenders standing behind it would
+        // be a trap the player builds for themselves.
+        for (const u of game.units) {
+          if (u.dead || u.def.flying || !game.areEnemies(u.owner, this.owner)) continue;
+          if (RC.dist(this.x, this.y, u.x, u.y) > (p.radius || 96)) continue;
+          u.slow = Math.max(u.slow || 0, p.slow || 1.2);
+        }
+      }
+      void dt;
+    }
+
     update(dt, game) {
       if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - dt);   // 피격 섬광 감쇠
       // The Warden's dome sits on a building far more often than on a unit, so the
@@ -306,9 +416,19 @@ window.RC = window.RC || {};
           if (game.shake) game.shake(0.4);
         }
       }
-      // 산성 지속 피해 (건설 중에도 진행)
+      // 산성/맹독 지속 피해 (건설 중에도 진행)
       const dot = RC.tickStatus(this, dt);
       if (dot > 0) this.damage(dot);
+      // 건물 재생 (Gloop 껍질 벽) — 전투 중에도 천천히 아문다
+      if (this.done && this.def.regen && this.hp < this.maxHp && this.acidStacks <= 0 && this.venomStk <= 0) {
+        this.hp = Math.min(this.maxHp, this.hp + this.def.regen * dt);
+      }
+      // 존재만으로 작동하는 건물 패시브 (진창 벨트). 유닛의 오라와 같은 이유로 초당
+      // 4회만 갱신한다 — 매 프레임 전군을 훑을 값어치가 없고, 눈에는 똑같이 보인다.
+      if (this.done && this.def.passive) {
+        this._auraT = (this._auraT || 0) - dt;
+        if (this._auraT <= 0) { this._auraT = 0.25; this._passiveAura(0.25, game); }
+      }
       if (this.done) RC.tickShield(this, dt);   // 실드 재충전 (완공된 건물만)
       if (!this.done) return;
       // 연구 진행 (아크 랩)
@@ -331,7 +451,10 @@ window.RC = window.RC || {};
           // 고지대에 세운 포탑도 화력 보너스를 받는다
           const tz = game.terrainAt ? game.terrainAt(this.x, this.y) : null;
           const tdmg = this.def.dmg * ((tz && tz.high) ? (RC.CFG.TERRAIN.high.atk || 1) : 1);
-          game.hurt(this.foe, tdmg, this.owner, this);
+          const dealt = game.hurt(this.foe, tdmg, this.owner, this);
+          // 타워도 고유 패시브를 가진다 — 유닛과 완전히 같은 어휘를 쓴다.
+          RC.passiveHit(this, this.foe, dealt, game);
+          RC.passiveThorns(this, this.foe, dealt, game);
           if (this.def.splash) {
             for (const u of game.units) {
               if (u.dead || u === this.foe || !game.areEnemies(u.owner, this.owner)) continue;
@@ -1057,15 +1180,7 @@ window.RC = window.RC || {};
       }
       if (this.def.acid) RC.applyAcid(foe, this.def.acid);   // 글룹 — 산성 중첩
       this._passiveHit(foe, dealt, game);                    // 고유 패시브 (냉기/맹독/파쇄/…)
-      // 가시 껍질 — 방어자의 패시브다. _hit을 되부르지 않고 직접 피해를 넣는 것은
-      // 서로 가시를 가진 두 유닛이 무한히 되받아치는 것을 막기 위해서다.
-      const fp = foe.def && foe.def.passive;
-      const thorn = fp && (fp.id === 'thorns' ? fp.pct : fp.thorns);
-      if (thorn && this.kind === 'unit' && !this.dead && RC.dist(this.x, this.y, foe.x, foe.y) < 220) {
-        RC.dealDamage(this, dealt * thorn);
-        this.hitFlash = 0.1;
-        if (this.hp <= 0) { this.hp = 0; this.dead = true; }
-      }
+      RC.passiveThorns(this, foe, dealt, game);              // 방어자의 가시 (Bloat, Spike Wall)
       if (foe.kind === 'unit') {
         RC.dealDamage(foe, dealt);                            // 실드 우선 흡수
         foe.hitFlash = 0.12;
@@ -1087,73 +1202,8 @@ window.RC = window.RC || {};
     // attack, _passiveAura runs four times a second on units whose passive is a presence
     // rather than an event. Anything a unit does beyond attacking goes through one of
     // these — there is no third path and no button.
-    _passiveHit(foe, dealt, game) {
-      const p = this.def.passive;
-      if (!p || !foe || foe.dead) return;
-      switch (p.id) {
-        case 'chill': RC.applyChill(foe, p); break;
-        case 'venom': RC.applyVenom(foe, p); break;
-        // Burn is venom with a different colour. Keeping it a separate id costs one line
-        // here and buys a Rattler that reads as incendiary instead of as a snake.
-        case 'burn':  RC.applyVenom(foe, { dmg: p.dmg, dur: p.dur, max: p.max, fire: true }); break;
-        case 'shred': RC.applyShred(foe, p); break;
-        case 'mark':  RC.applyMark(foe, p); break;
-        case 'lifesteal': {
-          // 건물에서는 못 빤다. You cannot drink from a wall, and more to the point a
-          // swarm that heals off whatever it is chewing becomes unkillable exactly when
-          // it is chewing the thing you need it to stop chewing: one Globling on the Rift
-          // Crystal out-healed a Volt Trooper shooting it, forever.
-          if (foe.kind !== 'unit') break;
-          const gain = dealt * (p.pct || 0.3);
-          if (p.toShield && this.maxShield && this.shield < this.maxShield) RC.restoreShield(this, gain);
-          else if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + gain);
-          break;
-        }
-        case 'knock': {
-          if (foe.kind !== 'unit' || foe.def.flying) break;
-          const a = Math.atan2(foe.y - this.y, foe.x - this.x);
-          const d = p.dist || 24;
-          foe.x = Math.max(foe.r, Math.min(RC.CFG.WORLD_W - foe.r, foe.x + Math.cos(a) * d));
-          foe.y = Math.max(foe.r, Math.min(RC.CFG.WORLD_H - foe.r, foe.y + Math.sin(a) * d));
-          break;
-        }
-        // Chain and cleave re-enter _hit, so they are fenced behind _arc. Without it a
-        // chain would arc off its own arc and one Volt Trooper would clear a map.
-        case 'chain': {
-          if (this._arc || foe.kind !== 'unit') break;
-          this._arc = true;
-          let jumps = p.jumps || 1;
-          let from = foe;
-          const struck = new Set([foe.id]);
-          while (jumps-- > 0) {
-            let best = null, bd = p.range || 90;
-            for (const u of game.units) {
-              if (u.dead || struck.has(u.id) || !game.areEnemies(u.owner, this.owner)) continue;
-              const d = RC.dist(from.x, from.y, u.x, u.y);
-              if (d < bd) { bd = d; best = u; }
-            }
-            if (!best) break;
-            struck.add(best.id);
-            game.fx.push({ x: from.x, y: from.y, tx: best.x, ty: best.y, t: 0.12, owner: this.owner, arc: true });
-            this._hit(best, dealt * (p.pct || 0.4), game);
-            from = best;
-          }
-          this._arc = false;
-          break;
-        }
-        case 'cleave': {
-          if (this._arc) break;
-          this._arc = true;
-          for (const u of game.units) {
-            if (u === foe || u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(foe.x, foe.y, u.x, u.y) > (p.radius || 60)) continue;
-            this._hit(u, dealt * (p.pct || 0.5), game);
-          }
-          this._arc = false;
-          break;
-        }
-      }
-    }
+    // 고유 패시브 — 실제 구현은 모듈 수준의 passiveHit (타워도 같은 것을 쓴다)
+    _passiveHit(foe, dealt, game) { RC.passiveHit(this, foe, dealt, game); }
 
     _passiveAura(dt, game) {
       const p = this.def.passive;

@@ -5,7 +5,7 @@ global.window = global;
 ['config', 'maps', 'pathfind', 'entities', 'game', 'ai', 'daily', 'survival', 'net_core']
   .forEach(m => require('../' + m + '.js'));
 
-const BUILDINGS = ['core', 'crystal', 'factory', 'cell', 'guardtower'].filter(b => RC.BUILDINGS[b]);
+const BUILDINGS = ['core', 'crystal', 'factory', 'cell', 'stonethrower'].filter(b => RC.BUILDINGS[b]);
 const GROUND = Object.keys(RC.UNITS).filter(k => {
   const d = RC.UNITS[k];
   return !d.flying && !d.transport && (d.dmg || 0) > 0;
