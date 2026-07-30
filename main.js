@@ -339,14 +339,18 @@ window.RC = window.RC || {};
   //
   // So it is ONE card now — 'Crystal Defense' — with the depth chosen inside it. The
   // other three modes are each obviously their own thing and stay as they are.
+  // Two rows on purpose. Tutorial sits alone on the first — it is not a mode you choose
+  // between, it is the thing to do before you choose — and the three actual modes line up
+  // beneath it. `br: true` means "start a new row after this card"; the layout is stated
+  // here rather than left to wherever the flex happens to wrap at a given width.
   const GAMEMODES = [
+    { id: 'tutorial', ic: '🎓', name: 'Tutorial', sub: 'Learn the game, then a guided practice match.', br: true },
     { id: 'defend', ic: '💎', name: 'Crystal Defense', sub: 'Endless waves attack the Rift Crystal. Play it simple, or with the full RTS.' },
-    { id: 'tutorial', ic: '🎓', name: 'Tutorial', sub: 'Learn the game, then a guided practice match.' },
+    { id: 'vs', ic: '⚔️', name: 'Versus', sub: '1v1 or 2v2 vs bots — or online vs friends.' },
     // Campaign is parked. It needs the most work of anything on this screen, and a mode
     // that disappoints is worse than a mode that is honestly not ready yet, so the card
     // stays visible (it says what is coming) but cannot be selected.
     { id: 'campaign', ic: '🎯', name: 'Campaign', sub: 'Scripted missions vs bots — a ladder into multiplayer.', soon: true },
-    { id: 'vs', ic: '⚔️', name: 'Versus', sub: '1v1 or 2v2 vs bots — or online vs friends.' },
   ];
 
   // The two depths of Crystal Defense. Simple is listed first and is the default: it is
@@ -382,6 +386,14 @@ window.RC = window.RC || {};
       if (gm.soon) c.title = 'Not ready yet — coming soon.';
       else c.addEventListener('click', () => applyGameMode(gm.id));
       wrap.appendChild(c);
+      // A zero-height full-width flex item forces the next card onto a new line. Doing it
+      // with an element rather than a fixed container width means the break holds at every
+      // screen size instead of only the one the max-width was tuned for.
+      if (gm.br) {
+        const brk = document.createElement('div');
+        brk.className = 'gm-break';
+        wrap.appendChild(brk);
+      }
     });
   }
   const SQUADS = [

@@ -367,6 +367,8 @@
     border-top-width: 3px; text-align: center; transition: border-color .12s, transform .12s;
   }
   .gmcard:hover { transform: translateY(-2px); border-color: var(--blue); }
+  /* Row break inside the mode picker — see GAMEMODES `br` in main.js. */
+  .gm-break { flex-basis: 100%; height: 0; margin: 0; }
   /* Parked mode — visible so players know it is coming, but not selectable. */
   .gmcard.soon { opacity: .45; cursor: default; filter: grayscale(.85); position: relative; }
   .gmcard.soon:hover { transform: none; border-color: var(--line); }

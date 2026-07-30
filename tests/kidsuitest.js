@@ -301,6 +301,26 @@ head('FROM THE MENU BUTTON');
      'Survival no longer has a second competing card');
   ok(dd.querySelectorAll('#ss-gamemodes .gmcard').length === 4, 'the front page is down to four mode cards');
 
+  // ── Two rows: Tutorial alone, then the three modes ───────────────────────
+  // A flex row wraps wherever the width happens to run out, so the split is forced with
+  // an explicit break element. This asserts the arrangement rather than the widths.
+  {
+    const kids2 = Array.from(dd.querySelectorAll('#ss-gamemodes > *'));
+    const rows = [[]];
+    for (const el of kids2) {
+      if (/gm-break/.test(el.className)) { rows.push([]); continue; }
+      rows[rows.length - 1].push(el.dataset.m);
+    }
+    console.log('  mode rows: ' + rows.map(r => '[' + r.join(', ') + ']').join('  '));
+    ok(rows.length === 2, 'there are exactly two rows, got ' + rows.length);
+    ok(rows[0].join() === 'tutorial', 'Tutorial sits alone on the first row, got [' + rows[0].join(', ') + ']');
+    ok(rows[1].length === 3, 'the three modes share the second row, got ' + rows[1].length);
+    ok(rows[1].indexOf('defend') >= 0 && rows[1].indexOf('vs') >= 0 && rows[1].indexOf('campaign') >= 0,
+       'and they are Crystal Defense, Versus and Campaign');
+    const brk = dd.querySelector('#ss-gamemodes .gm-break');
+    ok(!!brk && w2.getComputedStyle(brk).flexBasis === '100%', 'the break is a full-width flex item');
+  }
+
   // ── Every action button is the same size ──────────────────────────────────
   // "Play Crystal Guard" shipped with NO css rule of its own, so it rendered at the
   // browser's default size next to a full-size "Online Co-op" beside it, and every
