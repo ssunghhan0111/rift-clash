@@ -398,6 +398,14 @@ RC.Input = (function () {
 
   function placeAt(e) {
     const type = g.placing, me = ME();
+    // Crystal Guard has its own build rules — kid prices, a ring around the crystal, a
+    // slot cap — and its own worker, which the player never selects. One command, and
+    // RC.Kids does the rest.
+    if (g.kids) {
+      RC.cmd(g, { t: 'kbuild', bt: type, x: state.world.x, y: state.world.y });
+      g.placing = null;
+      return;
+    }
     const workers = g.selection.filter(s => s.kind === 'unit' && s.def.worker);
     const w = workers.length ? [workers[0]] : g.units.filter(u => u.owner === me && u.def.worker).slice(0, 1);
     RC.cmd(g, { t: 'build', bt: type, x: state.world.x, y: state.world.y, ids: w.map(u => u.id) });

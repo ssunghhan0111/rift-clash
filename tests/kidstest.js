@@ -73,7 +73,10 @@ for (const w of [1, 2, 3, 5, 8, 10, 15, 20, 25]) {
 }
 ok(gentler, 'Kids waves are never larger than Survival medium from wave 3 on');
 ok(K.waveSize(1) === 2, 'wave 1 is exactly 2 enemies');
-ok(K.hpMul(1) < 1 && K.hpMul(5) === K.hpMul(1), 'enemy HP is below printed stats and flat for the first 5 waves');
+// Enemies used to arrive at 70% health, flat for five waves, which is most of why the
+// opening was a formality. They now start at their printed stats and climb from wave 3.
+ok(K.hpMul(1) >= 1 && K.hpMul(3) === K.hpMul(1), 'enemies start at full printed stats, flat for the first three waves');
+ok(K.hpMul(8) > K.hpMul(3), 'and get tougher after that');
 ok(K.hpMul(20) < RC.Survival.diffOf({ survivalDiff: 'medium' }).hpBase * 2.5, 'late-wave HP stays modest');
 
 // Air arrives late enough to be a lesson, not an ambush.
@@ -401,7 +404,12 @@ head('NO RTS — the simplifications hold');
   gk.heroesEnabled = true;
   gk.setupKids({ race: 'forge' });
   ok(gk.nodes.length === 0, 'there are no shard nodes to mine, has ' + gk.nodes.length);
-  ok(!gk.units.some(u => u.def.worker), 'no workers were created');
+  // There is exactly ONE worker, and it is a builder: no mining, no dropoff, no economy
+  // to forget. That distinction is the whole reason a worker was allowed back in.
+  const workers = gk.units.filter(u => u.def.worker);
+  ok(workers.length === 1, 'exactly one worker, got ' + workers.length);
+  ok(workers[0].free === true, 'the builder costs no supply — it is a tool, not an army slot');
+  ok(gk.nodes.length === 0, 'and there is nothing for it to mine, so it cannot be mismanaged');
   ok(gk.supply(1).max === K.CFG.POP, 'population is a flat cap, not a supply-building game');
   // Income arrives on its own, with nothing to click.
   const before = gk.res[1].shard;
@@ -411,7 +419,97 @@ head('NO RTS — the simplifications hold');
      'income is about INCOME per second');
   // Only the two starter buildings exist: the crystal and the one base.
   ok(gk.buildings.length === 2, 'a solo run starts with exactly the crystal and one base, has ' + gk.buildings.length);
+  ok(RC.KID_BUILD.length === 2, 'a kid may build exactly two things');
+  ok(RC.KID_BUILD.every(b => RC.BUILDINGS[b.t]), 'both are real buildings');
+  ok(RC.KID_BUILD.every(b => !RC.BUILDINGS[b.t].produces || !RC.BUILDINGS[b.t].produces.length),
+     'neither of them produces units — defence only, no base-building tree');
+  ok(!RC.BUILDABLE.includes('rampart'), 'the wall is Crystal Guard only and never leaks into Versus/Survival');
   ok(gk.buildings.every(b => b.done), 'both start finished — there is nothing to build');
+}
+
+// ── 8a. The opening is not a formality ─────────────────────────────────────
+// The mode was reported as "too easy in the beginning", and it measured that way: a
+// passive player — buys whatever is affordable, never moves the army, never builds —
+// reached wave 10 with the crystal untouched at 100%.
+//
+// Worth knowing before changing any of these numbers: this system SELF-BALANCES on
+// wall-clock time. Tougher or more numerous enemies make waves last longer, the player
+// banks more income, and the bigger army cancels the change out — measured, raising
+// enemy HP made runs LONGER, not shorter. The levers that actually bite are the ones
+// that cap how much army can exist at once (POP) and how fast it can be bought (INCOME).
+head('THE OPENING HAS TEETH');
+{
+  ok(K.CFG.INCOME <= 8, 'income is no longer a flood (' + K.CFG.INCOME + '/s)');
+  ok(K.CFG.POP <= 24, 'the army cannot snowball to invulnerability (cap ' + K.CFG.POP + ')');
+  ok(K.CFG.WAVE_HEAL <= 0.04, 'chip damage is not erased between waves (' + Math.round(K.CFG.WAVE_HEAL * 100) + '% heal)');
+  // A tower has to be a real alternative to a fighter, or nobody will ever build one.
+  const tower = RC.KID_BUILD.find(b => b.t === 'guardtower');
+  const fighter = K.costOf(K.kitOf('forge').starters[0].t);
+  console.log('  tower ' + tower.cost + ' shards vs a Tank at ' + fighter + ' — one is genuinely the other');
+  ok(tower.cost >= fighter * 0.8 && tower.cost <= fighter * 2.5,
+     'a tower costs about a fighter, so building is a real choice');
+  ok(K.CFG.START_SHARD < K.costOf(K.kitOf('forge').starters[0].t) * 3,
+     'the opening shards do not cover three fighters — there is a decision on second one');
+}
+
+// ── 8b. Building ───────────────────────────────────────────────────────────
+head('BUILDING — a fort around the crystal');
+{
+  const gb = new RC.Game(RC.MAPS[0], RC.MODES['1v1']);
+  gb.heroesEnabled = true;
+  gb.setupKids({ race: 'forge' });
+  const c = gb.crystal;
+  const near = { x: c.x + 160, y: c.y - 130 };
+  const far = { x: c.x + K.buildRing(gb) + 200, y: c.y };
+
+  ok(!!K.workerOf(gb, 1), 'the run starts with a builder');
+  ok(K.buildCap(gb) >= 2, 'and room to build something, cap ' + K.buildCap(gb));
+  ok(K.buildUsed(gb, 1) === 0, 'nothing built yet');
+  ok(gb.res[1].shard >= RC.KID_BUILD[1].cost, 'the opening shards cover at least a wall');
+
+  // The ring is the rule, and it is enforced with a sentence rather than a silent no.
+  ok(K.inBuildRing(gb, near.x, near.y), 'a spot beside the crystal is inside the ring');
+  ok(!K.inBuildRing(gb, far.x, far.y), 'a spot across the map is outside it');
+  const why = K.canBuild(gb, 'rampart', far.x, far.y, 1);
+  ok(typeof why === 'string' && /crystal/i.test(why), 'building too far says why: "' + why + '"');
+  ok(K.build(gb, 'rampart', far.x, far.y, 1) === false, 'and is refused');
+  ok(K.buildUsed(gb, 1) === 0, 'a refused build costs nothing');
+
+  // A real build.
+  const sh0 = gb.res[1].shard;
+  ok(K.build(gb, 'guardtower', near.x, near.y, 1) === true, 'a tower goes up beside the crystal');
+  ok(K.buildUsed(gb, 1) === 1, 'and takes a slot');
+  const kidCost = RC.KID_BUILD.find(b => b.t === 'guardtower').cost;
+  ok(Math.abs((sh0 - gb.res[1].shard) - kidCost) < 0.001,
+     'it cost the KID price (' + kidCost + '), not the Versus price (' + RC.BUILDINGS.guardtower.cost + ')');
+  ok(RC.BUILDINGS.guardtower.cost !== kidCost, 'and those two really are different');
+  ok(RC.BUILDINGS.guardtower.cost === 120, 'the Versus price was left alone for other modes');
+
+  // The slot cap holds, and it grows as waves are cleared.
+  const capNow = K.buildCap(gb);
+  gb.res[1].shard = 99999;
+  let n = 0;
+  for (let i = 0; i < 30 && K.buildUsed(gb, 1) < capNow + 3; i++) {
+    if (K.build(gb, 'rampart', c.x - 300 + (i % 6) * 60, c.y - 240 + Math.floor(i / 6) * 60, 1)) n++;
+  }
+  ok(K.buildUsed(gb, 1) === capNow, 'the cap holds at ' + capNow + ' however many times you tap');
+  const s2 = K.st(gb);
+  s2.wave = 10;
+  ok(K.buildCap(gb) > capNow, 'clearing waves earns more slots (' + capNow + ' -> ' + K.buildCap(gb) + ')');
+
+  // A wall is a wall: it blocks, it does not shoot.
+  const ramp = RC.BUILDINGS.rampart;
+  ok(!ramp.tower && !ramp.dmg, 'the wall has no weapon');
+  ok(ramp.hp > RC.BUILDINGS.guardtower.hp * 0.8, 'but it is tough — it is meant to be chewed through');
+  ok(ramp.cost < RC.KID_BUILD[0].cost, 'and cheaper than a tower');
+
+  // The builder walks back out free if it dies — losing it is a pause, not a run-ender.
+  const w = K.workerOf(gb, 1);
+  w.dead = true;
+  gb.units = gb.units.filter(u => !u.dead);
+  ok(!K.workerOf(gb, 1), 'the builder is gone');
+  for (let i = 0; i < 30 * (K.CFG.WORKER_RESPAWN + 2); i++) gb.update(DT);
+  ok(!!K.workerOf(gb, 1), 'and a replacement arrives on its own within ' + K.CFG.WORKER_RESPAWN + 's');
 }
 
 // ── 9. Survival is untouched ───────────────────────────────────────────────

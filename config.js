@@ -691,7 +691,33 @@ RC.BUILDINGS = {
 };
 
 // Order of buildings a worker can construct (default = Forge)
+// ── Rampart ───────────────────────────────────────────────────────────────────
+// A wall. Cheap, tough, shoots nothing — it exists to be in the way, and to be the thing
+// a kid actually enjoys placing. Small footprint on purpose so a row of them reads as a
+// wall rather than as four sheds, and high hp per shard so blocking a lane is worth doing
+// even though a stray attacker will eventually chew through it.
+//
+// Deliberately NOT in RC.BUILDABLE: this is a Crystal Guard piece (see RC.KID_BUILD), and
+// dropping free walls into Versus and Survival would rebalance two tuned modes by accident.
+RC.BUILDINGS.rampart = {
+  id: 'rampart', name: 'Rampart', hp: 700, w: 42, h: 42,
+  cost: 30, time: 6, supplyGiven: 0, produces: [], key: 'W',
+  desc: 'A block of wall. Does not shoot — it just gets in the way.'
+};
+
 RC.BUILDABLE = ['cell', 'factory', 'hoverpad', 'arclab', 'guardtower', 'arcbattery'];
+
+// ── What a Crystal Guard player may build ─────────────────────────────────────
+// Two things only, and both are defence. A kid gets the build-your-fort loop that makes
+// the mode worth replaying without any of the base-building tree the mode exists to avoid:
+// no production buildings, no supply, no tech. Prices are the kid prices, not the Versus
+// ones, because these compete for the same shards as fighters.
+RC.KID_BUILD = [
+  { t: 'guardtower', ic: '🗼', role: 'Tower', cost: 70, time: 7,
+    kid: 'Shoots bad guys all by itself.' },
+  { t: 'rampart',    ic: '🧱', role: 'Wall',  cost: 25, time: 4,
+    kid: 'Blocks the way. Build a fence!' },
+];
 
 // ── Factions ─────────────────────────────────────────
 // Each faction's core, worker, build list + AI role map (role -> actual type id).

@@ -167,7 +167,7 @@ RC.Renderer = (function () {
     drawFog(g, VW, VH);               // 전장의 안개 — 적/지형을 덮는다
     drawSelection(g);
     drawMarks(g);                     // 명령 표식 + 데미지 숫자
-    if (g.placing) drawGhost(g, input);
+    if (g.placing) { drawBuildRing(g); drawGhost(g, input); }
 
     ctx.restore();
 
@@ -3341,7 +3341,11 @@ RC.Renderer = (function () {
   function drawGhost(g, input) {
     const d = RC.BUILDINGS[g.placing];
     const x = input.world.x, y = input.world.y;
-    const ok = g.canPlace(g.placing, x, y, 1) && g.canAfford(1, d.cost);
+    // Crystal Guard asks RC.Kids, which knows about the ring, the slot cap and the kid
+    // price — otherwise the ghost would show green on a spot the build would then refuse.
+    const ok = (g.kids && RC.Kids && RC.Kids.canBuild)
+      ? !RC.Kids.canBuild(g, g.placing, x, y, g.playerOwner)
+      : (g.canPlace(g.placing, x, y, 1) && g.canAfford(1, d.cost));
     ctx.save();
     ctx.globalAlpha = 0.5;
     ctx.fillStyle = ok ? C.p1_body : C.hpBad;
@@ -3350,6 +3354,25 @@ RC.Renderer = (function () {
     ctx.strokeStyle = ok ? C.select : C.hpBad;
     ctx.lineWidth = 2;
     ctx.strokeRect(x - d.w / 2, y - d.h / 2, d.w, d.h);
+    ctx.restore();
+  }
+
+  // The build ring — "you may build in here". A rule a kid cannot see is a rule they will
+  // break repeatedly and never understand, so it is drawn on the ground rather than left
+  // to a refusal message. Only while something is armed, so it is not permanent clutter.
+  function drawBuildRing(g) {
+    if (!g.kids || !g.placing || !g.crystal || !RC.Kids || !RC.Kids.buildRing) return;
+    const R = RC.Kids.buildRing(g);
+    const t = performance.now() / 1000;
+    ctx.save();
+    blitGlow(softGlow('120,220,255'), g.crystal.x, g.crystal.y, R, R, 0.05);
+    ctx.strokeStyle = '#8fe3ff';
+    ctx.globalAlpha = 0.5 + 0.15 * Math.sin(t * 2.4);
+    ctx.lineWidth = 3;
+    ctx.setLineDash([26, 18]);
+    ctx.lineDashOffset = -t * 30;
+    ctx.beginPath(); ctx.arc(g.crystal.x, g.crystal.y, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 

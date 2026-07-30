@@ -443,7 +443,24 @@ head('FROM THE MENU BUTTON');
 
   const G = w2.GAME;
   ok(G && G.kids === true, 'a Kids run actually started');
-  ok(G && G.units.filter(u => u.def.worker).length === 0, 'the started run has no workers');
+  // ONE worker, and it only builds — the mode gained a fort-building loop without gaining
+  // an economy to forget. See the BUILDING section in kidstest.js.
+  ok(G && G.units.filter(u => u.def.worker).length === 1, 'the started run has exactly one builder');
+  ok(G && G.nodes.length === 0, 'and nothing to mine, so it can only build');
+  w2.RC.KidsUI.update();          // one frame, so the build bar has been rendered
+  ok(!!dd.getElementById('kid-build'), 'the build bar is on screen');
+  ok(dd.querySelectorAll('#kid-build .kid-bb').length === RC.KID_BUILD.length,
+     'with a button per buildable, got ' + dd.querySelectorAll('#kid-build .kid-bb').length);
+  // Tapping one arms placement; tapping it again puts it back.
+  {
+    const bb = dd.querySelector('#kid-build .kid-bb');
+    press(bb);
+    ok(G.placing === bb.dataset.t, 'tapping a build button arms that building');
+    w2.RC.KidsUI.update();
+    ok(dd.getElementById('kid-placing').classList.contains('on'), 'and the tap-where-you-want-it hint shows');
+    press(bb);
+    ok(!G.placing, 'tapping it again disarms — a kid who changed their mind is never stuck');
+  }
   ok(G && G.nodes.length === 0, 'the started run has no shard nodes');
   ok(dd.getElementById('startscreen').classList.contains('hidden'), 'the start screen got out of the way');
 

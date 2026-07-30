@@ -90,6 +90,11 @@ window.RC = window.RC || {};
       // offered to you" check all live server-side, so a hand-rolled client cannot buy
       // what it cannot afford or take a card it was never dealt.
       case 'kbuy': { if (game.kids && RC.Kids) RC.Kids.buy(game, c.ut, owner); break; }
+      // Building in Crystal Guard goes through RC.Kids rather than game.placeBuilding, so
+      // the kid price, the ring, the slot cap and the "why not" message are all applied on
+      // the authoritative side — a hand-rolled client cannot build outside the ring or
+      // past its slots any more than it can buy a fighter it cannot afford.
+      case 'kbuild': { if (game.kids && RC.Kids) RC.Kids.build(game, c.bt, c.x, c.y, owner); break; }
       case 'kcard': { if (game.kids && RC.Kids) RC.Kids.choose(game, c.id, owner); break; }
     }
   }

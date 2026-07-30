@@ -5,13 +5,21 @@
 // stop them, and I get a present after every wave."
 //
 // What is DELIBERATELY absent, and why:
-//   · no workers, no shard nodes, no gathering  — income just ticks up. A kid who
-//     forgets to mine should never quietly lose ten minutes later for a mistake
-//     they made in minute one.
-//   · no base building, no supply buildings, no tech tree — three concepts a kid
-//     has to hold at once before the first fight, all of them invisible to the
-//     actual goal.
-//   · no build placement — nothing to put down means nothing to put down wrong.
+//   · no shard nodes, no gathering — income just ticks up. A kid who forgets to mine
+//     should never quietly lose ten minutes later for a mistake made in minute one.
+//   · no supply buildings, no tech tree, no production buildings — concepts a kid has
+//     to hold all at once before the first fight, all invisible to the actual goal.
+//
+// What CHANGED, and why it does not break the above:
+//   · There is now ONE worker per player, and it only BUILDS — towers and walls, inside
+//     a ring around the crystal. Kids want to build; that is most of why Minecraft is
+//     Minecraft, and without it this mode is a shop and a health bar. Income stays
+//     automatic, so the failure the mode exists to prevent — an economy you can forget —
+//     is still prevented. Losing the builder is a pause, not a run-ender: it walks back
+//     out free after a few seconds.
+//   · Placement can still go wrong, so it is made hard to get wrong instead of absent:
+//     you may only build near the crystal, slots are limited, and every refusal returns
+//     a sentence saying what to do differently rather than a silent no.
 //
 // What replaces them:
 //   · THREE buttons. Tank / Archer / Support, per faction, bought straight from
@@ -35,17 +43,39 @@ RC.Kids = (function () {
     PREP: 22,               // seconds before wave 1 — long enough to buy a first squad
     GAP: 4,                 // seconds after the reward card is picked before the next wave
     SPAWN_STEP: 0.30,       // seconds between individual spawns (slower than Survival — easier to read)
-    INCOME: 15,             // shards per second, before card upgrades
-    START_SHARD: 220,       // enough for two fighters immediately
-    POP: 40,                // fixed population cap — no supply buildings to think about
-    CRYSTAL_HP: 5200,       // a bit beefier than Survival's 4000; a kid needs room to make mistakes
-    WAVE_HEAL: 0.07,        // crystal heals this fraction of max on every wave cleared
+    // Income was 15/s, which handed a kid more shards than they could spend and made the
+    // first ten waves a formality: everything was affordable, so nothing was a choice.
+    // Halved. Now a tower costs a fighter, and that is the decision the mode was missing.
+    INCOME: 7.5,            // shards per second, before card upgrades
+    START_SHARD: 140,       // one fighter and a wall, or two fighters — a choice from second one
+    // Was 40, which let the army SNOWBALL: fighters survive waves and accumulate, so by
+    // wave 8 thirty defenders met a wave of nine and the outcome stopped being in doubt.
+    // A tighter cap keeps every wave a fight — and because towers and walls cost no
+    // supply, it is also what makes building worth doing rather than a decoration.
+    POP: 20,                // fixed population cap — no supply buildings to think about
+    // Room to make mistakes, but the mistakes have to SHOW. At 5200hp healing 7% a wave,
+    // every scratch was erased between waves and the bar read 100% right up until the run
+    // collapsed in one wave — a cliff, with no warning a kid could act on. Smaller pool,
+    // smaller heal: the bar now drifts down as waves leak, which is the feedback that
+    // says "do something" while there is still time to do it.
+    CRYSTAL_HP: 4400,
+    WAVE_HEAL: 0.03,        // crystal heals this fraction of max on every wave cleared
     COST_MUL: 0.55,         // kid prices, as a fraction of the normal card cost
     TIME_MUL: 0.35,         // kid build times, likewise — waiting is not the fun part
     QUEUE_MAX: 6,
     BOSS_HP: 5,             // Big Guy health multiplier
     CELEB: 2.6,             // seconds the wave-clear celebration holds the screen
     PICK: 15,               // co-op only: seconds to pick a reward before one is picked for you
+
+    // ── Building ──
+    // One worker per defender that ONLY builds. Income stays automatic, so there is still
+    // no economy to forget — the thing this mode has always refused to make a kid manage —
+    // but the build-your-fort loop that makes it worth replaying is now there.
+    BUILD_RING: 620,        // how far from the crystal you may build
+    BUILD_BASE: 3,          // slots at wave 0
+    BUILD_PER_WAVE: 0.5,    // +1 slot every two waves
+    BUILD_MAX: 14,          // ceiling, so a turtle cannot wall the whole map
+    WORKER_RESPAWN: 8,      // seconds before a lost builder walks back out, free
   };
 
   // ── Attack lanes ──────────────────────────────────────────────────────────
@@ -100,6 +130,94 @@ RC.Kids = (function () {
       x: Math.max(M, Math.min(W - M, lane.x + dx * along - dy * across)),
       y: Math.max(M, Math.min(H - M, lane.y + dy * along + dx * across)),
     };
+  }
+
+  // ── Building ──────────────────────────────────────────────────────────────
+  // Everything a kid may put on the map, and where. The ring exists because most of this
+  // map is nowhere near the fight: without it a kid scatters towers across 3400px and
+  // never understands why none of them ever shoot. Around the crystal, everything built
+  // is doing something, and "build your fort around the crystal" is a rule you can say
+  // in one sentence.
+  function buildRing(g) { return CFG.BUILD_RING; }
+  function inBuildRing(g, x, y) {
+    if (!g.crystal) return false;
+    return RC.dist(g.crystal.x, g.crystal.y, x, y) <= buildRing(g);
+  }
+  // Slots grow with the waves, so the fort visibly gets bigger as a reward for surviving.
+  // A flat cap stops the fort growing, and growth is most of why building is fun; no cap
+  // at all lets a patient kid turtle behind twenty towers and remove the tension entirely.
+  function buildCap(g) {
+    const s = st(g);
+    return Math.min(CFG.BUILD_MAX, Math.floor(CFG.BUILD_BASE + CFG.BUILD_PER_WAVE * (s.wave || 0)));
+  }
+  function buildUsed(g, owner) {
+    if (owner == null) owner = g.playerOwner;
+    let n = 0;
+    for (const b of g.buildings) {
+      if (b.dead || b.owner !== owner) continue;
+      if (b.def.isCore || b === g.crystal) continue;     // the base and the crystal are free
+      n++;
+    }
+    return n;
+  }
+  function kitBuild() { return RC.KID_BUILD || []; }
+  function buildDefOf(t) { return kitBuild().find(b => b.t === t) || null; }
+
+  // Why a build would be refused, as a sentence a six-year-old can act on. Returning the
+  // REASON rather than a bare false is what lets the screen say "too far from the crystal"
+  // instead of leaving a kid tapping a spot that will never work.
+  function canBuild(g, t, x, y, owner) {
+    if (owner == null) owner = g.playerOwner;
+    const bd = buildDefOf(t);
+    if (!bd) return 'You cannot build that';
+    if (!inBuildRing(g, x, y)) return 'Build closer to the crystal!';
+    if (buildUsed(g, owner) >= buildCap(g)) return 'No room for more — clear a wave to get another slot';
+    if (!g.res[owner] || g.res[owner].shard < bd.cost) return 'Not enough shards yet';
+    if (!g.canPlace(t, x, y, owner)) return 'Something is in the way';
+    return null;
+  }
+
+  function build(g, t, x, y, owner) {
+    if (owner == null) owner = g.playerOwner;
+    const mine = owner === g.playerOwner;
+    const why = canBuild(g, t, x, y, owner);
+    if (why) { if (mine) g.notify(why); return false; }
+    const bd = buildDefOf(t);
+    const worker = workerOf(g, owner);
+    // Kid prices and kid build times, exactly like the fighters — placeBuilding would
+    // otherwise charge the Versus cost, which is more than a whole fighter.
+    const d = RC.BUILDINGS[t];
+    const realCost = d.cost, realTime = d.time;
+    d.cost = bd.cost; d.time = bd.time;
+    let b = null;
+    try { b = g.placeBuilding(t, x, y, owner, worker ? [worker] : []); }
+    finally { d.cost = realCost; d.time = realTime; }
+    if (!b) return false;
+    if (mine && RC.Audio) RC.Audio.play('build');
+    return true;
+  }
+
+  // The builder. One per defender, and it does nothing but build: no mining, no dropoff,
+  // no gathering to forget about. If it dies it walks back out of the base for free after
+  // a few seconds, because a kid losing the ability to build for the rest of a run because
+  // a globling wandered past is a punishment out of all proportion to the mistake.
+  function workerOf(g, owner) {
+    if (owner == null) owner = g.playerOwner;
+    for (const u of (g.units || [])) if (u.owner === owner && u.def.worker && !u.dead) return u;
+    return null;
+  }
+  function spawnWorker(g, owner) {
+    const home = baseOf(g, owner) || g.crystal;
+    if (!home) return null;
+    const race = g.raceOf ? g.raceOf(owner) : 'forge';
+    const type = (RC.RACES[race] || RC.RACES.forge).worker;
+    if (!RC.UNITS[type]) return null;
+    const u = new RC.Unit(type, home.x - 40, home.y + home.h / 2 + 30, owner);
+    u.free = true;                       // costs no supply — it is a tool, not an army slot
+    if (g.initUnit) g.initUnit(u);
+    g.units.push(u);
+    g.fx.push({ abil: 'warp', ax: u.x, ay: u.y, t: 0.45, radius: u.r + 10, owner });
+    return u;
   }
 
   // ── Roster ────────────────────────────────────────────────────────────────
@@ -238,13 +356,21 @@ RC.Kids = (function () {
   // cancels out the smaller horde almost exactly (~10 waves either way). What the extra
   // directions actually cost is COVERAGE, so that is what gets compensated — see the
   // rally point in game.js and the lane schedule above.
+  // Still gentler than Survival medium at every wave (kidstest asserts it), but no longer
+  // a formality: wave 3 is a handful rather than four stragglers, and by wave 8 there are
+  // enough bodies that some of them get through if nobody is watching.
   function waveSize(w) {
-    return Math.max(2, Math.min(30, Math.round(2 + 0.85 * Math.max(0, w - 1))));
+    return Math.max(2, Math.min(30, Math.round(2 + 1.05 * Math.max(0, w - 1))));
   }
 
   // Enemy health. Flat for the first five waves so the opening is a genuine
   // warm-up, then a shallow climb.
-  function hpMul(w) { return 0.70 * (1 + 0.06 * Math.max(0, w - 5)); }
+  // Enemies used to arrive at 70% of their printed health, flat for the first five waves.
+  // Combined with a small wave that meant almost nothing survived the walk to the crystal,
+  // and a passive player sat at 100% crystal health through wave 12 — the "too easy at the
+  // beginning" the mode was reported for. They now start near their real stats and climb
+  // sooner, so a wave that is ignored actually costs something.
+  function hpMul(w) { return 1.0 * (1 + 0.08 * Math.max(0, w - 3)); }
 
   function weightAt(e, w) {
     if (w < e.at) return 0;
@@ -662,6 +788,13 @@ RC.Kids = (function () {
     // Shard Rush multiplier, so one player's card never funds the other.
     for (const o of defenders(g)) {
       if (g.res[o]) g.res[o].shard += CFG.INCOME * (per(g, o).incomeMul || 1) * dt;
+      // Replace a lost builder. Free, and after a pause long enough that losing it still
+      // stings without ending the kid's ability to build for the rest of the run.
+      const p = per(g, o);
+      if (!workerOf(g, o)) {
+        p.workerT = (p.workerT || 0) + dt;
+        if (p.workerT >= CFG.WORKER_RESPAWN) { p.workerT = 0; spawnWorker(g, o); }
+      } else p.workerT = 0;
     }
 
     if (s.banner) { s.banner.t -= dt; if (s.banner.t <= 0) s.banner = null; }
@@ -754,6 +887,13 @@ RC.Kids = (function () {
       queue: (b && b.queue) || [],
       lanes: s.lanes || 1, laneMax: lanesOf(g).length,
       sig: sigHud(g, owner),
+      build: {
+        items: kitBuild().map(b => ({ t: b.t, ic: b.ic, role: b.role, cost: b.cost, kid: b.kid })),
+        used: buildUsed(g, owner), cap: buildCap(g),
+        ring: buildRing(g),
+        ringAt: g.crystal ? { x: g.crystal.x, y: g.crystal.y } : null,
+        worker: !!workerOf(g, owner),
+      },
       coop: !!s.coop,
       crystal: g.crystal ? { hp: Math.max(0, Math.round(g.crystal.hp)), max: Math.round(g.crystal.maxHp) } : null,
     };
@@ -816,6 +956,8 @@ RC.Kids = (function () {
   return {
     CFG, CARDS, KITS, ROSTER, UNLOCK_WAVES, FLAVOURS, LANE_AT,
     heroCards, sigHud,
+    buildRing, inBuildRing, buildCap, buildUsed, canBuild, build, kitBuild,
+    workerOf, spawnWorker,
     netState, applyNetState,
     kitOf, costOf, timeOf, roster, waveSize, hpMul, weightAt, compose,
     flavourFor, waveLabel, offer, choose, autoPick, buy, freeSquad,

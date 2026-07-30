@@ -85,8 +85,9 @@ window.RC = window.RC || {};
     }
 
     // ── Kids mode ─────────────────────────────────────
-    // Survival's crystal and horde, with the RTS removed: no workers, no shard
-    // nodes, no building, no supply management. See kids.js for the reasoning.
+    // Survival's crystal and horde with the RTS pared back: no shard nodes, no gathering,
+    // no supply, no tech tree. One worker each, and it only builds towers and walls near
+    // the crystal — see kids.js for why that is the one piece of base-building kept.
     //
     // It rides on `survival = true` on purpose — the wave HUD, the crystal lose
     // condition and the end screen all already key off that flag, and duplicating
@@ -751,6 +752,13 @@ window.RC = window.RC || {};
           this.heroOf[p.owner] = h;
         }
         if (K.START_SHARD != null && this.res[p.owner]) this.res[p.owner].shard = K.START_SHARD;
+        // One builder each. It does not mine — income stays automatic — it exists purely so
+        // the kid can put towers and walls on the map, which is the loop that makes the mode
+        // worth replaying. Free of supply: it is a tool, not an army slot.
+        if (RC.Kids && RC.Kids.spawnWorker) RC.Kids.spawnWorker(this, p.owner);
+        // Crystal Guard hands hero upgrades out as reward cards, so the level route is off.
+        const hero = this.heroOf[p.owner];
+        if (hero && hero.useCardUpgrades) hero.useCardUpgrades();
       });
       // The local player's base — what the Crystal Guard shop buys from and the camera
       // opens on. On the server (no local player) this is simply the first defender's.

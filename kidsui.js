@@ -128,6 +128,37 @@ RC.KidsUI = (function () {
                border:2px solid currentColor; border-radius:14px; padding:6px 16px; }
 #kid-next .t { font-weight:700; color:#cfe0f5; font-size:14px; margin-left:6px; }
 
+/* ── Build bar ──────────────────────────────────────────────────────────────
+   Left of the fighter shop and visibly a different KIND of thing: fighters walk out
+   of the base on their own, buildings get put somewhere by you. The slot counter is
+   the whole economy of it — a kid can see they have two of three used. */
+#kid-build { position:absolute; left:14px; bottom:14px; display:flex; gap:8px;
+             align-items:flex-end; pointer-events:auto; }
+.kid-bb { width:76px; min-height:78px; border-radius:16px; cursor:pointer;
+          background:linear-gradient(180deg,#3a3050,#1d1830);
+          border:3px solid rgba(255,255,255,.20); color:#eaf2ff;
+          display:flex; flex-direction:column; align-items:center; gap:1px;
+          padding:7px 5px 6px; position:relative; transition:transform .08s, filter .12s;
+          user-select:none; -webkit-tap-highlight-color:transparent; }
+.kid-bb:hover { filter:brightness(1.14); }
+.kid-bb:active { transform:scale(.94); }
+.kid-bb .ic   { font-size:24px; line-height:1; }
+.kid-bb .role { font-size:13px; font-weight:800; }
+.kid-bb .cost { font-size:12.5px; font-weight:800; color:#ffd24a; }
+.kid-bb.poor  { opacity:.45; }
+.kid-bb.poor .cost { color:#ff8f7d; }
+.kid-bb.on    { border-color:#8fe3ff; box-shadow:0 0 0 3px rgba(143,227,255,.30), 0 0 22px rgba(143,227,255,.45); }
+#kid-slots { font-size:11.5px; font-weight:800; color:#9fb2d0; text-align:center;
+             background:rgba(10,16,26,.72); border-radius:10px; padding:3px 8px;
+             align-self:center; white-space:nowrap; }
+#kid-slots.full { color:#ff8f7d; }
+/* Tap-to-place hint, shown only while a building is armed. */
+#kid-placing { position:absolute; top:64px; left:50%; transform:translateX(-50%);
+               background:rgba(10,16,26,.86); border:2px solid #8fe3ff; border-radius:14px;
+               padding:7px 16px; font-size:15px; font-weight:800; color:#eaf2ff;
+               display:none; pointer-events:none; white-space:nowrap; }
+#kid-placing.on { display:block; }
+
 /* ── The hero's one button ──────────────────────────────────────────────────
    Sits apart from the shop, on the right, because it is not a purchase — it is the
    one thing in the mode that is free and can only be spent once. The ring IS the
@@ -197,6 +228,12 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
   #kid-queue { bottom:92px; }
   .kid-card { width:150px; min-height:180px; }
   .kid-card .ic { font-size:40px; }
+  #kid-build { left:8px; bottom:96px; gap:6px; }
+  .kid-bb { width:60px; min-height:62px; padding:5px 3px 4px; border-width:2px; border-radius:12px; }
+  .kid-bb .ic { font-size:19px; }
+  .kid-bb .role { font-size:11px; }
+  .kid-bb .cost { font-size:11px; }
+  #kid-slots { font-size:10px; padding:2px 6px; }
   #kid-sig { width:82px; height:82px; right:8px; bottom:14px; }
   #kid-sig .ic { font-size:28px; }
   #kid-sig .lb { font-size:10px; }
@@ -219,6 +256,8 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       </div>
       <div id="kid-queue"></div>
       <div id="kid-shop"></div>
+      <div id="kid-build"></div>
+      <div id="kid-placing">Tap where you want it!</div>
       <div id="kid-sig">
         <div class="ring"></div>
         <div class="ups"></div>
@@ -262,6 +301,8 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       sigLb: root.querySelector('#kid-sig .lb'),
       sigRing: root.querySelector('#kid-sig .ring'),
       sigUps: root.querySelector('#kid-sig .ups'),
+      build: root.querySelector('#kid-build'),
+      placing: root.querySelector('#kid-placing'),
     };
     // One tap fires it at the smartest spot — there is nothing to aim. The mode has no
     // build placement for the same reason: nothing to put down means nothing to put down
@@ -337,6 +378,60 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
         d.className = 'kid-qd' + (i === 0 ? ' go' : '');
         els.queue.appendChild(d);
       }
+    }
+  }
+
+  // ── Build bar ─────────────────────────────────────────────────────────────
+  // Tap a button to ARM a building, then tap the map to put it down. Two taps, no drag,
+  // no menus — and tapping the armed button again disarms it, so a kid who changed their
+  // mind is never stuck holding a tower they cannot put back.
+  let builtSig = '';
+  function renderBuild(h) {
+    const b = h.build;
+    if (!b || !b.items.length) { els.build.style.display = 'none'; return; }
+    els.build.style.display = 'flex';
+    const sig = b.items.map(i => i.t).join(',');
+    if (sig !== builtSig) {
+      builtSig = sig;
+      els.build.innerHTML = '';
+      b.items.forEach(it => {
+        const n = document.createElement('div');
+        n.className = 'kid-bb';
+        n.dataset.t = it.t;
+        n.title = it.kid || '';
+        n.innerHTML = `<div class="ic">${esc(it.ic)}</div>` +
+                      `<div class="role">${esc(it.role)}</div>` +
+                      `<div class="cost">💎 ${it.cost}</div>`;
+        n.addEventListener('pointerdown', ev => {
+          ev.preventDefault();
+          g.placing = (g.placing === it.t) ? null : it.t;   // tap again to change your mind
+        });
+        els.build.appendChild(n);
+      });
+      const slots = document.createElement('div');
+      slots.id = 'kid-slots';
+      els.build.appendChild(slots);
+    }
+    // Affordability, armed state, and the slot count.
+    const nodes = els.build.querySelectorAll('.kid-bb');
+    for (let i = 0; i < nodes.length; i++) {
+      const it = b.items[i];
+      if (!it) continue;
+      const full = b.used >= b.cap;
+      nodes[i].classList.toggle('poor', h.shard < it.cost || full);
+      nodes[i].classList.toggle('on', g.placing === it.t);
+    }
+    const slots = els.build.querySelector('#kid-slots');
+    if (slots) {
+      slots.textContent = '🧰 ' + b.used + ' / ' + b.cap;
+      slots.classList.toggle('full', b.used >= b.cap);
+      slots.title = 'Buildings you have room for. Clear waves to earn more slots.';
+    }
+    const armed = !!g.placing;
+    els.placing.classList.toggle('on', armed);
+    if (armed) {
+      const it = b.items.find(i => i.t === g.placing);
+      els.placing.textContent = (it ? it.ic + ' ' + it.role + ' — ' : '') + 'tap near the crystal to place it';
     }
   }
 
@@ -439,6 +534,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     renderShop(h);
     renderQueue(h);
     renderSig(h);
+    renderBuild(h);
 
     // Banner
     if (h.banner) {
