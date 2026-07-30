@@ -61,10 +61,18 @@ window.RC = window.RC || {};
   const mini = document.getElementById('minimap');
   const game = new RC.Game();
 
+  // Keep the canvas backing store the same size as the box it is displayed in. If the two
+  // drift apart, every click is off by the ratio between them — an error that grows with
+  // distance from the top-left, so taps land further and further below the finger. Reading
+  // the real (fractional) rect and rounding beats clientWidth/clientHeight, which round
+  // down and so are routinely a pixel short of the box the browser actually painted.
   function resize() {
     const wrap = document.getElementById('stage');
-    cv.width = wrap.clientWidth;
-    cv.height = wrap.clientHeight;
+    const r = wrap.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width || wrap.clientWidth));
+    const h = Math.max(1, Math.round(r.height || wrap.clientHeight));
+    if (cv.width !== w) cv.width = w;
+    if (cv.height !== h) cv.height = h;
     RC.Input.clampCam();
   }
 
@@ -76,6 +84,12 @@ window.RC = window.RC || {};
   // Rotating a phone/tablet into landscape (incl. the fullscreen orientation lock)
   // sometimes fires before the viewport settles — re-fit on the next frame too.
   window.addEventListener('orientationchange', () => { resize(); setTimeout(resize, 250); });
+  // The stage can change size WITHOUT a window resize event: a phone hiding or showing its
+  // address bar, entering fullscreen, the on-screen keyboard closing. Every one of those
+  // left the backing store stale and every tap misaligned until something else resized.
+  if (window.ResizeObserver) {
+    try { new ResizeObserver(resize).observe(document.getElementById('stage')); } catch (e) {}
+  }
   resize();
 
   // ── 닉네임 ────────────────────────────────────────
@@ -328,7 +342,10 @@ window.RC = window.RC || {};
   const GAMEMODES = [
     { id: 'defend', ic: '💎', name: 'Crystal Defense', sub: 'Endless waves attack the Rift Crystal. Play it simple, or with the full RTS.' },
     { id: 'tutorial', ic: '🎓', name: 'Tutorial', sub: 'Learn the game, then a guided practice match.' },
-    { id: 'campaign', ic: '🎯', name: 'Campaign', sub: 'Scripted missions vs bots — a ladder into multiplayer.' },
+    // Campaign is parked. It needs the most work of anything on this screen, and a mode
+    // that disappoints is worse than a mode that is honestly not ready yet, so the card
+    // stays visible (it says what is coming) but cannot be selected.
+    { id: 'campaign', ic: '🎯', name: 'Campaign', sub: 'Scripted missions vs bots — a ladder into multiplayer.', soon: true },
     { id: 'vs', ic: '⚔️', name: 'Versus', sub: '1v1 or 2v2 vs bots — or online vs friends.' },
   ];
 
@@ -357,10 +374,13 @@ window.RC = window.RC || {};
     wrap.innerHTML = '';
     GAMEMODES.forEach(gm => {
       const c = document.createElement('div');
-      c.className = 'gmcard' + (gm.id === selGameMode ? ' sel' : '');
+      c.className = 'gmcard' + (gm.id === selGameMode ? ' sel' : '') + (gm.soon ? ' soon' : '');
       c.dataset.m = gm.id;
-      c.innerHTML = `<div class="gm-ic">${gm.ic}</div><div class="gm-name">${gm.name}</div><div class="gm-sub">${gm.sub}</div>`;
-      c.addEventListener('click', () => applyGameMode(gm.id));
+      c.innerHTML = `<div class="gm-ic">${gm.ic}</div><div class="gm-name">${gm.name}</div>` +
+                    `<div class="gm-sub">${gm.sub}</div>` +
+                    (gm.soon ? '<div class="gm-soon">COMING SOON</div>' : '');
+      if (gm.soon) c.title = 'Not ready yet — coming soon.';
+      else c.addEventListener('click', () => applyGameMode(gm.id));
       wrap.appendChild(c);
     });
   }
@@ -387,6 +407,9 @@ window.RC = window.RC || {};
 
   // Show/hide start-screen sections for the chosen game mode
   function applyGameMode(m) {
+    // A parked mode is not selectable — including via a stale saved preference.
+    const gmDef = GAMEMODES.find(x => x.id === m);
+    if (gmDef && gmDef.soon) m = 'defend';
     selGameMode = m;
     document.querySelectorAll('#ss-gamemodes .gmcard').forEach(c => c.classList.toggle('sel', c.dataset.m === m));
     const show = (id, on, disp) => { const e = document.getElementById(id); if (e) e.style.display = on ? (disp || 'flex') : 'none'; };
@@ -410,9 +433,11 @@ window.RC = window.RC || {};
     show('act-vs', m === 'vs', 'flex');
     show('act-survival', full, 'flex');
     show('act-kids', simple, 'flex');
-    show('ss-onlinehint', m === 'vs');
-    show('ss-survivalhint', full);
-    show('ss-kidshint', simple);
+    // 'block', not the default 'flex' — these are prose paragraphs (.ss-note). Showing
+    // them as a flex column is what put every bold phrase on its own line.
+    show('ss-onlinehint', m === 'vs', 'block');
+    show('ss-survivalhint', full, 'block');
+    show('ss-kidshint', simple, 'block');
     // Daily now lives in the always-visible front-page banner (rendered in buildStartScreen).
     const rh = document.getElementById('race-h');
     if (rh) rh.textContent = defend ? 'Your faction' : 'Faction (enemy AI takes the other)';

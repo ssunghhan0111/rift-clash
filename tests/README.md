@@ -15,6 +15,7 @@ npm run test:browser  # real Chromium, real WebSockets, real WebRTC
 | `simtest.js` | Full survival runs on every difficulty and every daily twist |
 | `kidstest.js` | Crystal Guard (Kids mode) rules: the gentler curve, a live 10-wave run with the reward loop, unlocks, all three factions, and that Survival is untouched |
 | `kidsuitest.js` | Crystal Guard screen, in real `index.html` under jsdom: the three buy buttons spend shards, reward cards can only be picked once, unlocks reach the shop, the grown-up HUD is hidden. Needs `npm i -D jsdom`; skips cleanly without it |
+| `inputmap_test.js` | Pointer-to-world mapping under jsdom: a click lands in the right place even when the canvas display box and its backing store disagree — the bug that made taps land below the finger. Needs `jsdom`; skips cleanly without it |
 | `kidscoop_test.js` | Crystal Guard **co-op** over a real server and real WebSockets: the room caps at 2, a lone host cannot start, both players get their own base and economy, the snapshot carries the wave director, and buys/card-picks travel as commands applied to the owner they came from |
 | `sighttest.js` | Per-unit sight, auto-engagement, the leash, worker behaviour |
 | `reachtest.js` | Every ground unit can actually damage every building |

@@ -171,16 +171,39 @@ body.kids-mode #hint { display:none !important; }
 body.kids-mode #touchbar .tbtn#tb-idle,
 body.kids-mode #touchbar .tb-groups { display:none !important; }
 
-@media (max-width:760px) {
-  .kid-buy { width:104px; min-height:84px; }
-  .kid-buy .ic { font-size:22px; }
-  .kid-buy .role { font-size:13px; }
+/* ── Phones and short screens ──────────────────────────────────────────────
+   The shop WRAPS on a wide screen, which is right there and wrong everywhere else:
+   the roster grows from three buttons to nine as things unlock, and on a portrait
+   phone that wrapped into a tall column straight up the middle of the battlefield —
+   the kid could no longer see the thing they were defending.
+   One row that scrolls sideways instead. It is one card tall no matter how many
+   fighters unlock, which is the property that actually matters. */
+@media (max-width:760px), (max-height:560px) {
+  #kid-shop { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden;
+              max-width:100vw; width:100vw; left:0; transform:none;
+              justify-content:flex-start; padding:0 10px 2px; gap:8px;
+              scrollbar-width:none; -webkit-overflow-scrolling:touch;
+              /* room for the charge button on the right, so they never overlap */
+              padding-right:118px;
+              /* the strip itself must not eat taps meant for the map beside it */
+              scroll-padding:10px; }
+  #kid-shop::-webkit-scrollbar { display:none; }
+  .kid-buy { width:88px; min-height:74px; flex:0 0 auto; border-radius:14px;
+             border-width:2px; padding:6px 4px 5px; }
+  .kid-buy .ic   { font-size:20px; }
+  .kid-buy .role { font-size:12px; }
+  .kid-buy .nm   { display:none; }        /* the role and the price are the decision */
+  .kid-buy .cost { font-size:12px; }
+  #kid-queue { bottom:92px; }
   .kid-card { width:150px; min-height:180px; }
   .kid-card .ic { font-size:40px; }
-  #kid-sig { width:92px; height:92px; right:10px; bottom:88px; }
-  #kid-sig .ic { font-size:30px; }
+  #kid-sig { width:82px; height:82px; right:8px; bottom:14px; }
+  #kid-sig .ic { font-size:28px; }
+  #kid-sig .lb { font-size:10px; }
   #kid-btitle { font-size:30px; }
   #kid-bic { font-size:48px; }
+  /* The top strip wraps on a narrow phone and pushed the wave banner over the map. */
+  #kid-top { flex-wrap:wrap; justify-content:center; max-width:96vw; gap:6px; }
 }`;
     document.head.appendChild(css);
 

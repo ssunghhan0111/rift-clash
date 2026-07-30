@@ -116,8 +116,19 @@ RC.Input = (function () {
     return { x: sx / z + g.camera.x, y: sy / z + g.camera.y };
   }
 
+  // ── Screen point from a pointer event ──────────────────────────────────────
+  // The canvas is sized in CSS pixels (`width:100%`) but its BACKING STORE is set from
+  // clientWidth/clientHeight, which are integers. Any fractional layout — and every
+  // moment between a viewport change and the next resize() — leaves the two different,
+  // and then a raw `clientX - rect.left` is wrong by a factor that GROWS with distance
+  // from the top-left corner. On a tall phone that reads exactly as reported: clicks
+  // landing below where you tapped, worst at the bottom of the screen.
+  //
+  // Scaling by backing-store-over-display-box makes it exact no matter what the two are.
   function rectPoint(e, r) {
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    const sx = r.width ? cv.width / r.width : 1;
+    const sy = r.height ? cv.height / r.height : 1;
+    return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
   }
 
   function init(game, canvas, minimap) {
@@ -158,10 +169,10 @@ RC.Input = (function () {
     window.addEventListener('mousemove', e => {
       if (isTouchSession()) return;
       const r = cv.getBoundingClientRect();
-      const x = e.clientX - r.left, y = e.clientY - r.top;
-      state.screen.x = x;
-      state.screen.y = y;
-      state.mouseInside = (x >= 0 && x <= r.width && y >= 0 && y <= r.height);
+      const p = rectPoint(e, r);
+      state.screen.x = p.x;
+      state.screen.y = p.y;
+      state.mouseInside = (p.x >= 0 && p.x <= cv.width && p.y >= 0 && p.y <= cv.height);
     });
     window.addEventListener('mouseout', e => {
       if (!e.relatedTarget && !e.toElement) state.mouseInside = false;   // left the browser window

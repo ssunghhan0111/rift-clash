@@ -358,7 +358,62 @@ head('FROM THE MENU BUTTON');
   ok(dd.getElementById('sec-diff').style.display === 'none', 'no difficulty picker to get stuck on');
   ok(dd.getElementById('sec-map').style.display === 'none', 'and no map picker either');
   ok(dd.getElementById('sec-race').style.display === 'flex', 'faction can still be chosen');
-  ok(!!dd.getElementById('ss-kids-online'), 'there is an Online Co-op button for two players');
+  ok(!!dd.getElementById('ss-kids-online'), 'there is a play-with-a-friend button');
+
+  // ── The buttons say who you are playing with, and against ────────────────
+  // "Start Battle" / "Play Crystal Guard" told a new player nothing about whether they
+  // were about to face a computer or a person.
+  {
+    const txt = id => (dd.getElementById(id).textContent || '').trim();
+    for (const id of ['ss-start', 'ss-kids', 'ss-survival']) {
+      ok(/computer/i.test(txt(id)), id + ' says it is against the computer — "' + txt(id) + '"');
+    }
+    for (const id of ['ss-online', 'ss-kids-online', 'ss-survival-online']) {
+      ok(/friend/i.test(txt(id)), id + ' says it involves a friend — "' + txt(id) + '"');
+    }
+    ok(/2 vs computer/i.test(txt('ss-kids-online')), 'Crystal Guard co-op states it is 2 vs the computer');
+  }
+
+  // ── The explanatory paragraphs are prose, not flex columns ───────────────
+  // They carried .mode-sec (display:flex; flex-direction:column), which turned every
+  // inline <b> into its own flex item — the text rendered one fragment per line.
+  {
+    depths[1].dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));   // show the survival note
+    for (const id of ['ss-survivalhint', 'ss-onlinehint', 'ss-kidshint']) {
+      const e = dd.getElementById(id);
+      ok(!!e && /ss-note/.test(e.className), id + ' uses the prose class');
+      ok(!/mode-sec/.test(e.className), id + ' is no longer a flex column');
+      const disp = w2.getComputedStyle(e).display;
+      ok(disp === 'block' || disp === 'none', id + ' renders as a block, got ' + disp);
+      ok(e.querySelectorAll('b').length > 0, id + ' still has its bold phrases');
+    }
+    depths[0].dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));   // back to Simple
+  }
+
+  // ── Campaign is parked ───────────────────────────────────────────────────
+  {
+    const camp = Array.from(dd.querySelectorAll('#ss-gamemodes .gmcard')).find(c => c.dataset.m === 'campaign');
+    ok(!!camp, 'the Campaign card is still on the page');
+    ok(/\bsoon\b/.test(camp.className), 'it is marked as parked');
+    ok(/COMING SOON/i.test(camp.textContent), 'and says COMING SOON');
+    // Clicking it must not switch the screen to a mode that is not ready.
+    camp.dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
+    ok(dd.getElementById('panel-campaign').style.display === 'none', 'clicking it does not open the campaign panel');
+    ok(dd.getElementById('sec-depth').style.display !== 'none', 'and the screen stays on a playable mode');
+  }
+
+  // ── The Crystal Guard shop is one row on a phone ─────────────────────────
+  // jsdom does not evaluate media queries, so this reads the rule. The roster grows from
+  // three buttons to nine as things unlock, and a wrapping shop turned into a tall column
+  // straight up the middle of a portrait screen — covering the crystal being defended.
+  {
+    const kui = fs.readFileSync(path.join(SRC, 'kidsui.js'), 'utf8');
+    const mq = kui.slice(kui.indexOf('@media (max-width:760px)'));
+    ok(mq.length > 0, 'kidsui has a phone media query');
+    ok(/#kid-shop\s*\{[^}]*flex-wrap:\s*nowrap/.test(mq), 'the phone shop does not wrap');
+    ok(/#kid-shop\s*\{[^}]*overflow-x:\s*auto/.test(mq), 'it scrolls sideways instead');
+    ok(/padding-right:\s*\d+px/.test(mq), 'and leaves room for the charge button');
+  }
 
   const thrown = [];
   w2.onerror = m => thrown.push(String(m));
