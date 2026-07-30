@@ -83,6 +83,14 @@ window.RC = window.RC || {};
         break;
       }
       case 'stop': { ownUnits(game, owner, c.ids).forEach(u => u.stop()); break; }
+      // ── Crystal Guard ──
+      // The mode has no build placement and no train-from-a-selected-building, so its two
+      // player actions need their own commands. Both are authoritative here for the same
+      // reason `train` is: the shard cost, the queue cap and the "was this card actually
+      // offered to you" check all live server-side, so a hand-rolled client cannot buy
+      // what it cannot afford or take a card it was never dealt.
+      case 'kbuy': { if (game.kids && RC.Kids) RC.Kids.buy(game, c.ut, owner); break; }
+      case 'kcard': { if (game.kids && RC.Kids) RC.Kids.choose(game, c.id, owner); break; }
     }
   }
 
@@ -154,7 +162,10 @@ window.RC = window.RC || {};
       ? { w: game.survivalWave || 0, k: game.survivalKills || 0,
           d: game.survivalDiff || 'medium', c: game.crystal ? game.crystal.id : null }
       : null;
-    return { tm: game.time, ov: game.over, res, up, U, B, N, FX, sv };
+    // Crystal Guard — the whole wave director, so a client that never ticks the sim
+    // still has a live wave counter, its own reward cards and its own shop.
+    const kd = (game.kids && RC.Kids && RC.Kids.netState) ? RC.Kids.netState(game) : null;
+    return { tm: game.time, ov: game.over, res, up, U, B, N, FX, sv, kd };
   }
 
   // ── Reconcile a client game to a snapshot (entities are real RC.Unit/Building instances) ──
@@ -235,6 +246,10 @@ window.RC = window.RC || {};
       game.survivalDiff = s.sv.d || game.survivalDiff || 'medium';
       game.crystal = (s.sv.c != null) ? (bmap.get(s.sv.c) || null) : null;
     }
+    if (s.kd && RC.Kids && RC.Kids.applyNetState) {
+      game.kids = true;
+      RC.Kids.applyNetState(game, s.kd);
+    }
 
     // 궁극기 화면 흔들림은 서버가 보내지 않는다 (순수 연출). 스냅샷의 이펙트 중
     // 처음 보는 궁극기 이펙트를 만나면 클라이언트가 스스로 흔든다.
@@ -263,4 +278,12 @@ window.RC = window.RC || {};
   }
 
   RC.Net = { applyCommand, serialize, applySnapshot };
+
+  // Offline default for RC.cmd. net.js — browser only — replaces this with a version that
+  // routes to the server while RC.online. Defining the fallback HERE, in the DOM-free
+  // half, means every module that issues a command can rely on RC.cmd existing: kidsui.js
+  // now sends its buys and card picks through it, and it must not explode in a headless
+  // test or anywhere else net.js was never loaded.
+  // net_core.js is loaded BEFORE net.js (see index.html), so the browser version still wins.
+  if (!RC.cmd) RC.cmd = function (game, cmd) { applyCommand(game, game.playerOwner, cmd); };
 })();

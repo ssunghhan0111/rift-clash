@@ -32,6 +32,7 @@ require('./game.js');
 require('./ai.js');
 require('./daily.js');          // Daily Challenge seed + twist table (shared with the client)
 require('./survival.js');       // online co-op Survival wave director
+require('./kids.js');           // online co-op Crystal Guard wave director
 require('./net_core.js');
 const RC = global.RC;
 RC.CFG.FOG_ENABLED = false;               // server is omniscient; clients compute their own fog
@@ -561,11 +562,20 @@ function onClose(c) {
 // 방 정원 — 대전은 모드 인원수, 생존은 방어자 최대 4명(맵의 base 수)
 const SURVIVAL_CAP = 4;
 const SURVIVAL_SEATS = [1, 3, 4, 5];       // owner 2 is reserved for the wave horde
+// Crystal Guard co-op is a pair. It is the mode a grown-up plays sitting next to a kid,
+// and the map gives each defender their own base ringed around the one crystal; four
+// bases around it leaves no room to fight in. Two also keeps the wave curve honest —
+// the whole appeal is a gentle ramp, and it is tuned for one or two armies, not four.
+const KIDS_CAP = 2;
+const KIDS_SEATS = [1, 3];
 const RESUME_GRACE_MS = 90000;             // how long a dropped seat is held open
 function roomCap(room) {
   if (room.lobby.gameMode === 'survival') return SURVIVAL_CAP;
+  if (room.lobby.gameMode === 'kids') return KIDS_CAP;
   return (RC.MODES[room.lobby.modeId] || {}).count || 4;
 }
+const WAVE_MODES = ['survival', 'kids'];
+function isWaveMode(room) { return WAVE_MODES.indexOf(room.lobby.gameMode) >= 0; }
 
 // Names and room names are rendered in OTHER players' browsers, so they must never
 // carry markup. The client's cleanName already strips this, but a hand-rolled
@@ -590,10 +600,11 @@ function createRoom(host, name, isPublic, gameMode) {
     ownerOf: new Map(), teamOf: {},
     seats: new Map(),                      // owner -> { token, name, race, clientId, goneAt }
     creator: host.id,
-    // gameMode: 'vs' (map + 1v1/2v2) | 'survival' (co-op vs endless waves, difficulty instead of map)
+    // gameMode: 'vs' (map + 1v1/2v2) | 'survival' (co-op vs endless waves, difficulty
+    //           instead of map) | 'kids' (Crystal Guard co-op, no pickers at all)
     lobby: {
       mapId: RC.MAPS[0].id, modeId: '1v1', started: false,
-      gameMode: (gameMode === 'survival' ? 'survival' : 'vs'), diff: 'medium',
+      gameMode: (gameMode === 'survival' || gameMode === 'kids') ? gameMode : 'vs', diff: 'medium',
       // Host switch. Voice is available in every room, but the host can turn it off
       // for everyone — which matters the moment a public room turns unpleasant.
       voice: true,
@@ -612,6 +623,10 @@ function createRoom(host, name, isPublic, gameMode) {
 // Ready would just be an extra click every single match.
 function isReadyToStart(room) {
   if (!room || !room.clients.length) return false;
+  // Crystal Guard is the one mode where a lone host has nothing to gain by starting:
+  // solo Crystal Guard is complete OFFLINE and needs no server, there is no bot to fill
+  // the second seat, and a one-player co-op run is just the offline mode with latency.
+  if (room.lobby.gameMode === 'kids' && room.clients.length < 2) return false;
   // A host ALONE in the room may start: startMatch() fills every empty seat with a bot
   // (seat.ai = !human), so a solo online game is a real, supported match. Requiring a
   // second human here was wrong — with nobody else online it left the only available
@@ -841,8 +856,8 @@ function onMsg(c, m) {
       // A kind is only sent from the browser screen ("invite them to a 2v2"). An
       // invite sent from inside a lobby carries none, because the room already has
       // a game type and rewriting it out from under the host would be a surprise.
-      const hasKind = (m.kind === 'vs' || m.kind === 'survival');
-      const gm = (m.kind === 'survival') ? 'survival' : 'vs';
+      const hasKind = (m.kind === 'vs' || m.kind === 'survival' || m.kind === 'kids');
+      const gm = (m.kind === 'survival' || m.kind === 'kids') ? m.kind : 'vs';
       const modeId = RC.MODES[m.modeId] ? m.modeId : '1v1';
       let room = c.room;
       if (!room) {
@@ -960,7 +975,8 @@ function onMsg(c, m) {
       send(c, {
         t: 'resumed',
         roomId: room.id, token: foundSeat.token,
-        survival: room.lobby.gameMode === 'survival',
+        survival: isWaveMode(room),
+        kids: room.lobby.gameMode === 'kids',
         diff: room.lobby.diff, mapId: room.lobby.mapId, modeId: room.lobby.modeId,
         owner: foundOwner, team: room.teamOf[foundOwner], rosters,
       });
@@ -989,7 +1005,7 @@ function onMsg(c, m) {
     case 'diff': if (isHost(c) && ['easy', 'medium', 'insane'].includes(m.diff)) { c.room.lobby.diff = m.diff; clearReady(c.room); pushLobby(c.room); broadcastRoomList(); } break;
     case 'gamemode': {
       if (!isHost(c) || c.room.lobby.started) break;
-      const gm = (m.gameMode === 'survival') ? 'survival' : 'vs';
+      const gm = (m.gameMode === 'survival' || m.gameMode === 'kids') ? m.gameMode : 'vs';
       c.room.lobby.gameMode = gm;
       clearReady(c.room);
       // switching to a tighter cap could leave the room over-full — drop the newest joiners
@@ -1037,6 +1053,7 @@ function broadcastSnapshot(room, g) {
 
 function startMatch(room) {
   if (room.lobby.gameMode === 'survival') return startSurvivalMatch(room);
+  if (room.lobby.gameMode === 'kids') return startKidsMatch(room);
   const mode = RC.MODES[room.lobby.modeId];
   const seats = mode.players.map(p => ({ owner: p.owner, team: p.team }));
   const humans = room.clients.slice(0, seats.length);      // join order fills seats
@@ -1155,6 +1172,73 @@ function startSurvivalMatch(room) {
         wave: g.survivalWave || 0, kills: g.survivalKills || 0, diff: g.survivalDiff,
         waveTimes: (g.waveTimes || []).slice(0, 500),
         token: issueRunTokenBackdated(g),
+      });
+      room.seats = new Map();
+      clearInterval(room.loop); room.loop = null;
+    }
+  }, 1000 / 30);
+}
+
+// ── Crystal Guard co-op (per room) ──
+// The same shape as startSurvivalMatch — two defenders on team 1, the horde on owner 2,
+// no "win", the run ends when the crystal falls — with three deliberate differences:
+//
+//   · No difficulty. The mode has one setting and it is "gentle"; a difficulty picker is
+//     one more screen between a young player and the game.
+//   · No filler bot. Solo Crystal Guard is a complete mode offline, so a host waiting in
+//     a co-op room is waiting for a person, and an AI standing in would make the room
+//     look full to the friend who was about to join.
+//   · No run token and no leaderboard write. Crystal Guard scores never reach the world
+//     board (see the end screen in ui.js), so there is nothing here to sign.
+function startKidsMatch(room) {
+  const humans = room.clients.slice(0, KIDS_CAP);
+  const seats = humans.map((h, i) => ({ owner: KIDS_SEATS[i], race: h.race || 'forge', ai: false }));
+
+  room.ownerOf = new Map(); room.teamOf = {}; room.seats = new Map();
+  humans.forEach((h, i) => {
+    room.ownerOf.set(h.socket, seats[i].owner);
+    room.seats.set(seats[i].owner, { token: seatToken(), name: h.name, race: seats[i].race, clientId: h.id, goneAt: null });
+  });
+  seats.forEach(s => { room.teamOf[s.owner] = 1; });
+  room.teamOf[2] = 2;
+
+  room.game = new RC.Game();
+  room.game.heroesEnabled = true;
+  room.game.setupKids({ players: seats });
+  room.lobby.started = true;
+  room.cmdQueue = []; room.tickN = 0;
+
+  const rosters = seats.map(s => ({ owner: s.owner, team: 1, race: s.race, ai: false }));
+  room.clients.forEach(cl => {
+    const owner = room.ownerOf.get(cl.socket);
+    const seat = owner != null ? room.seats.get(owner) : null;
+    send(cl, {
+      t: 'start', survival: true, kids: true, diff: 'kids', roomId: room.id,
+      resume: seat ? seat.token : null,
+      owner, team: 1, rosters,
+    });
+  });
+  broadcastRoomList();
+  broadcastPresence();
+
+  const DT = 1 / 30;
+  room.loop = setInterval(() => {
+    const g = room.game;
+    RC.CFG.WORLD_W = g.world.w; RC.CFG.WORLD_H = g.world.h;
+    g.over = null;                                            // the server decides when the run ends
+    // The solo card screen pauses the world. Online it must not: the wave director sets
+    // g.paused only when it is NOT a co-op run, but a stray pause from anywhere else
+    // would silently stop the room, so the authoritative loop refuses to be paused.
+    g.paused = false;
+    const q = room.cmdQueue; room.cmdQueue = [];
+    for (const item of q) RC.Net.applyCommand(g, item.owner, item.cmd);
+    g.update(DT);
+    room.tickN++;
+    if (room.tickN % 2 === 0) broadcastSnapshot(room, g);
+    if (!g.crystal || g.crystal.dead) {
+      roomBroadcast(room, {
+        t: 'over', survival: true, kids: true, team: null,
+        wave: g.survivalWave || 0, kills: g.survivalKills || 0, diff: 'kids',
       });
       room.seats = new Map();
       clearInterval(room.loop); room.loop = null;

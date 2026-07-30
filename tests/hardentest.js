@@ -398,6 +398,10 @@ async function main() {
     guest.send({ t: 'join', roomId: joined.roomId });
     await guest.wait('joined');
 
+    // Guests arm the start themselves now (isReadyToStart on the server); without this the
+    // host only gets startDenied and this whole section waits for a match that never begins.
+    guest.send({ t: 'ready', ready: true });
+    await sleep(150);
     host.send({ t: 'start' });
     const gStart = await guest.wait('start');
     ok(!!gStart.resume, 'the match start hands each player a resume token', JSON.stringify(gStart).slice(0, 120));

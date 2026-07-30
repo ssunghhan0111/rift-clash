@@ -141,6 +141,12 @@ const statusOf = (list, id) => (list.find(p => p.id === id) || {}).status;
   await D.wait('welcome');
   D.send({ t: 'setName', name: 'Watcher' });
   await sleep(120);
+  // Guests have to arm the start themselves (see isReadyToStart on the server), and
+  // switching the room to survival cleared any Ready they had set before. Without this
+  // the host just gets startDenied and everyone stays in the lobby.
+  B.send({ t: 'ready', ready: true });
+  C.send({ t: 'ready', ready: true });
+  await sleep(150);
   A.send({ t: 'start' });
   await sleep(600);
   const pres = D.last('presence');

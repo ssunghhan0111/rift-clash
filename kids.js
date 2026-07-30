@@ -45,7 +45,62 @@ RC.Kids = (function () {
     QUEUE_MAX: 6,
     BOSS_HP: 5,             // Big Guy health multiplier
     CELEB: 2.6,             // seconds the wave-clear celebration holds the screen
+    PICK: 15,               // co-op only: seconds to pick a reward before one is picked for you
   };
+
+  // ── Attack lanes ──────────────────────────────────────────────────────────
+  // Which wave each lane on the map opens on. One direction at the start, because a
+  // young player has to learn "they come from over there, I stand here" before anything
+  // else. By wave 14 the crystal is surrounded and holding a single side stops being a
+  // strategy. Every opening is announced: an unwatched flank is only unfair if nobody
+  // told you it existed.
+  //
+  // The gaps are wide (3, then 5, then 5 waves) because a wider fight is a much harder
+  // fight: measured against the old single-lane mode, a passive player who buys constantly
+  // but never manoeuvres dropped from ~14 waves cleared to ~9 on the first schedule tried,
+  // [1,3,6,10]. Stretching it puts the whole early game back where it was and leaves the
+  // 360° squeeze for the deep run, where a kid has already learned to move their army.
+  //
+  // Survival is untouched and still uses the map's single western enemySpawn — a lane
+  // you can wall off with turrets is the point of that mode.
+  const LANE_AT = [1, 4, 9, 14];
+  function laneCount(w) {
+    let n = 1;
+    for (let i = 0; i < LANE_AT.length; i++) if (w >= LANE_AT[i]) n = i + 1;
+    return n;
+  }
+  function lanesOf(g) {
+    const m = g.survivalMap || {};
+    if (m.guardLanes && m.guardLanes.length) return m.guardLanes;
+    return [g.enemySpawn || { id: 'west', x: 0, y: 0 }];     // a map with no lanes keeps one approach
+  }
+  function openLanes(g, w) {
+    const all = lanesOf(g);
+    return all.slice(0, Math.max(1, Math.min(laneCount(w), all.length)));
+  }
+  // Screen words, not compass words. The camera never rotates, so "look left" is
+  // something a six-year-old can act on immediately and "look west" is not.
+  const LANE_WORDS = { west: 'left', east: 'right', north: 'top', south: 'bottom' };
+  function laneName(lane) { return (lane && (LANE_WORDS[lane.id] || lane.id)) || 'other side'; }
+
+  // A spawn point on `lane`, spread ACROSS the approach rather than along it, so a
+  // wave walks in line abreast instead of trickling out single file. The spread runs
+  // perpendicular to the lane->crystal vector, which is what lets one helper serve a
+  // lane on any side of the map instead of needing per-side special cases.
+  function laneSpawn(g, lane) {
+    const c = g.crystal || lane;
+    let dx = c.x - lane.x, dy = c.y - lane.y;
+    const d = Math.hypot(dx, dy) || 1;
+    dx /= d; dy /= d;
+    const along = Math.random() * 120 - 60;
+    const across = Math.random() * 440 - 220;
+    const M = 120;                                           // stay clear of the world edge
+    const W = (g.world && g.world.w) || 3400, H = (g.world && g.world.h) || 1600;
+    return {
+      x: Math.max(M, Math.min(W - M, lane.x + dx * along - dy * across)),
+      y: Math.max(M, Math.min(H - M, lane.y + dy * along + dx * across)),
+    };
+  }
 
   // ── Roster ────────────────────────────────────────────────────────────────
   // Three starters per faction, then a fixed unlock ladder. The starters are
@@ -87,6 +142,38 @@ RC.Kids = (function () {
 
   function kitOf(race) { return KITS[race] || KITS.forge; }
 
+  // ── Defenders ─────────────────────────────────────────────────────────────
+  // One offline, two in online co-op. Everything a defender owns PRIVATELY — income
+  // rate, which fighters they have unlocked, which cards they have taken, and which
+  // three they are currently being offered — hangs off per(g, owner). Only the wave
+  // counter, the horde and the crystal are shared.
+  //
+  // Two kids sharing one reward pick was the alternative, and it makes the mode worse
+  // for both: the slower one never gets to choose, and the whole appeal is being handed
+  // a decision of your own after every wave.
+  function defenders(g) {
+    if (g.players && g.players.length) {
+      const out = g.players.filter(p => p.owner !== ENEMY && !p.waveEnemy).map(p => p.owner);
+      if (out.length) return out;
+    }
+    return [g.playerOwner];
+  }
+  function per(g, owner) {
+    const s = st(g);
+    if (owner == null) owner = g.playerOwner;
+    s.pl = s.pl || {};
+    return s.pl[owner] || (s.pl[owner] = {
+      incomeMul: 1, unlocked: [], taken: {}, offer: null, freshUnlock: null,
+      picked: false, bought: 0,
+    });
+  }
+  // The building a given defender buys from. g.kidsBase stays pointed at the local
+  // player's so existing UI and saves keep working untouched.
+  function baseOf(g, owner) {
+    if (owner == null) owner = g.playerOwner;
+    return (g.kidsBases && g.kidsBases[owner]) || (owner === g.playerOwner ? g.kidsBase : null);
+  }
+
   // Kid prices. Derived from the real card rather than hand-typed, so a balance
   // pass on config.js carries into Kids mode instead of silently drifting.
   function costOf(type) {
@@ -102,21 +189,22 @@ RC.Kids = (function () {
 
   // Everything the player is allowed to buy right now — the three starters plus
   // whatever the wave counter has opened up.
-  function roster(g) {
-    const race = g.raceOf ? g.raceOf(g.playerOwner) : 'forge';
+  function roster(g, owner) {
+    if (owner == null) owner = g.playerOwner;
+    const race = g.raceOf ? g.raceOf(owner) : 'forge';
     const kit = kitOf(race);
     const out = kit.starters.map(s => ({
       t: s.t, role: s.role, ic: s.ic, blurb: s.blurb,
       name: (RC.UNITS[s.t] || {}).name || s.t,
       cost: costOf(s.t), time: timeOf(s.t), isNew: false,
     }));
-    const s = st(g);
-    for (const t of (s.unlocked || [])) {
+    const p = per(g, owner);
+    for (const t of (p.unlocked || [])) {
       const d = RC.UNITS[t];
       if (!d) continue;
       out.push({
         t, role: d.role || 'Fighter', ic: d.flying ? '✈️' : '⭐', blurb: d.desc || '',
-        name: d.name, cost: costOf(t), time: timeOf(t), isNew: s.freshUnlock === t,
+        name: d.name, cost: costOf(t), time: timeOf(t), isNew: p.freshUnlock === t,
       });
     }
     return out;
@@ -144,6 +232,12 @@ RC.Kids = (function () {
   // Wave size — near-linear and capped low. Wave 1 is 2 enemies, wave 10 is 10,
   // wave 20 is 18. Survival's medium curve is at 34 by wave 20; this is not that
   // game and is not trying to be.
+  // Left alone on purpose. Shrinking the wave as lanes open was the obvious way to pay
+  // for the harder 360° fight, and it measurably does not work: income is per-second, so
+  // smaller waves end sooner, the player earns less between them, and the weaker army
+  // cancels out the smaller horde almost exactly (~10 waves either way). What the extra
+  // directions actually cost is COVERAGE, so that is what gets compensated — see the
+  // rally point in game.js and the lane schedule above.
   function waveSize(w) {
     return Math.max(2, Math.min(30, Math.round(2 + 0.85 * Math.max(0, w - 1))));
   }
@@ -225,40 +319,46 @@ RC.Kids = (function () {
   // and one visible effect. `max` caps how many times a card can ever be taken so
   // the pool keeps refreshing instead of collapsing onto one best answer — a kid
   // taking the same card nine times in a row is the mode failing, not the kid.
+  //
+  // `apply` takes the OWNER who picked it. Most cards are private — upgrades and income
+  // land on that defender's own army — while `shared: true` marks the ones that act on
+  // the crystal both players are standing on. Shared cards are still picked privately;
+  // what shared changes is who benefits, and the card text says so.
   const CARDS = [
     { id: 'atk',    ic: '⚔️', name: 'Sharper Shots',  desc: 'All your fighters hit harder.',      max: 3,
-      apply: (g) => g.applyUpgrade(g.playerOwner, 'atk') },
+      apply: (g, o) => g.applyUpgrade(o, 'atk') },
     { id: 'arm',    ic: '🛡️', name: 'Thicker Armour', desc: 'All your fighters take less damage.', max: 3,
-      apply: (g) => g.applyUpgrade(g.playerOwner, 'arm') },
+      apply: (g, o) => g.applyUpgrade(o, 'arm') },
     { id: 'tough',  ic: '❤️', name: 'Bigger Hearts',  desc: 'All your fighters get more health.',  max: 3,
-      apply: (g) => g.applyUpgrade(g.playerOwner, 'tough') },
+      apply: (g, o) => g.applyUpgrade(o, 'tough') },
     { id: 'spd',    ic: '⚡', name: 'Speed Boost',    desc: 'All your fighters move and shoot faster.', max: 2,
-      apply: (g) => g.applyUpgrade(g.playerOwner, 'spd') },
+      apply: (g, o) => g.applyUpgrade(o, 'spd') },
     { id: 'crit',   ic: '🎯', name: 'Lucky Hits',     desc: 'Sometimes your shots do double damage!', max: 3,
-      apply: (g) => g.applyUpgrade(g.playerOwner, 'crit') },
+      apply: (g, o) => g.applyUpgrade(o, 'crit') },
     { id: 'frost',  ic: '❄️', name: 'Frosty Shots',   desc: 'Your shots freeze enemies slow.',     max: 2,
-      apply: (g) => g.applyUpgrade(g.playerOwner, 'frost') },
+      apply: (g, o) => g.applyUpgrade(o, 'frost') },
     { id: 'income', ic: '💎', name: 'Shard Rush',     desc: 'Shards come in 25% faster, forever.', max: 5,
-      apply: (g) => { const s = st(g); s.incomeMul = (s.incomeMul || 1) + 0.25; } },
-    { id: 'heal',   ic: '💖', name: 'Crystal Mend',   desc: 'Repair the crystal right now.',       max: 99,
+      apply: (g, o) => { const p = per(g, o); p.incomeMul = (p.incomeMul || 1) + 0.25; } },
+    { id: 'heal',   ic: '💖', name: 'Crystal Mend',   desc: 'Repair the crystal right now.',       max: 99, shared: true,
       apply: (g) => { const c = g.crystal; if (c) c.hp = Math.min(c.maxHp, c.hp + c.maxHp * 0.35); } },
-    { id: 'shell',  ic: '✨', name: 'Crystal Shell',  desc: 'The crystal gets more maximum health.', max: 4,
+    { id: 'shell',  ic: '✨', name: 'Crystal Shell',  desc: 'The crystal gets more maximum health.', max: 4, shared: true,
       apply: (g) => { const c = g.crystal; if (!c) return; const add = Math.round(CFG.CRYSTAL_HP * 0.15); c.maxHp += add; c.hp += add; } },
     { id: 'squad',  ic: '🎁', name: 'Free Squad',     desc: 'Three free fighters, right away!',    max: 99,
-      apply: (g) => freeSquad(g, 3) },
+      apply: (g, o) => freeSquad(g, 3, o) },
     { id: 'bank',   ic: '🏦', name: 'Shard Chest',    desc: 'A big pile of shards, right now.',    max: 99,
-      apply: (g) => { if (g.res[g.playerOwner]) g.res[g.playerOwner].shard += 350; } },
+      apply: (g, o) => { if (g.res[o]) g.res[o].shard += 350; } },
   ];
 
-  // How many times a card has already been taken this run.
-  function taken(g, id) { const s = st(g); return (s.taken && s.taken[id]) || 0; }
+  // How many times a card has already been taken this run BY THIS DEFENDER. Per player,
+  // so one kid maxing out Sharper Shots does not empty the other kid's card pool.
+  function taken(g, id, owner) { const p = per(g, owner); return (p.taken && p.taken[id]) || 0; }
 
   // Three distinct cards the player can still benefit from. `heal` is filtered out
   // at full health — offering a repair to an undamaged crystal is a wasted choice,
   // and a wasted choice teaches a kid that the cards do not matter.
-  function offer(g) {
+  function offer(g, owner) {
     const pool = CARDS.filter(c => {
-      if (taken(g, c.id) >= c.max) return false;
+      if (taken(g, c.id, owner) >= c.max) return false;
       if (c.id === 'heal' && g.crystal && g.crystal.hp >= g.crystal.maxHp * 0.95) return false;
       return true;
     });
@@ -267,70 +367,104 @@ RC.Kids = (function () {
     while (out.length < 3 && bag.length) {
       out.push(bag.splice(Math.floor(Math.random() * bag.length), 1)[0]);
     }
-    return out.map(c => ({ id: c.id, ic: c.ic, name: c.name, desc: c.desc, tier: taken(g, c.id) + 1, max: c.max }));
+    return out.map(c => ({ id: c.id, ic: c.ic, name: c.name, desc: c.desc,
+                           tier: taken(g, c.id, owner) + 1, max: c.max, shared: !!c.shared }));
   }
 
-  function choose(g, id) {
+  // One defender takes their card. Everyone picks from their OWN three and nobody waits
+  // on anybody; the wave only resumes once every defender has taken something (or the
+  // co-op timer picked for them).
+  function choose(g, id, owner) {
     const s = st(g);
     if (s.phase !== 'reward') return false;
+    if (owner == null) owner = g.playerOwner;
+    const p = per(g, owner);
+    if (p.picked) return false;                                      // one card per wave, per player
     const card = CARDS.find(c => c.id === id);
     if (!card) return false;
-    if (!s.offer || !s.offer.some(o => o.id === id)) return false;   // only from what was offered
-    card.apply(g);
-    s.taken = s.taken || {};
-    s.taken[id] = (s.taken[id] || 0) + 1;
-    s.offer = null;
+    if (!p.offer || !p.offer.some(o => o.id === id)) return false;    // only from what was offered
+    card.apply(g, owner);
+    p.taken = p.taken || {};
+    p.taken[id] = (p.taken[id] || 0) + 1;
+    p.offer = null;
+    p.picked = true;
+    if (owner === g.playerOwner) {
+      banner(g, '🎁', card.name + '!', card.desc, '#ffd24a', 2.0);
+      if (RC.Audio) RC.Audio.play('ready');
+    }
+    finishReward(g);
+    return true;
+  }
+
+  // Nobody chose in time. Taking the first offered card rather than nothing at all is
+  // deliberate: a co-op run must not stall on an AFK player, and an empty-handed wave
+  // reads to a kid as the game forgetting to give them their present.
+  function autoPick(g, owner) {
+    const p = per(g, owner);
+    if (p.picked || !p.offer || !p.offer.length) { p.picked = true; return; }
+    choose(g, p.offer[0].id, owner);
+  }
+
+  // Advance out of the reward phase once every defender holds a card.
+  function finishReward(g) {
+    const s = st(g);
+    if (s.phase !== 'reward') return;
+    if (!defenders(g).every(o => per(g, o).picked)) return;
     s.phase = 'gap';
     s.timer = CFG.GAP;
     if (g.paused && s.autoPaused) { g.paused = false; s.autoPaused = false; }
-    banner(g, '🎁', card.name + '!', card.desc, '#ffd24a', 2.0);
-    if (RC.Audio) RC.Audio.play('ready');
     // Tell the kid what is coming BEFORE it arrives. A tip that appears at the same
     // moment as the wave is a caption, not a warning — no time to act on it.
     const nf = flavourFor(s.wave + 1);
     s.preview = nf.id === 'normal' ? null : { ic: nf.ic, name: nf.name, tip: nf.tip, col: nf.col };
-    return true;
   }
 
   // Free Squad — one of each currently affordable-to-exist type, cycled, dropped
   // straight onto the field rather than into the build queue. Instant gratification
   // is the entire appeal of the card.
-  function freeSquad(g, n) {
-    const list = roster(g);
+  function freeSquad(g, n, owner) {
+    if (owner == null) owner = g.playerOwner;
+    const list = roster(g, owner);
     if (!list.length) return;
-    const home = g.kidsBase || g.crystal;
+    const home = baseOf(g, owner) || g.crystal;
     if (!home) return;
     for (let i = 0; i < n; i++) {
       const pick = list[i % list.length].t;
-      const u = new RC.Unit(pick, home.x + (Math.random() * 120 - 60), home.y + home.h / 2 + 40 + Math.random() * 40, g.playerOwner);
+      const u = new RC.Unit(pick, home.x + (Math.random() * 120 - 60), home.y + home.h / 2 + 40 + Math.random() * 40, owner);
       if (g.initUnit) g.initUnit(u);
       u.free = true;                     // does not count against the population cap
       g.units.push(u);
     }
-    g.fx.push({ abil: 'warp', ax: home.x, ay: home.y, t: 0.5, radius: 90, owner: g.playerOwner });
+    g.fx.push({ abil: 'warp', ax: home.x, ay: home.y, t: 0.5, radius: 90, owner });
   }
 
   // ── Buying ────────────────────────────────────────────────────────────────
   // Deliberately NOT g.train(): kid prices and kid build times live here, and the
   // production building is the base the kid is already looking at.
-  function buy(g, type) {
+  function buy(g, type, owner) {
+    if (owner == null) owner = g.playerOwner;
     const s = st(g);
-    const allowed = roster(g).some(r => r.t === type);
+    // Only ever complain to the player who pressed the button. Online the other
+    // defender's failed purchase would otherwise pop a notice on this screen.
+    const mine = owner === g.playerOwner;
+    const say = (m) => { if (mine) g.notify(m); };
+    const allowed = roster(g, owner).some(r => r.t === type);
     if (!allowed) return false;
-    const b = g.kidsBase;
+    const b = baseOf(g, owner);
     if (!b || b.dead || !b.done) return false;
-    if (b.queue.length >= CFG.QUEUE_MAX) { g.notify('Too many on the way — wait a moment'); return false; }
+    if (b.queue.length >= CFG.QUEUE_MAX) { say('Too many on the way — wait a moment'); return false; }
     const cost = costOf(type);
-    const me = g.playerOwner;
-    if (!g.res[me] || g.res[me].shard < cost) { g.notify('Not enough shards yet'); return false; }
-    const sup = g.supply(me);
+    if (!g.res[owner] || g.res[owner].shard < cost) { say('Not enough shards yet'); return false; }
+    const sup = g.supply(owner);
     const d = RC.UNITS[type];
-    if (sup.used + d.supply > sup.max) { g.notify('Your army is full!'); return false; }
-    g.res[me].shard -= cost;
+    if (sup.used + d.supply > sup.max) { say('Your army is full!'); return false; }
+    g.res[owner].shard -= cost;
     const t = timeOf(type);
     b.queue.push({ type, timeLeft: t, total: t });
-    if (RC.Audio) RC.Audio.play('build');
+    if (RC.Audio && mine) RC.Audio.play('build');
     s.bought = (s.bought || 0) + 1;
+    const p = per(g, owner);
+    p.bought = (p.bought || 0) + 1;
     return true;
   }
 
@@ -341,9 +475,13 @@ RC.Kids = (function () {
     if (!g._kd) {
       g._kd = {
         wave: 0, phase: 'prep', timer: CFG.PREP, queue: [], spawnT: 0,
-        unlocked: [], freshUnlock: null, taken: {}, offer: null, preview: null,
-        incomeMul: 1, celebT: 0, banner: null, bought: 0, best: 0, autoPaused: false,
+        preview: null, celebT: 0, banner: null, bought: 0, best: 0, autoPaused: false,
+        lanes: 1, pl: {},
+        // Two or more humans defending. Set here from the roster rather than read off
+        // RC.online, so a headless test and the server agree with the browser.
+        coop: false,
       };
+      g._kd.coop = defenders(g).length > 1;
     }
     return g._kd;
   }
@@ -370,21 +508,46 @@ RC.Kids = (function () {
     s.freshUnlock = null;
     s.preview = null;
 
-    // A new unit type, if this wave is on the ladder.
+    // A new unit type, if this wave is on the ladder. Each defender unlocks from their
+    // OWN faction kit — in co-op the two players may not be the same race, and handing
+    // one of them the other's fighter is both wrong and unbuildable.
     const slot = UNLOCK_WAVES.indexOf(s.wave);
+    let myUnlock = null;
     if (slot >= 0) {
-      const race = g.raceOf ? g.raceOf(g.playerOwner) : 'forge';
-      const t = kitOf(race).unlocks[slot];
-      if (t && RC.UNITS[t] && s.unlocked.indexOf(t) < 0) {
-        s.unlocked.push(t);
-        s.freshUnlock = t;
-        banner(g, '🔓', 'NEW FIGHTER!', RC.UNITS[t].name + ' unlocked — check your buttons', '#5ddc7a', 3.2);
-        if (RC.Audio) RC.Audio.play('levelup');
+      for (const o of defenders(g)) {
+        const p = per(g, o);
+        p.freshUnlock = null;
+        const race = g.raceOf ? g.raceOf(o) : 'forge';
+        const t = kitOf(race).unlocks[slot];
+        if (t && RC.UNITS[t] && p.unlocked.indexOf(t) < 0) {
+          p.unlocked.push(t);
+          p.freshUnlock = t;
+          if (o === g.playerOwner) myUnlock = t;
+        }
       }
+    } else {
+      for (const o of defenders(g)) per(g, o).freshUnlock = null;
+    }
+    if (myUnlock) {
+      banner(g, '🔓', 'NEW FIGHTER!', RC.UNITS[myUnlock].name + ' unlocked — check your buttons', '#5ddc7a', 3.2);
+      if (RC.Audio) RC.Audio.play('levelup');
+    }
+
+    // A lane opening outranks the wave name in the banner queue: being told the shape
+    // of the fight has changed matters more than being told what it is called.
+    const lanes = openLanes(g, s.wave);
+    const opened = lanes.length > (s.lanes || 1) ? lanes[lanes.length - 1] : null;
+    s.lanes = lanes.length;
+    if (opened) {
+      banner(g, '🧭', 'NEW DIRECTION!', 'They are coming from the ' + laneName(opened) + ' too — turn around!', '#ff9f43', 3.4);
+      if (RC.Audio) RC.Audio.play('alarm');
+      // An arrow the player can follow, not just a line of text. A flank that opens
+      // off-screen is the one thing in this mode that can lose a run without warning.
+      if (g.markAlert) g.markAlert(opened.x, opened.y, '🧭 They are coming from the ' + laneName(opened) + ' now!');
     }
 
     const f = flavourFor(s.wave);
-    if (!s.freshUnlock) banner(g, f.ic, waveLabel(s.wave), f.tip || 'Here they come!', f.col, 2.4);
+    if (!myUnlock && !opened) banner(g, f.ic, waveLabel(s.wave), f.tip || 'Here they come!', f.col, 2.4);
     g.notify(f.ic + ' ' + waveLabel(s.wave));
     if (RC.Audio) RC.Audio.play('wave');
   }
@@ -393,8 +556,13 @@ RC.Kids = (function () {
     const s = st(g);
     const type = s.queue.shift();
     const f = flavourFor(s.wave);
-    const o = g.enemySpawn;
-    const u = new RC.Unit(type, o.x + (Math.random() * 120 - 60), o.y + (Math.random() * 460 - 230), ENEMY);
+    // Round-robin across the open lanes rather than picking at random, so a wave is
+    // always split evenly. Randomising it means a four-lane wave regularly arrives
+    // almost entirely down one side, which reads as the lanes not working.
+    const lanes = openLanes(g, s.wave);
+    const lane = lanes[(s.spawnN = (s.spawnN || 0) + 1) % lanes.length];
+    const at = laneSpawn(g, lane);
+    const u = new RC.Unit(type, at.x, at.y, ENEMY);
 
     const mul = hpMul(s.wave) * (f.hpMul || 1);
     u.baseMaxHp = u.def.hp * mul;
@@ -444,8 +612,10 @@ RC.Kids = (function () {
     const c = g.crystal;
     if (!c) return;
     g.fx.push({ party: 1, ax: c.x, ay: c.y - 40, t: 2.2, life: 2.2, n: 46 });
-    const b = g.kidsBase;
-    if (b) g.fx.push({ party: 1, ax: b.x, ay: b.y - 30, t: 1.8, life: 1.8, n: 26 });
+    for (const o of defenders(g)) {
+      const b = baseOf(g, o);
+      if (b) g.fx.push({ party: 1, ax: b.x, ay: b.y - 30, t: 1.8, life: 1.8, n: 26 });
+    }
   }
 
   // Keep the horde walking at the crystal.
@@ -463,8 +633,11 @@ RC.Kids = (function () {
     if (g.over) return;
 
     // Automatic income. The single biggest thing that makes this mode playable by
-    // a kid: there is no economy to forget about.
-    if (g.res[g.playerOwner]) g.res[g.playerOwner].shard += CFG.INCOME * (s.incomeMul || 1) * dt;
+    // a kid: there is no economy to forget about. Each defender earns on their own
+    // Shard Rush multiplier, so one player's card never funds the other.
+    for (const o of defenders(g)) {
+      if (g.res[o]) g.res[o].shard += CFG.INCOME * (per(g, o).incomeMul || 1) * dt;
+    }
 
     if (s.banner) { s.banner.t -= dt; if (s.banner.t <= 0) s.banner = null; }
     if (!g.crystal || g.crystal.dead) return;
@@ -488,16 +661,37 @@ RC.Kids = (function () {
       case 'celebrate':
         s.celebT -= dt;
         if (s.celebT <= 0) {
-          s.offer = offer(g);
-          if (!s.offer.length) { s.phase = 'gap'; s.timer = CFG.GAP; }   // pool exhausted — skip straight on
-          else { s.phase = 'reward'; g.paused = true; s.autoPaused = true; }
+          // Deal each defender their own three cards.
+          let any = false;
+          for (const o of defenders(g)) {
+            const p = per(g, o);
+            p.offer = offer(g, o);
+            p.picked = !p.offer.length;                                  // pool exhausted for them
+            if (!p.picked) any = true;
+          }
+          if (!any) { s.phase = 'gap'; s.timer = CFG.GAP; }
+          else {
+            s.phase = 'reward';
+            s.timer = CFG.PICK;
+            // Solo keeps the modal pause — a kid should be able to read three cards
+            // with the world stopped. Co-op cannot: the server never stops ticking and
+            // one player's card screen must not freeze the other player's fight. There
+            // the pick runs on a timer instead.
+            if (!s.coop) { g.paused = true; s.autoPaused = true; }
+          }
         }
         break;
 
       case 'reward':
-        // Held here until choose() is called. If something else unpaused the game
-        // (the P key, the pause button) put it back — the card screen is modal.
-        if (!g.paused) { g.paused = true; s.autoPaused = true; }
+        if (s.coop) {
+          s.timer -= dt;
+          if (s.timer <= 0) for (const o of defenders(g)) autoPick(g, o);
+        } else if (!g.paused) {
+          // Something else unpaused the game (the P key, the pause button). The solo
+          // card screen is modal, so put it back.
+          g.paused = true; s.autoPaused = true;
+        }
+        finishReward(g);
         break;
 
       case 'gap':
@@ -510,10 +704,15 @@ RC.Kids = (function () {
   }
 
   // What the screen needs, in one object, so kidsui.js never reaches into state.
-  function hud(g) {
+  function hud(g, owner) {
     const s = st(g);
+    if (owner == null) owner = g.playerOwner;
+    const p = per(g, owner);
+    const b = baseOf(g, owner);
     let next = 0;
     if (s.phase === 'prep' || s.phase === 'gap') next = Math.max(0, s.timer);
+    // In co-op the card screen counts down, and the other player may still be choosing.
+    const others = defenders(g).filter(o => o !== owner);
     return {
       wave: s.wave,
       phase: s.phase,
@@ -521,19 +720,66 @@ RC.Kids = (function () {
       nextIn: next,
       left: s.phase === 'spawning' ? s.queue.length + countEnemies(g) : countEnemies(g),
       preview: (s.phase === 'gap' || s.phase === 'reward' || s.phase === 'celebrate') ? s.preview : null,
-      offer: s.offer,
+      offer: p.picked ? null : p.offer,
+      pickIn: (s.phase === 'reward' && s.coop) ? Math.max(0, s.timer) : 0,
+      waitingFor: (s.phase === 'reward' && s.coop) ? others.filter(o => !per(g, o).picked).length : 0,
       banner: s.banner,
-      roster: roster(g),
-      shard: Math.floor((g.res[g.playerOwner] || {}).shard || 0),
-      queue: (g.kidsBase && g.kidsBase.queue) || [],
+      roster: roster(g, owner),
+      shard: Math.floor((g.res[owner] || {}).shard || 0),
+      queue: (b && b.queue) || [],
+      lanes: s.lanes || 1, laneMax: lanesOf(g).length,
+      coop: !!s.coop,
       crystal: g.crystal ? { hp: Math.max(0, Math.round(g.crystal.hp)), max: Math.round(g.crystal.maxHp) } : null,
     };
   }
 
+  // ── Netcode ───────────────────────────────────────────────────────────────
+  // An online client never runs game.update(), so its own copy of the run state would
+  // sit frozen at wave 0 with no cards in it. The server ships the whole director state
+  // in each snapshot and the client writes it straight back into st(g), which is why
+  // hud() and the entire screen work online without a second code path.
+  //
+  // Every defender's slice travels to everyone, exactly like `res` and `upgrades` already
+  // do. It is a few hundred bytes, and the alternative — a per-client tailored snapshot —
+  // would mean the server could no longer broadcast one buffer to the whole room.
+  function netState(g) {
+    const s = st(g);
+    const pl = {};
+    for (const o of defenders(g)) {
+      const p = per(g, o);
+      pl[o] = { i: p.incomeMul, u: p.unlocked, k: p.taken, of: p.offer, fu: p.freshUnlock, pk: !!p.picked };
+    }
+    return { w: s.wave, ph: s.phase, tm: s.timer, ln: s.lanes, co: !!s.coop,
+             pv: s.preview, bn: s.banner, pl };
+  }
+  // Which sound a freshly arrived banner should make. The server has no RC.Audio, so the
+  // cues that fire beside banner() offline are simply absent online; deriving them from
+  // the banner's icon keeps every one of them in this single spot instead of threading a
+  // sound name through five call sites.
+  const BANNER_SFX = { '🎉': 'win', '🔓': 'levelup', '🧭': 'alarm', '🎁': 'ready' };
+  function applyNetState(g, n) {
+    if (!n) return;
+    const s = st(g);
+    const wasBanner = s.banner && s.banner.title;
+    s.wave = n.w; s.phase = n.ph; s.timer = n.tm;
+    s.lanes = n.ln || 1; s.coop = !!n.co; s.preview = n.pv || null; s.banner = n.bn || null;
+    s.pl = s.pl || {};
+    for (const o in (n.pl || {})) {
+      const q = n.pl[o], p = per(g, +o);
+      p.incomeMul = q.i; p.unlocked = q.u || []; p.taken = q.k || {};
+      p.offer = q.of || null; p.freshUnlock = q.fu || null; p.picked = !!q.pk;
+    }
+    if (s.banner && s.banner.title !== wasBanner && RC.Audio) {
+      RC.Audio.play(BANNER_SFX[s.banner.ic] || 'wave');
+    }
+  }
+
   return {
-    CFG, CARDS, KITS, ROSTER, UNLOCK_WAVES, FLAVOURS,
+    CFG, CARDS, KITS, ROSTER, UNLOCK_WAVES, FLAVOURS, LANE_AT,
+    netState, applyNetState,
     kitOf, costOf, timeOf, roster, waveSize, hpMul, weightAt, compose,
-    flavourFor, waveLabel, offer, choose, buy, freeSquad,
+    flavourFor, waveLabel, offer, choose, autoPick, buy, freeSquad,
+    laneCount, lanesOf, openLanes, laneName, defenders, per, baseOf,
     update, hud, banner, st,
   };
 })();

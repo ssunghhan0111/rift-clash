@@ -688,13 +688,13 @@
   }
   #lobby-link:hover { filter: brightness(1.25); }
 
-  #ss-online, #ss-survival-online, #lobby-start, #btn-menu2 {
+  #ss-online, #ss-survival-online, #ss-kids-online, #lobby-start, #btn-menu2 {
     padding: 14px 30px; font-size: 16px; font-weight: 700;
     font-family: var(--sans); cursor: pointer; border-radius: 6px; border: 0;
   }
   #ss-start { border: 0; }
-  #ss-online, #ss-survival-online { background: var(--panel-2); color: var(--cyan); border: 1px solid var(--line); }
-  #ss-online:hover, #ss-survival-online:hover { filter: brightness(1.2); }
+  #ss-online, #ss-survival-online, #ss-kids-online { background: var(--panel-2); color: var(--cyan); border: 1px solid var(--line); }
+  #ss-online:hover, #ss-survival-online:hover, #ss-kids-online:hover { filter: brightness(1.2); }
   #ss-survival-online { margin: 20px 0 8px; }
   #lobby-start { background: var(--orange); color: #10171f; }
   #lobby-start:hover { filter: brightness(1.1); }
@@ -1135,6 +1135,12 @@
   <div class="ss-h">Game Mode</div>
   <div id="ss-gamemodes"></div>
 
+  <!-- Crystal Defense: how much game is switched on -->
+  <div id="sec-depth" class="mode-sec">
+    <div class="ss-h">How do you want to play it?</div>
+    <div id="ss-depths"></div>
+  </div>
+
   <!-- Tutorial -->
   <div id="panel-tutorial" class="mode-sec">
     <div style="color:var(--dim); font-size:12.5px; max-width:520px; text-align:center; margin:6px 0 14px;">
@@ -1191,9 +1197,11 @@
   </div>
   <div id="act-kids" class="mode-sec row" style="display:none">
     <button id="ss-kids">💎 Play Crystal Guard</button>
+    <button id="ss-kids-online">Online Co-op (2)</button>
   </div>
   <div id="ss-kidshint" class="mode-sec" style="display:none; color:var(--dim); font-size:11.5px; margin-top:8px; max-width:520px; text-align:center;">
-    Made for younger players. <b>No base building, no mining</b> — shards come in on their own. Three big buttons buy a <b>Tank</b>, an <b>Archer</b> and a <b>Support</b>; more unlock as you go. Clear a wave and <b>pick one of three rewards</b>. Just protect the crystal.
+    Made for younger players. <b>No base building, no mining</b> — shards come in on their own. Three big buttons buy a <b>Tank</b>, an <b>Archer</b> and a <b>Support</b>; more unlock as you go. Clear a wave and <b>pick one of three rewards</b>. Waves start from one side and open up until they come from <b>every direction</b>.<br>
+    <b>Online Co-op</b> seats <b>two</b> players around one crystal — each with their own base, their own fighters and their own reward card to pick.
   </div>
   <div id="act-survival" class="mode-sec row">
     <button id="ss-survival">Start Survival</button>

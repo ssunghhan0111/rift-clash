@@ -506,8 +506,23 @@ RC.SURVIVAL = {
   biome: 'ice',
   world: { w: 3400, h: 1600 },
   bg: '#060c14', ground: '#132133',
-  enemySpawn: { x: 250, y: 800 },     // waves appear here and head for the crystal
+  enemySpawn: { x: 250, y: 800 },     // Survival: waves appear here and head for the crystal
   crystal: { x: 2430, y: 800 },       // the objective to protect
+  // Crystal Guard attack lanes. Survival keeps its single western approach — a lane
+  // you can wall off is the whole point of its turret play — but Crystal Guard opens
+  // these one at a time until the crystal is under attack from every side.
+  //
+  // ORDER MATTERS. West is first because it is where the camera already points on
+  // wave 1, and east is last because it comes in behind the players' own bases;
+  // arriving there before wave 10 turns the mode's gentlest moment into its hardest.
+  // Each point is clear of the map's rocks, and east clears the vent zone at
+  // (2900,800) r155 rather than letting the horde spawn standing in a heal field.
+  guardLanes: [
+    { id: 'west',  x: 1830, y: 800 },
+    { id: 'north', x: 2430, y: 250 },
+    { id: 'south', x: 2430, y: 1350 },
+    { id: 'east',  x: 3160, y: 800 },
+  ],
   bases: [                            // defender start positions (up to 4 — online co-op)
     { x: 2960, y: 620 },
     { x: 2960, y: 980 },

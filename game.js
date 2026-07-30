@@ -92,17 +92,22 @@ window.RC = window.RC || {};
     // condition and the end screen all already key off that flag, and duplicating
     // them for a second wave mode is exactly the kind of parallel path that drifts.
     // `kids = true` is the switch that swaps the director and the map builder.
-    //   opts = { race, difficulty? }
+    //   opts = { race, difficulty? }                       — solo, offline
+    //   opts = { players: [{owner, race, ai}] }             — online co-op (server)
     setupKids(opts) {
       opts = opts || {};
       this.survival = true;
       this.kids = true;
       this.daily = null; this._dailyRng = null;
       this.survivalDiff = 'kids';
-      const race = opts.race || 'forge';
-      const players = [{ owner: 1, team: 1, ai: false }];
+      // Owner 2 is always the horde, so co-op seats skip it — same rule as Survival.
+      const seats = (opts.players && opts.players.length)
+        ? opts.players.filter(p => p.owner !== 2)
+        : [{ owner: 1, race: opts.race || 'forge', ai: false }];
+      const players = seats.map(p => ({ owner: p.owner, team: 1, ai: !!p.ai }));
       players.push({ owner: 2, team: 2, ai: false, waveEnemy: true });
-      this._racePick = { 1: race, 2: 'forge' };
+      this._racePick = { 2: 'forge' };
+      seats.forEach(p => { this._racePick[p.owner] = p.race || opts.race || 'forge'; });
       this.mode = { id: 'kids', name: 'Crystal Guard', survival: true, kids: true, count: players.length, players };
       this.survivalMap = RC.SURVIVAL;
       this.mapDef = { world: RC.SURVIVAL.world, terrain: RC.SURVIVAL.terrain, obstacles: RC.SURVIVAL.obstacles, spawns: [{ x: 0, y: 0 }] };
@@ -227,7 +232,8 @@ window.RC = window.RC || {};
       this._ai = {};              // per-game AI memory (see ai.js) — reset with the game
       this._sv = null;            // per-game survival wave state (see survival.js) — same reason
       this._kd = null;            // per-game Kids mode state (see kids.js) — same reason
-      this.kidsBase = null;       // Kids mode: the one building the player buys fighters from
+      this.kidsBase = null;       // Kids mode: the building the LOCAL player buys fighters from
+      this.kidsBases = {};        // Kids mode: owner -> that defender's base (co-op has two)
       this._nav = null;           // pathfinding nav grid — rebuilt lazily for the new map
       this.marks = [];            // client-side visual feedback (command markers, damage numbers)
       if (this.kids) this._buildKidsMap();
@@ -438,6 +444,17 @@ window.RC = window.RC || {};
       this.alertFlash = 1;                              // renderer/UI read this for the banner + minimap pulse
       this.alertAt = { x: foe.x, y: foe.y };            // where Space jumps to
       if (RC.Audio && RC.Audio.play) RC.Audio.play('alarm');
+    }
+    // Public alert marker — the off-screen arrow plus the minimap pulse, for things that
+    // deserve the player's eyes but are not "something of mine is being hit": a Crystal
+    // Guard lane opening on a flank nobody is watching. _maybeAlert covers combat.
+    markAlert(x, y, msg) {
+      this.alerts = this.alerts || [];
+      this.alerts.push({ x, y, last: this.time, spoke: this.time, born: this.time });
+      if (this.alerts.length > 6) this.alerts.shift();
+      this.alertFlash = 1;
+      this.alertAt = { x, y };                            // where Space jumps to
+      if (msg) this.notify(msg);
     }
     // Drop alerts once their fight has been quiet for a while. Called from update().
     _ageAlerts(dt) {
@@ -692,32 +709,55 @@ window.RC = window.RC || {};
       this.zones = (map.zones || []).map(z => RC.prepZone({ ...z }));
       this.obstacles = (map.obstacles || []).map(o => ({ ...o, r: Math.max(o.w, o.h) / 2 }));
 
-      const me = this.players.find(p => p.team === 1) || this.players[0];
+      const defs = this.players.filter(p => p.team === 1 && !p.waveEnemy);
+      const me = defs[0] || this.players[0];
       const rdef = RC.RACES[me.race] || RC.RACES.forge;
 
-      // The crystal — the thing to defend, and the visual centre of the mode.
+      // The crystal — the thing to defend, and the visual centre of the mode. It belongs
+      // to the first defender but every defender is protecting the same one: there is no
+      // version of this mode where one player's crystal falls and the other plays on.
       this.crystal = new RC.Building('crystal', map.crystal.x, map.crystal.y, me.owner, true);
       if (K.CRYSTAL_HP) { this.crystal.maxHp = K.CRYSTAL_HP; this.crystal.hp = K.CRYSTAL_HP; }
       this.buildings.push(this.crystal);
 
-      // The base, tucked in behind the crystal (the horde comes from the left, so
-      // "behind" is to the right) with its rally point in FRONT of the crystal —
-      // new fighters walk out towards the fight, not away from it.
-      const base = new RC.Building(rdef.core, map.crystal.x + 200, map.crystal.y, me.owner, true);
-      base.rally = { x: map.crystal.x - 130, y: map.crystal.y + 40 };
-      this.buildings.push(base);
-      this.kidsBase = base;
-      me.spawn = { x: base.x, y: base.y };
-
-      if (this.heroesEnabled && rdef.hero) {
-        const h = new RC.Unit(rdef.hero, map.crystal.x - 90, map.crystal.y + 60, me.owner);
-        this.units.push(h);
-        this.heroOf[me.owner] = h;
-      }
-
-      if (K.START_SHARD != null && this.res[me.owner]) this.res[me.owner].shard = K.START_SHARD;
+      // One base per defender, RINGED around the crystal rather than lined up behind it.
+      // The waves used to come only from the left, so "behind" meant "to the right"; now
+      // that Crystal Guard opens lanes on all four sides there is no behind, and a base
+      // parked on one flank would be the first thing lost every time that lane opened.
+      // Solo keeps the original single position so a familiar layout does not move.
+      this.kidsBases = {};
+      const spots = (defs.length > 1)
+        ? [{ x: map.crystal.x + 210, y: map.crystal.y - 190 },
+           { x: map.crystal.x + 210, y: map.crystal.y + 190 },
+           { x: map.crystal.x - 210, y: map.crystal.y - 190 },
+           { x: map.crystal.x - 210, y: map.crystal.y + 190 }]
+        : [{ x: map.crystal.x + 200, y: map.crystal.y }];
+      defs.forEach((p, i) => {
+        const rd = RC.RACES[p.race] || RC.RACES.forge;
+        const at = spots[i % spots.length];
+        const b = new RC.Building(rd.core, at.x, at.y, p.owner, true);
+        // Rally just off the crystal, on the side the base sits. Rallying ON the crystal
+        // sounds better — it is the one spot that covers every lane — but measured, it
+        // gutted the mode: fighters pile into the building's footprint, spend their time
+        // shoving each other instead of shooting, and a passive run drops from ~16 waves
+        // cleared to 4. Beside the objective they still cover it and they can still fight.
+        b.rally = { x: map.crystal.x + (at.x > map.crystal.x ? -130 : 130), y: map.crystal.y + (at.y > map.crystal.y ? -60 : 60) };
+        this.buildings.push(b);
+        this.kidsBases[p.owner] = b;
+        p.spawn = { x: b.x, y: b.y };
+        if (this.heroesEnabled && rd.hero) {
+          const h = new RC.Unit(rd.hero, b.x - 90, b.y + 60, p.owner);
+          this.units.push(h);
+          this.heroOf[p.owner] = h;
+        }
+        if (K.START_SHARD != null && this.res[p.owner]) this.res[p.owner].shard = K.START_SHARD;
+      });
+      // The local player's base — what the Crystal Guard shop buys from and the camera
+      // opens on. On the server (no local player) this is simply the first defender's.
+      const base = this.kidsBases[this.playerOwner] || this.kidsBases[me.owner];
 
       this.enemySpawn = { x: map.enemySpawn.x, y: map.enemySpawn.y };
+      this.kidsBase = base;
       this.spawn1 = { x: base.x, y: base.y };
       this.camera.x = this.crystal.x - 560;
       this.camera.y = this.crystal.y - 380;

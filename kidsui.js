@@ -219,7 +219,12 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
         // double-tap, and that delay reads as the button not working.
         b.addEventListener('pointerdown', ev => {
           ev.preventDefault();
-          if (!RC.Kids.buy(g, r.t)) return;
+          // Through RC.cmd, not RC.Kids.buy: offline that lands straight on the local
+          // sim, online it goes to the server and comes back in the next snapshot. One
+          // path for both, so a purchase can never be applied on a client the server
+          // disagrees with. The squish plays either way — the server may still refuse
+          // the buy, and a button that visibly does nothing reads as broken to a kid.
+          RC.cmd(g, { t: 'kbuy', ut: r.t });
           // Element.animate is the Web Animations API, which older iOS WebViews do
           // not have. main.js turns ANY uncaught error into a full-screen overlay,
           // so an unguarded call here would end the game the first time a child
@@ -286,7 +291,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
         ev.preventDefault();
         if (used) return;                        // a double-tap must not spend two picks
         used = true;
-        RC.Kids.choose(g, c.id);
+        RC.cmd(g, { t: 'kcard', id: c.id });
       });
       els.cards.appendChild(card);
     });

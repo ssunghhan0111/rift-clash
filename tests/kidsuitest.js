@@ -70,8 +70,10 @@ window.HTMLCanvasElement.prototype.getContext = () => stubCtx;
 function load(f) {
   window.eval(fs.readFileSync(path.join(SRC, f), 'utf8'));
 }
+// net_core.js is in the list because the shop buttons issue COMMANDS now (RC.cmd) rather
+// than calling RC.Kids.buy directly — one path that works offline and online both.
 ['config.js', 'maps.js', 'pathfind.js', 'entities.js', 'ai.js', 'survival.js',
- 'kids.js', 'game.js', 'kidsui.js'].forEach(load);
+ 'kids.js', 'game.js', 'net_core.js', 'kidsui.js'].forEach(load);
 
 const RC = window.RC;
 const K = RC.Kids;
@@ -149,10 +151,13 @@ g.crystal.hp = g.crystal.maxHp;
 
 // ── The reward screen ───────────────────────────────────────────────────────
 head('REWARD SCREEN');
+// The offer belongs to a DEFENDER now, not to the run — in co-op each player is dealt
+// their own three, and the screen renders whichever set belongs to the local player.
 const s = K.st(g);
 s.wave = 4;
 s.phase = 'reward';
-s.offer = K.offer(g);
+K.per(g, 1).offer = K.offer(g, 1);
+K.per(g, 1).picked = false;
 RC.KidsUI.update();
 
 ok($('#kid-reward').classList.contains('on'), 'the reward screen shows when a pick is pending');
@@ -163,15 +168,16 @@ ok(Array.from(cards).every(c => c.querySelector('.ds').textContent.trim().length
 ok(/WAVE 4 CLEARED/.test($('#kid-rtitle').textContent), 'the heading names the wave just cleared');
 
 // Picking must be idempotent — a kid double-tapping must not spend two rewards.
-const takenBefore = JSON.stringify(s.taken);
-const pickedId = s.offer[0].id;
+const mine = K.per(g, 1);
+const takenBefore = JSON.stringify(mine.taken);
+const pickedId = mine.offer[0].id;
 press(cards[0]);
 ok(s.phase === 'gap', 'picking a card moves the run on');
-ok((s.taken[pickedId] || 0) === 1, 'the card was counted exactly once');
+ok((mine.taken[pickedId] || 0) === 1, 'the card was counted exactly once');
 press(cards[0]);
 press(cards[0]);
-ok((s.taken[pickedId] || 0) === 1, 'a double-tap still only spends one reward');
-ok(takenBefore !== JSON.stringify(s.taken), 'the pick was actually recorded');
+ok((mine.taken[pickedId] || 0) === 1, 'a double-tap still only spends one reward');
+ok(takenBefore !== JSON.stringify(mine.taken), 'the pick was actually recorded');
 RC.KidsUI.update();
 ok(!$('#kid-reward').classList.contains('on'), 'the reward screen closes after a pick');
 
@@ -181,15 +187,17 @@ head('NEXT-WAVE WARNING');
   // Wave 4 was just cleared, so wave 5 is next — a plain wave, nothing to warn about.
   ok(s.preview == null, 'no warning before an ordinary wave');
   // Clear wave 5 instead: wave 6 is a Big Guy, which should be announced.
-  s.wave = 5; s.phase = 'reward'; s.offer = K.offer(g);
-  K.choose(g, s.offer[0].id);
+  s.wave = 5; s.phase = 'reward';
+  K.per(g, 1).offer = K.offer(g, 1); K.per(g, 1).picked = false;
+  K.choose(g, K.per(g, 1).offer[0].id, 1);
   ok(s.preview && s.preview.name === 'Big Guy', 'a special wave is announced one wave ahead');
-  s.phase = 'reward'; s.offer = K.offer(g);       // reopen so the UI renders the notice
+  s.phase = 'reward';                             // reopen so the UI renders the notice
+  K.per(g, 1).offer = K.offer(g, 1); K.per(g, 1).picked = false;
   RC.KidsUI.update();
   ok(/Big Guy/.test($('#kid-next').textContent), 'the warning is on screen while the reward is still unspent');
   // And again during the countdown after the card is picked, when the reward screen
   // is gone and the top strip is the only thing left saying it.
-  s.phase = 'gap'; s.offer = null; s.timer = 4;
+  s.phase = 'gap'; K.per(g, 1).offer = null; s.timer = 4;
   RC.KidsUI.update();
   ok(/Big Guy/.test($('#kid-wave').textContent), 'the top strip advertises what is coming during the countdown');
   ok(/\d+s/.test($('#kid-timer').textContent), 'the countdown shows seconds remaining');
@@ -203,9 +211,11 @@ head('NEXT-WAVE WARNING');
 head('UNLOCKS REACH THE SHOP');
 {
   const st2 = K.st(g);
-  st2.phase = 'gap'; st2.offer = null;
-  st2.unlocked = ['volt'];
-  st2.freshUnlock = 'volt';
+  st2.phase = 'gap';
+  const p1 = K.per(g, 1);
+  p1.offer = null;
+  p1.unlocked = ['volt'];
+  p1.freshUnlock = 'volt';
   g.res[1].shard = 9999;
   RC.KidsUI.update();
   const b2 = doc.querySelectorAll('#kid-shop .kid-buy');
@@ -281,14 +291,34 @@ head('FROM THE MENU BUTTON');
      (loadErrs.length ? ' — ' + loadErrs.join(' | ') : ''));
 
   const dd = w2.document;
-  const card = Array.from(dd.querySelectorAll('#ss-gamemodes .gmcard')).find(c => c.dataset.m === 'kids');
-  ok(!!card, 'the Crystal Guard mode card is on the start screen');
-  ok(card && card.querySelector('.gm-name').textContent === 'Crystal Guard', 'the card is named Crystal Guard');
+  // Crystal Guard and Survival now live behind ONE card — Crystal Defense — with the depth
+  // chosen inside it. Both routes have to still work from that single card, which is the
+  // whole reason the two were merged.
+  const card = Array.from(dd.querySelectorAll('#ss-gamemodes .gmcard')).find(c => c.dataset.m === 'defend');
+  ok(!!card, 'the Crystal Defense mode card is on the start screen');
+  ok(card && card.querySelector('.gm-name').textContent === 'Crystal Defense', 'the card is named Crystal Defense');
+  ok(!dd.querySelector('#ss-gamemodes .gmcard[data-m="survival"]'),
+     'Survival no longer has a second competing card');
+  ok(dd.querySelectorAll('#ss-gamemodes .gmcard').length === 4, 'the front page is down to four mode cards');
   card.dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
-  ok(dd.getElementById('act-kids').style.display === 'flex', 'selecting it reveals the Play button');
+  ok(dd.getElementById('sec-depth').style.display === 'flex', 'the depth picker appears');
+  const depths = Array.from(dd.querySelectorAll('#ss-depths .modebtn'));
+  ok(depths.length === 2, 'there are exactly two depths, got ' + depths.length);
+
+  // Full RTS reveals Survival's controls...
+  depths[1].dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
+  ok(dd.getElementById('act-survival').style.display === 'flex', 'Full RTS reveals the Survival buttons');
+  ok(dd.getElementById('sec-diff').style.display === 'flex', 'Full RTS has a difficulty picker');
+  ok(dd.getElementById('act-kids').style.display === 'none', 'and hides the Crystal Guard button');
+
+  // ...and Simple reveals Crystal Guard's, with none of the pickers a kid can trip on.
+  depths[0].dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
+  ok(dd.getElementById('act-kids').style.display === 'flex', 'Simple reveals the Play button');
   ok(dd.getElementById('act-survival').style.display === 'none', 'and hides the Survival buttons');
   ok(dd.getElementById('sec-diff').style.display === 'none', 'no difficulty picker to get stuck on');
+  ok(dd.getElementById('sec-map').style.display === 'none', 'and no map picker either');
   ok(dd.getElementById('sec-race').style.display === 'flex', 'faction can still be chosen');
+  ok(!!dd.getElementById('ss-kids-online'), 'there is an Online Co-op button for two players');
 
   const thrown = [];
   w2.onerror = m => thrown.push(String(m));

@@ -146,7 +146,8 @@ window.RC = window.RC || {};
   let selMode = '1v1';
   let selRace = 'forge';
   let selColor = (RC.DEFAULT_COLOR || 'azure');   // chosen team color (see RC.TEAMCOLORS)
-  let selGameMode = 'vs';       // 'tutorial' | 'vs' | 'survival'
+  let selGameMode = 'vs';       // 'tutorial' | 'campaign' | 'vs' | 'defend'
+  let selDepth = 'kids';        // Crystal Defense depth: 'kids' (Simple) | 'survival' (Full RTS)
   let selSquad = 'solo';        // survival: 'solo' | 'ally'
   let selDiff = 'medium';       // survival: 'easy' | 'medium' | 'insane'
   let selVsDiff = 'normal';     // versus bots: 'easy' | 'normal' | 'hard'
@@ -241,6 +242,7 @@ window.RC = window.RC || {};
     buildColorPicker();
     buildCampaign();
     buildGameModes();
+    buildDepths();
     buildSquad();
     buildDiff();
     buildVsDiff();
@@ -313,17 +315,42 @@ window.RC = window.RC || {};
     });
   }
 
-  // ── Game-mode cards (Tutorial / Versus / Survival) ──
+  // ── Game-mode cards ──
+  // Crystal Guard and Survival used to be two cards, and they made the same promise:
+  // defend the Rift Crystal from endless waves, on the same map, around the same
+  // crystal. The only real difference is how much game is switched on. Two cards for
+  // one fantasy meant every new player had to guess which of two similar things they
+  // wanted, and guessing wrong sent a beginner into a full RTS or an experienced
+  // player into a mode built for six-year-olds.
+  //
+  // So it is ONE card now — 'Crystal Defense' — with the depth chosen inside it. The
+  // other three modes are each obviously their own thing and stay as they are.
   const GAMEMODES = [
-    // Crystal Guard is listed FIRST on purpose. It is the only mode a complete
-    // beginner can understand from the card alone, and it is the one to reach for
-    // when a young player is holding the tablet.
-    { id: 'kids', ic: '💎', name: 'Crystal Guard', sub: 'Easy mode for younger players. Buy fighters, defend the crystal, pick a reward every wave.' },
+    { id: 'defend', ic: '💎', name: 'Crystal Defense', sub: 'Endless waves attack the Rift Crystal. Play it simple, or with the full RTS.' },
     { id: 'tutorial', ic: '🎓', name: 'Tutorial', sub: 'Learn the game, then a guided practice match.' },
     { id: 'campaign', ic: '🎯', name: 'Campaign', sub: 'Scripted missions vs bots — a ladder into multiplayer.' },
     { id: 'vs', ic: '⚔️', name: 'Versus', sub: '1v1 or 2v2 vs bots — or online vs friends.' },
-    { id: 'survival', ic: '🛡️', name: 'Survival', sub: 'Defend the Rift Crystal from endless waves — full RTS.' },
   ];
+
+  // The two depths of Crystal Defense. Simple is listed first and is the default: it is
+  // the one a complete beginner can understand from the card alone, and the one to reach
+  // for when a young player is holding the tablet.
+  const DEPTHS = [
+    { id: 'kids', ic: '💎', name: 'Simple', sub: 'Buy fighters with three big buttons. No mining, no building. A reward card every wave. Co-op for two online.' },
+    { id: 'survival', ic: '🛡️', name: 'Full RTS', sub: 'Mine, build, research and hold the line. Three difficulties, co-op for four, world leaderboard.' },
+  ];
+  function buildDepths() {
+    const wrap = document.getElementById('ss-depths');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    DEPTHS.forEach(d => {
+      const b = document.createElement('div');
+      b.className = 'modebtn' + (d.id === selDepth ? ' sel' : '');
+      b.innerHTML = `<div class="mb-name">${d.ic} ${d.name}</div><div class="mb-sub">${d.sub}</div>`;
+      b.addEventListener('click', () => { selDepth = d.id; buildDepths(); applyGameMode('defend'); });
+      wrap.appendChild(b);
+    });
+  }
   function buildGameModes() {
     const wrap = document.getElementById('ss-gamemodes');
     if (!wrap) return;
@@ -363,27 +390,33 @@ window.RC = window.RC || {};
     selGameMode = m;
     document.querySelectorAll('#ss-gamemodes .gmcard').forEach(c => c.classList.toggle('sel', c.dataset.m === m));
     const show = (id, on, disp) => { const e = document.getElementById(id); if (e) e.style.display = on ? (disp || 'flex') : 'none'; };
+    // Inside Crystal Defense, the depth decides what the rest of the screen looks like.
+    const defend = (m === 'defend');
+    const simple = defend && selDepth === 'kids';
+    const full = defend && selDepth === 'survival';
     show('panel-tutorial', m === 'tutorial');
     show('panel-campaign', m === 'campaign');
+    show('sec-depth', defend);
     show('sec-map', m === 'vs');
     show('sec-mode', m === 'vs');
     show('sec-aidiff', m === 'vs');
-    show('sec-diff', m === 'survival');
-    show('sec-squad', m === 'survival');
-    // Crystal Guard shows faction and colour but no difficulty, no squad and no map:
-    // every extra picker on the way to "play" is a chance for a kid to get stuck on
-    // the menu instead of in the game.
+    show('sec-diff', full);
+    show('sec-squad', full);
+    // Simple shows faction and colour but no difficulty, no squad and no map: every extra
+    // picker on the way to "play" is a chance for a kid to get stuck on the menu instead
+    // of in the game.
     show('sec-race', m !== 'tutorial' && m !== 'campaign');
     show('sec-color', m !== 'tutorial' && m !== 'campaign');
     show('act-vs', m === 'vs', 'flex');
-    show('act-survival', m === 'survival', 'flex');
-    show('act-kids', m === 'kids', 'flex');
+    show('act-survival', full, 'flex');
+    show('act-kids', simple, 'flex');
     show('ss-onlinehint', m === 'vs');
-    show('ss-survivalhint', m === 'survival');
-    show('ss-kidshint', m === 'kids');
+    show('ss-survivalhint', full);
+    show('ss-kidshint', simple);
     // Daily now lives in the always-visible front-page banner (rendered in buildStartScreen).
     const rh = document.getElementById('race-h');
-    if (rh) rh.textContent = (m === 'survival' || m === 'kids') ? 'Your faction' : 'Faction (enemy AI takes the other)';
+    if (rh) rh.textContent = defend ? 'Your faction' : 'Faction (enemy AI takes the other)';
+    buildDepths();
   }
 
   // ── Campaign (scripted missions) ──────────────────────
@@ -1036,7 +1069,9 @@ window.RC = window.RC || {};
     list.forEach(r => {
       const cap = r.cap || 4, full = r.players >= cap;
       let sub;
-      if (r.gameMode === 'survival') {
+      if (r.gameMode === 'kids') {
+        sub = `💎 Crystal Guard Co-op · ${r.players}/${cap} players`;
+      } else if (r.gameMode === 'survival') {
         const dn = RC.Survival ? RC.Survival.diffName(r.diff) : (r.diff || 'Medium');
         sub = `🛡️ Survival Co-op · ${dn} · ${r.players}/${cap} players`;
       } else {
@@ -1064,6 +1099,7 @@ window.RC = window.RC || {};
     { id: '1v1', label: '⚔️ 1v1', kind: 'vs', modeId: '1v1' },
     { id: '2v2', label: '⚔️ 2v2', kind: 'vs', modeId: '2v2' },
     { id: 'survival', label: '🛡️ Survival', kind: 'survival', modeId: '1v1' },
+    { id: 'kids', label: '💎 Crystal Guard', kind: 'kids', modeId: '1v1' },
   ];
   const STATUS_TEXT = { idle: 'In the menu', lobby: 'Waiting in a game lobby', ingame: 'In a match' };
 
@@ -1132,7 +1168,9 @@ window.RC = window.RC || {};
     const pop = document.getElementById('invite-pop');
     const txt = document.getElementById('invite-text');
     if (!pop || !txt) return;
-    const what = m.gameMode === 'survival' ? 'Survival co-op' : (m.modeId === '2v2' ? 'a 2v2' : 'a 1v1');
+    const what = m.gameMode === 'kids' ? 'Crystal Guard co-op'
+               : m.gameMode === 'survival' ? 'Survival co-op'
+               : (m.modeId === '2v2' ? 'a 2v2' : 'a 1v1');
     txt.innerHTML = `<b>${esc(m.fromName)}</b> invites you to ${what}.`;
     pop.classList.remove('hidden');
   }
@@ -1470,7 +1508,9 @@ window.RC = window.RC || {};
     onlineKind = kind;
     const url = socketUrl();
     const title = document.getElementById('browser-title');
-    if (title) title.innerHTML = kind === 'survival'
+    if (title) title.innerHTML = kind === 'kids'
+      ? 'RIFT<b>CLASH</b> · Crystal Guard Co-op'
+      : kind === 'survival'
       ? 'RIFT<b>CLASH</b> · Online Co-op'
       : 'RIFT<b>CLASH</b> · Online';
     showBrowser(); setBrowserTab('public', true); setBrowserStatus('Connecting…');
@@ -1482,6 +1522,8 @@ window.RC = window.RC || {};
   document.getElementById('ss-online').addEventListener('click', () => openBrowser('vs'));
   const svOnlineBtn = document.getElementById('ss-survival-online');
   if (svOnlineBtn) svOnlineBtn.addEventListener('click', () => openBrowser('survival'));
+  const kidsOnlineBtn = document.getElementById('ss-kids-online');
+  if (kidsOnlineBtn) kidsOnlineBtn.addEventListener('click', () => openBrowser('kids'));
 
   // ── Public / Private tabs ──────────────────────────────
   // Joining a stranger's game and setting up a game with one friend are different
@@ -1733,8 +1775,11 @@ window.RC = window.RC || {};
       raceFaces.push({ cv: b.querySelector('canvas'), race: rid });
     });
     drawRaceFaces();
-    // Survival co-op lobbies swap the map/mode pickers for a difficulty picker.
-    const isSurvival = lobbyData.gameMode === 'survival';
+    // Wave-mode lobbies swap the map/mode pickers for a difficulty picker — except
+    // Crystal Guard, which has nothing to pick: no map, no mode, no difficulty. All
+    // that lobby is for is waiting for the second person to arrive and press Ready.
+    const isKids = lobbyData.gameMode === 'kids';
+    const isSurvival = lobbyData.gameMode === 'survival' || isKids;
     const vsOpts = document.getElementById('lobby-vs-opts');
     const svOpts = document.getElementById('lobby-sv-opts');
     // These two carry an inline display:flex, and there is no generic .hidden rule —
@@ -1742,11 +1787,11 @@ window.RC = window.RC || {};
     // "Difficulty" heading, and a survival lobby was showing Map and Mode pickers
     // that do nothing. Set display directly so the inline style is the one changing.
     if (vsOpts) vsOpts.style.display = isSurvival ? 'none' : 'flex';
-    if (svOpts) svOpts.style.display = isSurvival ? 'flex' : 'none';
+    if (svOpts) svOpts.style.display = (isSurvival && !isKids) ? 'flex' : 'none';
     const codeLine = document.getElementById('lobby-code');
     if (codeLine && isSurvival) {
       codeLine.textContent = (roomPublic ? '🌐 Public co-op' : ('🔒 Private co-op — share code: ' + (roomCode || ''))) +
-                             `  ·  ${(lobbyData.players || []).length}/${lobbyData.cap || 4} defenders`;
+                             `  ·  ${(lobbyData.players || []).length}/${lobbyData.cap || (isKids ? 2 : 4)} defenders`;
     }
 
     // host controls
@@ -1754,8 +1799,12 @@ window.RC = window.RC || {};
     const startBtn = document.getElementById('lobby-start');
     if (isHost) {
       hostBox.classList.remove('hidden'); startBtn.classList.remove('hidden');
-      startBtn.textContent = isSurvival ? 'Start Survival' : 'Start Match';
-      if (isSurvival) {
+      startBtn.textContent = isKids ? '💎 Start Crystal Guard' : isSurvival ? 'Start Survival' : 'Start Match';
+      if (isKids) {
+        setStatus((lobbyData.players || []).length < 2
+          ? 'Waiting for a second player. Share the code — Crystal Guard co-op is for two.'
+          : 'You are the host. Press Start. You each get your own base, your own fighters and your own reward card — and one crystal to keep alive between you.');
+      } else if (isSurvival) {
         const dw = document.getElementById('lobby-diffs'); dw.innerHTML = '';
         DIFFS.forEach(d => {
           const c = document.createElement('div');
@@ -1841,7 +1890,14 @@ window.RC = window.RC || {};
     audioGo();
     game.heroesEnabled = true;       // heroes are live online; the server owns them and the snapshot carries their state
 
-    if (m.survival) {
+    if (m.kids) {
+      // Co-op Crystal Guard — same idea as Survival below: build the map locally so
+      // terrain, fog and nav exist, then let snapshots drive every entity. The server
+      // owns the wave director, the reward cards and the crystal.
+      game.setupKids({
+        players: (m.rosters || []).map(r => ({ owner: r.owner, race: r.race, ai: r.ai })),
+      });
+    } else if (m.survival) {
       // Co-op Survival — build the survival map locally so terrain/fog/nav exist, then
       // let snapshots drive every entity (the server owns the wave director and crystal).
       game.setupSurvival({
