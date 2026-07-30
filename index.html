@@ -315,6 +315,14 @@
   .mapcard .mc-desc { font-size: 11px; color: var(--dim); padding: 0 10px 10px; line-height: 1.4; min-height: 44px; }
 
   #ss-modes, #ss-races { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
+  /* The depth picker sits directly under the mode cards and continues the same choice, so
+     it lines up like them: a centred row of EQUAL-width cards. Left to inherit .mode-sec's
+     column it stacked two ragged, differently-sized blocks, and two options of different
+     widths read as one being the real one. */
+  #ss-depths { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 640px; }
+  #ss-depths .modebtn { width: 300px; text-align: left; }
+  #ss-depths .modebtn .mb-sub { line-height: 1.45; margin-top: 4px; }
+  @media (max-width: 720px) { #ss-depths .modebtn { width: 100%; max-width: 330px; } }
   #ss-colors { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
   .colorsw { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.4); transition: transform .08s ease; }
   .colorsw:hover { transform: scale(1.12); }
@@ -341,12 +349,8 @@
   .modebtn .mb-name { font-size: 15px; font-weight: 700; }
   .modebtn .mb-sub { font-size: 11px; color: var(--dim); margin-top: 3px; }
 
-  #ss-start {
-    margin: 24px 0 8px; background: var(--orange); color: #10171f; border: 0;
-    padding: 14px 54px; font-size: 17px; font-weight: 700; letter-spacing: .05em;
-    font-family: var(--sans); cursor: pointer; border-radius: 6px;
-  }
-  #ss-start:hover { filter: brightness(1.1); }
+  /* Colour only — .ss-act owns the box (see the action-button block below). */
+  #ss-start { background: var(--orange); color: #10171f; }
   #overlay .ov-btns { display: flex; gap: 10px; justify-content: center; }
   #btn-menu {
     background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
@@ -369,7 +373,26 @@
   .gmcard .gm-sub { font-size: 11px; color: var(--dim); margin-top: 5px; line-height: 1.45; }
 
   .mode-sec { display: flex; flex-direction: column; align-items: center; width: 100%; }
-  .mode-sec.row { flex-direction: row; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  /* The row owns the vertical margin, not the buttons in it. Each action button used to
+     carry its own (24px here, 20px there, none on two of them), so whether a row lined
+     up depended on three separate margins agreeing — and they had stopped agreeing. */
+  .mode-sec.row { flex-direction: row; gap: 12px; align-items: stretch; justify-content: center; flex-wrap: wrap; margin: 22px 0 8px; }
+
+  /* ── Action buttons (Start / Online) ────────────────────────────────────────
+     Every mode's action row styled its buttons by id, and the metrics had drifted apart:
+     17px beside 16px, four different margins, and #ss-kids had no rule AT ALL, so "Play
+     Crystal Guard" rendered at the browser's default size next to a full-size Online
+     Co-op button. One class owns the box for all of them — same height, same padding
+     block, same radius — and the ids below choose nothing but colour. */
+  .ss-act, .ss-act2 {
+    box-sizing: border-box; min-height: 52px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; font-family: var(--sans); letter-spacing: .04em;
+    border-radius: 6px; cursor: pointer; border: 0; margin: 0;
+    padding: 13px 34px;
+  }
+  .ss-act { padding: 13px 44px; }         /* primary — wider, it is the one meant to be pressed */
+  .ss-act:hover, .ss-act2:hover { filter: brightness(1.12); }
   .ss-btn2 {
     background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
     padding: 13px 26px; font-size: 15px; font-weight: 700; border-radius: 6px;
@@ -377,12 +400,10 @@
   }
   .ss-btn2:hover { filter: brightness(1.2); }
   .ss-btn2.hl { background: var(--orange); color: #10171f; border: 0; }
-  #ss-survival {
-    margin: 20px 0 8px; background: var(--cyan); color: #082027; border: 0;
-    padding: 14px 48px; font-size: 17px; font-weight: 700; letter-spacing: .04em;
-    font-family: var(--sans); cursor: pointer; border-radius: 6px;
-  }
-  #ss-survival:hover { filter: brightness(1.08); }
+  #ss-survival { background: var(--cyan); color: #082027; }
+  /* Green, matching the crystal and the mode's own HUD accent, so the three Start buttons
+     read as three different modes rather than three shades of the same one. */
+  #ss-kids { background: var(--good); color: #08210f; }
 
   /* ── Daily Challenge banner (front page) ── */
   #daily-banner {
@@ -631,12 +652,7 @@
   }
   #lobby.hidden { display: none; }
   /* ── Global leaderboard ─────────────────────── */
-  #ss-leaderboard {
-    margin: 20px 0 8px; padding: 14px 26px; font-size: 16px; font-weight: 700;
-    background: var(--panel-2); color: var(--gold, #ffd23f); border: 1px solid var(--line);
-    border-radius: 6px; cursor: pointer; font-family: var(--sans);
-  }
-  #ss-leaderboard:hover { filter: brightness(1.25); }
+  #ss-leaderboard { background: var(--panel-2); color: var(--gold, #ffd23f); border: 1px solid var(--line); }
 
   #board { position: fixed; inset: 0; z-index: 55; background: var(--bg, #0b1118);
     display: flex; flex-direction: column; align-items: center; padding: 26px 16px 30px;
@@ -688,14 +704,11 @@
   }
   #lobby-link:hover { filter: brightness(1.25); }
 
-  #ss-online, #ss-survival-online, #ss-kids-online, #lobby-start, #btn-menu2 {
+  #lobby-start, #btn-menu2 {
     padding: 14px 30px; font-size: 16px; font-weight: 700;
     font-family: var(--sans); cursor: pointer; border-radius: 6px; border: 0;
   }
-  #ss-start { border: 0; }
   #ss-online, #ss-survival-online, #ss-kids-online { background: var(--panel-2); color: var(--cyan); border: 1px solid var(--line); }
-  #ss-online:hover, #ss-survival-online:hover, #ss-kids-online:hover { filter: brightness(1.2); }
-  #ss-survival-online { margin: 20px 0 8px; }
   #lobby-start { background: var(--orange); color: #10171f; }
   #lobby-start:hover { filter: brightness(1.1); }
   #btn-menu2 { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
@@ -1192,21 +1205,21 @@
   </div>
 
   <div id="act-vs" class="mode-sec row">
-    <button id="ss-start">Start Battle</button>
-    <button id="ss-online">Online</button>
+    <button id="ss-start" class="ss-act">Start Battle</button>
+    <button id="ss-online" class="ss-act2">Online</button>
   </div>
   <div id="act-kids" class="mode-sec row" style="display:none">
-    <button id="ss-kids">💎 Play Crystal Guard</button>
-    <button id="ss-kids-online">Online Co-op (2)</button>
+    <button id="ss-kids" class="ss-act">💎 Play Crystal Guard</button>
+    <button id="ss-kids-online" class="ss-act2">👥 Online Co-op (2)</button>
   </div>
   <div id="ss-kidshint" class="mode-sec" style="display:none; color:var(--dim); font-size:11.5px; margin-top:8px; max-width:520px; text-align:center;">
     Made for younger players. <b>No base building, no mining</b> — shards come in on their own. Three big buttons buy a <b>Tank</b>, an <b>Archer</b> and a <b>Support</b>; more unlock as you go. Clear a wave and <b>pick one of three rewards</b>. Waves start from one side and open up until they come from <b>every direction</b>.<br>
     <b>Online Co-op</b> seats <b>two</b> players around one crystal — each with their own base, their own fighters and their own reward card to pick.
   </div>
   <div id="act-survival" class="mode-sec row">
-    <button id="ss-survival">Start Survival</button>
-    <button id="ss-survival-online">Online Co-op</button>
-    <button id="ss-leaderboard">🏆 Leaderboard</button>
+    <button id="ss-survival" class="ss-act">🛡️ Start Survival</button>
+    <button id="ss-survival-online" class="ss-act2">👥 Online Co-op (4)</button>
+    <button id="ss-leaderboard" class="ss-act2">🏆 Leaderboard</button>
   </div>
   <div id="ss-survivalhint" class="mode-sec" style="color:var(--dim); font-size:11.5px; margin-top:8px; max-width:520px; text-align:center;">
     Online Co-op: defend the Rift Crystal together with up to <b>4 players</b>. Create a <b>public</b> game (anyone can find &amp; join) or a <b>private</b> one (share a 4-letter code). You all share one crystal — if it falls, the run ends for everyone.

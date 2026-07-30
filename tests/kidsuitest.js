@@ -300,6 +300,46 @@ head('FROM THE MENU BUTTON');
   ok(!dd.querySelector('#ss-gamemodes .gmcard[data-m="survival"]'),
      'Survival no longer has a second competing card');
   ok(dd.querySelectorAll('#ss-gamemodes .gmcard').length === 4, 'the front page is down to four mode cards');
+
+  // ── Every action button is the same size ──────────────────────────────────
+  // "Play Crystal Guard" shipped with NO css rule of its own, so it rendered at the
+  // browser's default size next to a full-size "Online Co-op" beside it, and every
+  // existing test passed the whole time — none of them look at how anything is sized.
+  // The metrics all come from one class now, and this is what keeps it that way: add a
+  // button to an action row without giving it .ss-act/.ss-act2 and this fails.
+  {
+    const acts = ['ss-start', 'ss-online', 'ss-kids', 'ss-kids-online',
+                  'ss-survival', 'ss-survival-online', 'ss-leaderboard'];
+    const cs = acts.map(id => {
+      const el = dd.getElementById(id);
+      ok(!!el, 'action button #' + id + ' exists');
+      const c = el && w2.getComputedStyle(el);
+      return { id, cls: el && el.className, font: c && c.fontSize, minH: c && c.minHeight, rad: c && c.borderRadius };
+    });
+    console.log('  action buttons: ' + cs.map(c => c.id + '(' + c.font + '/' + c.minH + ')').join(' '));
+    ok(cs.every(c => /ss-act2?\b/.test(c.cls || '')),
+       'every action button carries the shared size class — missing on: ' +
+       cs.filter(c => !/ss-act2?\b/.test(c.cls || '')).map(c => c.id).join(', '));
+    const font = cs[0].font, minH = cs[0].minH;
+    ok(!!font && !!minH, 'the shared class actually resolves to a font size and a height');
+    ok(cs.every(c => c.font === font), 'all action buttons share one font size, saw ' +
+       [...new Set(cs.map(c => c.font))].join(' / '));
+    ok(cs.every(c => c.minH === minH), 'all action buttons share one height, saw ' +
+       [...new Set(cs.map(c => c.minH))].join(' / '));
+    ok(cs.every(c => c.rad === cs[0].rad), 'all action buttons share one corner radius');
+    // The row owns the vertical margin, so no button can knock its neighbours out of line.
+    ok(cs.every(c => {
+      const m = w2.getComputedStyle(dd.getElementById(c.id)).marginTop;
+      return m === '0px' || m === '' || m == null;
+    }), 'no action button carries its own top margin');
+    for (const row of ['act-vs', 'act-kids', 'act-survival']) {
+      ok(w2.getComputedStyle(dd.getElementById(row)).marginTop === '22px',
+         row + ' carries the row margin instead');
+    }
+    // And the depth picker lays out as a centred row, not the stacked column it inherits.
+    const dep = w2.getComputedStyle(dd.getElementById('ss-depths'));
+    ok(dep.display === 'flex' && dep.justifyContent === 'center', 'the depth picker is a centred row');
+  }
   card.dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
   ok(dd.getElementById('sec-depth').style.display === 'flex', 'the depth picker appears');
   const depths = Array.from(dd.querySelectorAll('#ss-depths .modebtn'));
