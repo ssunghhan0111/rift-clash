@@ -417,7 +417,11 @@ RC.Input = (function () {
     const me = ME();
     let ent = g.entityAt(state.world.x, state.world.y, null);
     if (ent && ent.owner !== me && g.areEnemies(ent.owner, me) && !g.visibleAt(ent.x, ent.y)) ent = null;   // hidden enemies can't be selected
-    if (ent && ent.owner === me && ent.kind === 'unit' && ent.def.worker && ent.state === 'build') ent = null;   // busy builder is unavailable
+    // A busy builder cannot be given a new job, so in the grown-up game it is not worth
+    // selecting. Crystal Guard is the opposite: tapping the builder is how you OPEN the
+    // build panel, and a kid whose tap does nothing because the builder happens to be
+    // working has no way to find out that is why. Let it be selected and let the panel say so.
+    if (!g.kids && ent && ent.owner === me && ent.kind === 'unit' && ent.def.worker && ent.state === 'build') ent = null;
 
     if (e.pointerType === 'mouse') {
       if (!ent) { if (!e.shiftKey) g.selection = []; return; }

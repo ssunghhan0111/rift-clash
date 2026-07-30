@@ -172,10 +172,24 @@ RC.Kids = (function () {
   // Why a build would be refused, as a sentence a six-year-old can act on. Returning the
   // REASON rather than a bare false is what lets the screen say "too far from the crystal"
   // instead of leaving a kid tapping a spot that will never work.
+  // The one thing under construction, or null. There is a single builder per defender, so
+  // "is it busy" is a property of the RUN, not of the button that was pressed.
+  function buildingNow(g, owner) {
+    if (owner == null) owner = g.playerOwner;
+    for (const b of (g.buildings || [])) if (b.owner === owner && !b.done && !b.dead) return b;
+    return null;
+  }
+
   function canBuild(g, t, x, y, owner) {
     if (owner == null) owner = g.playerOwner;
     const bd = buildDefOf(g, t, owner);
     if (!bd) return 'You cannot build that';
+    // One at a time. A kid with shards to spend would otherwise queue five walls the
+    // single builder then trudges between, spending everything and finishing nothing —
+    // and the wave arrives with five foundations and no wall. Waiting for the one you
+    // started is also what makes the choice of WHICH wall matter.
+    const busy = buildingNow(g, owner);
+    if (busy) return 'Finish the ' + (busy.def.name || 'building') + ' first!';
     if (!inBuildRing(g, x, y)) return 'Build closer to the crystal!';
     if (buildUsed(g, owner) >= buildCap(g)) return 'No room for more — clear a wave to get another slot';
     if (!g.res[owner] || g.res[owner].shard < bd.cost) return 'Not enough shards yet';
@@ -898,6 +912,13 @@ RC.Kids = (function () {
       queue: (b && b.queue) || [],
       lanes: s.lanes || 1, laneMax: lanesOf(g).length,
       sig: sigHud(g, owner),
+      // What the player has tapped, and therefore which panel is open. The build bar used
+      // to live permanently in the bottom-left corner, on top of the end-match button; it
+      // is now a panel that opens when you tap the thing it belongs to — the builder for
+      // walls and towers, the base for fighters — which is also how the grown-up game
+      // works. Selection is the existing mechanism; nothing new had to be invented.
+      focus: focusOf(g, owner),
+      busy: busyHud(g, owner),
       build: {
         items: kitBuild(g, owner).map(b => ({
           t: b.t, ic: b.ic, cost: b.cost, kid: b.kid,
@@ -956,6 +977,28 @@ RC.Kids = (function () {
     }
   }
 
+  // Which of the two panels the player is looking at. The builder wins a tie, because a
+  // box-drag that caught both was almost certainly aimed at the thing you were about to
+  // move rather than at the base you cannot move.
+  function focusOf(g, owner) {
+    const sel = (g && g.selection) || [];
+    if (!sel.length) return null;
+    const w = workerOf(g, owner);
+    if (w && sel.includes(w)) return 'builder';
+    const b = baseOf(g, owner);
+    if (b && sel.includes(b)) return 'base';
+    return null;
+  }
+
+  // The building currently going up, as a progress pill. This is the whole explanation for
+  // why the build buttons are greyed out, so it has to be visible whenever they are.
+  function busyHud(g, owner) {
+    const b = buildingNow(g, owner);
+    if (!b) return null;
+    return { name: b.def.name || 'Building', ic: (kitBuild(g, owner).find(i => i.t === b.type) || {}).ic || '🧱',
+             pct: Math.max(0, Math.min(1, b.buildProgress || 0)) };
+  }
+
   // Everything the hero buttons need, or null when this player has no hero.
   // `skills` is the two small tactical buttons (Q/E); the big ring is still the
   // signature, kept separate because it is the only one with a story attached to it.
@@ -986,7 +1029,7 @@ RC.Kids = (function () {
     netState, applyNetState,
     kitOf, costOf, timeOf, roster, waveSize, hpMul, weightAt, compose,
     flavourFor, waveLabel, offer, choose, autoPick, buy, freeSquad,
-    laneCount, lanesOf, openLanes, laneName, defenders, per, baseOf,
+    laneCount, lanesOf, openLanes, laneName, defenders, per, baseOf, buildingNow,
     update, hud, banner, st,
   };
 })();

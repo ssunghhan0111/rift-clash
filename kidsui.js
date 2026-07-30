@@ -54,10 +54,40 @@ RC.KidsUI = (function () {
 #kid-cfill.hurt { background:linear-gradient(90deg,#ffb03d,#ffd88a); }
 #kid-cfill.bad  { background:linear-gradient(90deg,#ff5a4d,#ff9c8f); }
 
-/* Bottom shop — the three (then more) unit buttons. This is the whole interface. */
-#kid-shop { position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
-            display:flex; gap:12px; pointer-events:auto; flex-wrap:wrap;
-            justify-content:center; max-width:min(96vw,1000px); }
+/* ── The bottom dock ────────────────────────────────────────────────────────
+   One column at the bottom centre: the panel you opened, and under it the two tabs
+   that open them. Both panels used to be on screen at once — the fighter shop across
+   the bottom and the build bar in the bottom-LEFT CORNER, directly on top of the
+   end-match button, which is what prompted this. Only one is open now, and the corner
+   is free again.
+
+   Tapping the builder or the base on the map opens the matching panel, exactly as it
+   does in the grown-up game; the tabs are the same action for anyone who has not
+   worked out that the little robot is a button. */
+#kid-dock { position:absolute; left:50%; bottom:12px; transform:translateX(-50%);
+            display:flex; flex-direction:column; align-items:center; gap:9px;
+            pointer-events:none; max-width:min(96vw,1000px); }
+#kid-tabs { display:flex; gap:10px; pointer-events:auto; }
+.kid-tab { min-width:104px; height:44px; border-radius:14px; cursor:pointer;
+           display:flex; align-items:center; justify-content:center; gap:7px;
+           background:linear-gradient(180deg,#243354,#141d33);
+           border:3px solid rgba(255,255,255,.18); color:#cfe0f5;
+           font-size:14px; font-weight:800; padding:0 14px;
+           user-select:none; -webkit-tap-highlight-color:transparent;
+           transition:transform .08s, filter .12s, border-color .12s; }
+.kid-tab .ic { font-size:20px; }
+.kid-tab:active { transform:scale(.94); }
+.kid-tab.on { border-color:#8fe3ff; color:#eaf6ff;
+              box-shadow:0 0 0 3px rgba(143,227,255,.26), 0 0 22px rgba(143,227,255,.35); }
+/* Nothing open and nothing bought yet — the tabs ask to be pressed. */
+.kid-tab.hint { animation:kidtabhint 1.5s ease-in-out infinite; border-color:#ffd24a; }
+@keyframes kidtabhint { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+.kid-tab.gone { opacity:.35; pointer-events:none; }
+
+/* The panels themselves. Hidden until their tab is the open one. */
+#kid-shop { display:none; gap:12px; pointer-events:auto; flex-wrap:wrap;
+            justify-content:center; }
+#kid-shop.on { display:flex; }
 .kid-buy { width:138px; min-height:100px; border-radius:18px; cursor:pointer;
            background:linear-gradient(180deg,#243354,#16203a);
            border:3px solid rgba(255,255,255,.20); color:#eaf2ff;
@@ -80,8 +110,7 @@ RC.KidsUI = (function () {
 @keyframes kidpop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.16)} }
 
 /* Production queue — dots, not a list. "Three on the way" needs no reading. */
-#kid-queue { position:absolute; bottom:118px; left:50%; transform:translateX(-50%);
-             display:flex; gap:7px; pointer-events:none; }
+#kid-queue { display:flex; gap:7px; pointer-events:none; min-height:13px; }
 .kid-qd { width:13px; height:13px; border-radius:50%; background:rgba(255,255,255,.22);
           border:2px solid rgba(255,255,255,.35); }
 .kid-qd.go { background:#ffd24a; border-color:#ffe9a8; }
@@ -134,11 +163,21 @@ RC.KidsUI = (function () {
    Left of the fighter shop and visibly a different KIND of thing: fighters walk out
    of the base on their own, buildings get put somewhere by you. The slot counter is
    the whole economy of it — a kid can see they have two of three used. */
-/* Six of these now (a tower and five walls), so the bar wraps and is capped at a
-   third of the screen — it shares the bottom edge with the fighter shop. */
-#kid-build { position:absolute; left:14px; bottom:14px; display:flex; gap:8px;
-             align-items:flex-end; pointer-events:auto; flex-wrap:wrap;
-             max-width:min(34vw, 290px); }
+/* Six of these (a tower and five walls). Lives in the dock alongside the shop and is
+   only ever visible when the builder is the thing you tapped. */
+#kid-build { display:none; gap:8px; align-items:flex-end; pointer-events:auto;
+             flex-wrap:wrap; justify-content:center; }
+#kid-build.on { display:flex; }
+/* While something is going up, every build button is off and this says why. */
+#kid-busy { display:none; align-items:center; gap:9px; pointer-events:none;
+            background:rgba(10,16,26,.86); border:2px solid rgba(255,210,74,.5);
+            border-radius:14px; padding:7px 14px; color:#ffe9a8;
+            font-size:14px; font-weight:800; white-space:nowrap; }
+#kid-busy.on { display:flex; }
+#kid-busy .bar { width:96px; height:9px; border-radius:6px; overflow:hidden;
+                 background:rgba(255,255,255,.16); }
+#kid-busy .fill { height:100%; width:0%; border-radius:6px; background:#ffd24a;
+                  transition:width .2s linear; }
 .kid-bb { width:84px; min-height:84px; border-radius:16px; cursor:pointer;
           background:linear-gradient(180deg,#3a3050,#1d1830);
           border:3px solid rgba(255,255,255,.20); color:#eaf2ff;
@@ -217,6 +256,8 @@ RC.KidsUI = (function () {
 @media (max-width:820px), (max-height:560px) {
   #kid-qe { right:25px; bottom:104px; gap:6px; }
   #kid-qe .b { width:48px; height:48px; font-size:20px; }
+  .kid-tab { min-width:84px; height:38px; font-size:12.5px; padding:0 10px; }
+  .kid-tab .ic { font-size:17px; }
 }
 /* Upgrade badges — the run's story in three emoji. */
 #kid-sig .ups { position:absolute; top:-10px; left:50%; transform:translateX(-50%);
@@ -284,9 +325,17 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
         <div class="kid-chip" id="kid-wave">⚔️ <b>Get ready!</b></div>
         <div class="kid-chip" id="kid-timer">⏳ <b>0s</b></div>
       </div>
-      <div id="kid-queue"></div>
-      <div id="kid-shop"></div>
-      <div id="kid-build"></div>
+      <div id="kid-dock">
+        <div id="kid-queue"></div>
+        <div id="kid-busy"><span class="ic">🧱</span><span class="nm">Building…</span>
+          <span class="bar"><span class="fill"></span></span></div>
+        <div id="kid-shop"></div>
+        <div id="kid-build"></div>
+        <div id="kid-tabs">
+          <div class="kid-tab" data-focus="base"><span class="ic">🏠</span>Fighters</div>
+          <div class="kid-tab" data-focus="builder"><span class="ic">🔨</span>Build</div>
+        </div>
+      </div>
       <div id="kid-placing">Tap where you want it!</div>
       <div id="kid-qe"></div>
       <div id="kid-sig">
@@ -334,8 +383,34 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       sigUps: root.querySelector('#kid-sig .ups'),
       qe: root.querySelector('#kid-qe'),
       build: root.querySelector('#kid-build'),
+      tabs: root.querySelectorAll('.kid-tab'),
+      busy: root.querySelector('#kid-busy'),
+      busyIc: root.querySelector('#kid-busy .ic'),
+      busyNm: root.querySelector('#kid-busy .nm'),
+      busyFill: root.querySelector('#kid-busy .fill'),
       placing: root.querySelector('#kid-placing'),
     };
+    // A tab does not open a panel; it SELECTS the thing the panel belongs to, which is
+    // the same thing tapping the builder or the base on the map does. One source of truth
+    // for "what am I looking at", so the two routes can never disagree — and tapping empty
+    // ground closes whichever panel was open, for free, because it clears the selection.
+    els.tabs.forEach(tab => {
+      tab.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        if (!g || !RC.Kids) return;
+        const want = tab.dataset.focus;
+        const ent = want === 'builder' ? RC.Kids.workerOf(g, g.playerOwner)
+                                       : RC.Kids.baseOf(g, g.playerOwner);
+        if (!ent || ent.dead) return;
+        // Tapping the open tab again closes it, so there is always a way back to a clear
+        // screen without having to find an empty patch of ground.
+        const open = (g.selection || []).includes(ent);
+        g.selection = open ? [] : [ent];
+        g.placing = null;
+        if (!open && RC.Audio) RC.Audio.play('select');
+      });
+    });
+
     // One tap fires it at the smartest spot — there is nothing to aim. The mode has no
     // build placement for the same reason: nothing to put down means nothing to put down
     // wrong, and a mis-tap would waste a charge the kid waited two minutes for.
@@ -354,6 +429,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
   // affordability state is a class toggle on the existing nodes. Rebuilding a
   // button the moment a finger is on it is how a tap gets swallowed.
   function renderShop(h) {
+    els.shop.classList.toggle('on', h.focus === 'base');
     const sig = h.roster.map(r => r.t + (r.isNew ? '!' : '')).join(',');
     if (sig !== lastRosterSig) {
       lastRosterSig = sig;
@@ -420,10 +496,39 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
   // no menus — and tapping the armed button again disarms it, so a kid who changed their
   // mind is never stuck holding a tower they cannot put back.
   let builtSig = '';
+  // Which panel is open, plus the two tabs' own state. Called every frame; everything in
+  // here is a class toggle, so it is cheap enough not to need its own change detection.
+  let everOpened = false;
+  function renderDock(h) {
+    if (h.focus) everOpened = true;
+    for (const tab of els.tabs) {
+      const want = tab.dataset.focus;
+      const missing = want === 'builder' ? !h.build.worker : false;
+      tab.classList.toggle('on', h.focus === want);
+      tab.classList.toggle('gone', missing);
+      // A gentle bob until the player has opened a panel even once, so the two tabs read
+      // as the way in rather than as decoration. It stops for good after the first tap —
+      // an animation that never ends stops being a hint and becomes wallpaper.
+      tab.classList.toggle('hint', !everOpened && !h.focus && !missing);
+    }
+    // The builder tab says what it is waiting for when there is no builder to tap.
+    const bt = Array.prototype.find.call(els.tabs, t => t.dataset.focus === 'builder');
+    if (bt) bt.title = h.build.worker ? 'Build walls and towers' : 'Your builder is coming back…';
+
+    const busy = h.busy;
+    els.busy.classList.toggle('on', !!busy && h.focus === 'builder');
+    if (busy) {
+      els.busyIc.textContent = busy.ic;
+      els.busyNm.textContent = busy.name + '…';
+      els.busyFill.style.width = Math.round(busy.pct * 100) + '%';
+    }
+  }
+
   function renderBuild(h) {
     const b = h.build;
-    if (!b || !b.items.length) { els.build.style.display = 'none'; return; }
-    els.build.style.display = 'flex';
+    const open = h.focus === 'builder';
+    els.build.classList.toggle('on', open && !!b && !!b.items.length);
+    if (!open || !b || !b.items.length) return;
     const sig = b.items.map(i => i.t).join(',');
     if (sig !== builtSig) {
       builtSig = sig;
@@ -446,13 +551,14 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       slots.id = 'kid-slots';
       els.build.appendChild(slots);
     }
-    // Affordability, armed state, and the slot count.
+    // Affordability, armed state, and the slot count. `busy` greys everything: one
+    // builder means one building at a time, and the pill above says which one.
     const nodes = els.build.querySelectorAll('.kid-bb');
     for (let i = 0; i < nodes.length; i++) {
       const it = b.items[i];
       if (!it) continue;
-      const full = b.used >= b.cap;
-      nodes[i].classList.toggle('poor', h.shard < it.cost || full);
+      const blocked = b.used >= b.cap || !!h.busy;
+      nodes[i].classList.toggle('poor', h.shard < it.cost || blocked);
       nodes[i].classList.toggle('on', g.placing === it.t);
     }
     const slots = els.build.querySelector('#kid-slots');
@@ -598,6 +704,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       els.timer.style.display = 'none';
     }
 
+    renderDock(h);
     renderShop(h);
     renderQueue(h);
     renderSig(h);
