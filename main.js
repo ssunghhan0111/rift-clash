@@ -707,7 +707,7 @@ window.RC = window.RC || {};
     show('ss-kidshint', simple, 'block');
     // Daily now lives in the always-visible front-page banner (rendered in buildStartScreen).
     const rh = document.getElementById('race-h');
-    if (rh) rh.textContent = defend ? 'Your faction' : 'Faction (enemy AI takes the other)';
+    if (rh) rh.textContent = defend ? 'Choose Your Army' : 'Choose Your Army (the computer takes another)';
     buildDepths();
   }
 
@@ -1065,7 +1065,7 @@ window.RC = window.RC || {};
         `<h3>Goal</h3><p>Gather <b>shards</b>, build structures, grow an army, and destroy the enemy — or, in Survival, protect the Rift Crystal.</p>
          <h3>Economy</h3><p>Workers (Wrench Bot / Slug / Acolyte) mine shard clusters and carry them back to your Core. Shards pay for everything.</p>
          <h3>Population</h3><p>Every unit costs population. Build <b>Power Cells</b> / <b>Spore Membranes</b> / <b>Warp Conduits</b> to raise your population cap.</p>
-         <h3>Faction identity</h3><p>Forge leans on upgrades, repair support and towers. Gloop units self-heal and their attacks melt armor. <b>Aether</b> units carry recharging plasma shields that soak damage before health — and their combat units <b>warp in at any Warp Conduit</b>, so a conduit built near the enemy becomes a forward staging point.</p>
+         <h3>What each army is good at</h3><p>Forge leans on upgrades, repair support and towers. Gloop units self-heal and their attacks melt armor. <b>Aether</b> units carry recharging plasma shields that soak damage before health — and their combat units <b>warp in at any Warp Conduit</b>, so a conduit built near the enemy becomes a forward staging point.</p>
          <h3>Build order</h3><p class="muted">Core → workers → Power Cell → Factory → army → upgrades &amp; air. Right-click to move, attack, gather or assist a build. Press &amp; hold any command button to see what it does.</p>
          <h3>Controls</h3><p class="muted">Left-click / drag to select · right-click to command · Q/W/E to produce · number keys for control groups · minimap and screen edges to pan.</p>`;
     } else if (tab === 'Modes') {
@@ -1253,7 +1253,7 @@ window.RC = window.RC || {};
     if (!p.matches) {
       body.innerHTML = '<div class="st-h">Match Record</div>'
         + '<div class="st-empty">No matches yet. Play a game and your record shows up here — '
-        + 'wins and losses per faction, best Survival wave, and how far you have pushed Crystal Guard.</div>';
+        + 'wins and losses per army, best Survival wave, and how far you have pushed Crystal Guard.</div>';
       return;
     }
 
@@ -1290,7 +1290,7 @@ window.RC = window.RC || {};
       if (!rr) continue;
       fr.push(tile((f.w || 0) + '–' + (f.l || 0), rr.name, rr.tint));
     }
-    if (fr.length) html += '<div class="st-h">By Faction</div><div class="st-grid">' + fr.join('') + '</div>';
+    if (fr.length) html += '<div class="st-h">By Army</div><div class="st-grid">' + fr.join('') + '</div>';
 
     body.innerHTML = html;
   }

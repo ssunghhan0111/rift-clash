@@ -75,9 +75,11 @@ RC.UI = (function () {
         restartBtn.textContent = host ? '↻ Back to Lobby (everyone)' : '↻ Back to Lobby — host only';
       }
       if (sub) sub.textContent = 'Online matches keep running — the game is not paused.';
+      const t = document.getElementById('gm-title'); if (t) t.textContent = 'Match menu';
     } else {
       if (restartBtn) { restartBtn.disabled = false; restartBtn.textContent = '↻ Restart'; }
       if (sub) sub.textContent = 'The match is paused while you decide.';
+      const t2 = document.getElementById('gm-title'); if (t2) t2.textContent = 'Paused';
     }
     el.gameMenu.classList.remove('hidden');
     syncPause();
@@ -89,8 +91,7 @@ RC.UI = (function () {
     syncPause();
   }
   function initGameMenu() {
-    const menuBtn = document.getElementById('tb-gamemenu');
-    if (menuBtn) menuBtn.addEventListener('click', openGameMenu);
+    // No separate ⏹ button any more — ⏸ is the only way in (see initTouchbar).
     const r = document.getElementById('gm-restart');
     if (r) r.addEventListener('click', () => { closeGameMenu(false); restartMatch(); });
     const q = document.getElementById('gm-quit');
@@ -107,11 +108,15 @@ RC.UI = (function () {
     if (online) g.paused = false;              // the server never stops ticking
     const on = !!g.paused;
     if (el.pauseBtn) {
-      el.pauseBtn.textContent = on ? '▶' : '⏸';
-      el.pauseBtn.title = online ? 'Pause is offline-only' : (on ? 'Resume (P)' : 'Pause (P)');
+      // Always ⏸, never ▶: the button opens the menu, and the menu's own "Keep Playing"
+      // is what resumes. It also stays ENABLED online — an online match cannot pause,
+      // but restart and quit still have to be reachable, which is precisely what the
+      // old disabled-when-online pause button made impossible without the ⏹ twin.
+      el.pauseBtn.textContent = '⏸';
+      el.pauseBtn.title = online ? 'Match menu — restart or quit' : 'Pause (P)';
       el.pauseBtn.classList.toggle('on', on);
-      el.pauseBtn.disabled = online;
-      el.pauseBtn.style.opacity = online ? '.4' : '';
+      el.pauseBtn.disabled = false;
+      el.pauseBtn.style.opacity = '';
     }
     if (el.pausedTag) el.pausedTag.classList.toggle('hidden', !on);
   }
@@ -212,10 +217,86 @@ RC.UI = (function () {
     }
   }
 
+  // ── Long-press descriptions (touch / pen) ────────────────────────────────
+  // Every HUD card already carries its stats and description in a `title` attribute,
+  // which is exactly the right text — the browser just only ever shows it on mouse
+  // HOVER. On a tablet that made unit and building descriptions unreachable: there is
+  // no hover, and the game has no other place that text appears.
+  //
+  // So: hold a card for 400ms and the same string renders in #tip-pop. The `title` is
+  // left in place, so a desktop mouse keeps the native tooltip and nothing regresses.
+  //
+  // Restricted to touch and pen deliberately. A mouse already has hover, and a
+  // long-press handler that swallowed slow mouse clicks would make the HUD feel broken
+  // for the players who never needed this in the first place.
+  // Anything inside the in-match UI that carries a `title`. Keyed off the attribute
+  // rather than a list of class names on purpose: every HUD card sets `title` already
+  // (build buttons, train buttons, upgrades, the passive row, queue slots, hero skills,
+  // transport contents, the touchbar), and a hand-written selector list would silently
+  // stop covering whichever card someone adds next.
+  const TIP_ROOTS = ['#hud', '#touchbar', '#cmd-panel'];
+  const TIP_MS = 400;
+  function initLongPressTips() {
+    const pop = document.getElementById('tip-pop');
+    if (!pop) return;
+    let timer = null, fired = false, startX = 0, startY = 0;
+
+    const hide = () => pop.classList.add('hidden');
+    const show = text => {
+      // The tooltips are written as "Name — description\n[stats]"; bolding the first
+      // line is what makes this readable as a card rather than a wall of text.
+      const nl = text.indexOf('\n');
+      const head = nl < 0 ? text : text.slice(0, nl);
+      const rest = nl < 0 ? '' : text.slice(nl + 1);
+      pop.innerHTML = '<b>' + escapeHtml(head) + '</b>' + (rest ? '\n' + escapeHtml(rest) : '')
+                    + '<span class="tp-hint">Tap anywhere to close</span>';
+      pop.classList.remove('hidden');
+    };
+    const cancel = () => { clearTimeout(timer); timer = null; };
+
+    document.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse') return;                 // hover already covers it
+      if (!e.target.closest) { hide(); return; }
+      const card = e.target.closest('[title]');
+      // Must be a real HUD card, not the start screen or a stray titled element.
+      if (!card || !TIP_ROOTS.some(r => card.closest(r))) { hide(); return; }
+      const text = card.getAttribute('title');
+      if (!text || text.length < 3) return;
+      fired = false; startX = e.clientX; startY = e.clientY;
+      cancel();
+      timer = setTimeout(() => { fired = true; show(text); }, TIP_MS);
+    }, true);
+
+    // A drag is a drag, not a hold — box-select and map panning start this way.
+    document.addEventListener('pointermove', e => {
+      if (!timer) return;
+      if (Math.abs(e.clientX - startX) > 12 || Math.abs(e.clientY - startY) > 12) cancel();
+    }, true);
+    document.addEventListener('pointerup', cancel, true);
+    document.addEventListener('pointercancel', () => { cancel(); }, true);
+
+    // Swallow the click that a long press would otherwise deliver, so reading what a
+    // Chaingunner costs never also queues one.
+    document.addEventListener('click', e => {
+      if (!fired) return;
+      fired = false;
+      e.stopPropagation(); e.preventDefault();
+      hide();
+    }, true);
+  }
+
   // 터치용 툴바 — 키보드 단축키(P/F/Space/Esc/컨트롤그룹)를 버튼으로 대체.
   // 유닛 정지(S)는 버튼에서 뺐다 — 키보드에는 그대로 남아 있다.
   function initTouchbar() {
-    document.getElementById('tb-pause').addEventListener('click', togglePause);
+    initLongPressTips();
+    // ⏸ opens the pause menu rather than toggling directly. Pause and the end-match
+    // dialog were two buttons for one moment — the dialog always paused the match — so
+    // there is now one door in and the menu is what you resume, restart or quit from.
+    const pauseBtn = document.getElementById('tb-pause');
+    if (pauseBtn) pauseBtn.addEventListener('click', () => {
+      if (el.gameMenu && !el.gameMenu.classList.contains('hidden')) closeGameMenu(true);
+      else openGameMenu();
+    });
     initVoiceButton();
     initFullscreen();
 
@@ -250,12 +331,9 @@ RC.UI = (function () {
       if (muteBtn) muteBtn.textContent = RC.Audio.enabled ? '🔊' : '🔇';
     });
 
-    const amoveBtn = document.getElementById('tb-amove');
-    if (amoveBtn) amoveBtn.addEventListener('click', () => { if (RC.Input.armAttackMove) RC.Input.armAttackMove(); });
-
-    document.getElementById('tb-cancel').addEventListener('click', () => {
-      g.placing = null; g.selection = [];
-    });
+    // The attack-move and deselect buttons are gone from the touchbar. Both verbs live
+    // on the keyboard (A and Esc) and Esc is still wired in input.js, so nothing was
+    // lost except two permanently-visible buttons nobody was pressing.
 
     document.querySelectorAll('.tb-groups .grp').forEach(btn => {
       let timer = null, longPressed = false, lastTap = 0;

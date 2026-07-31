@@ -503,7 +503,14 @@
   }
   #ss-map-desc b { color: var(--text); font-weight: 700; }
 
-  #ss-modes, #ss-races { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  #ss-modes { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  #ss-races {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+    width: calc(75% - 3px); margin: 0 auto;
+  }
+  /* Where the maps drop to three tracks, three army cards of the same width is simply
+     the full column, and the arithmetic above collapses to 100%. */
+  @media (max-width: 980px) { #ss-races { width: 100%; } }
   /* The depth picker sits directly under the mode cards and continues the same choice, so
      it lines up like them: a centred row of EQUAL-width cards. Left to inherit .mode-sec's
      column it stacked two ragged, differently-sized blocks, and two options of different
@@ -516,16 +523,23 @@
   .colorsw { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.4); transition: transform .08s ease; }
   .colorsw:hover { transform: scale(1.12); }
   .colorsw.sel { border-color: #fff; transform: scale(1.18); box-shadow: 0 0 0 2px rgba(255,255,255,0.35), 0 2px 8px rgba(0,0,0,0.5); }
-  /* Three across, not two-then-one. At 280px minimum these wrapped the third faction
-     onto its own row and ate ~750px of page; sharing the row keeps the comparison
-     side-by-side, which is the only way a faction picker is any use. */
-  .racebtn { flex: 1 1 0; min-width: 0; max-width: 250px; text-align: center; border-top-width: 3px; }
+  /* Three across, not two-then-one. At 280px minimum these wrapped the third army onto
+     a row of its own and ate ~750px of page; sharing the row keeps the comparison
+     side-by-side, which is the only way an army picker is any use.
+     Sized to match a MAP card exactly, at any column width. The maps are a 4-track grid
+     with a 12px gap, so one map card is (W - 36) / 4. Three army cards of that width
+     plus two gaps is 3(W - 36)/4 + 24, which simplifies to 75% of W minus 3px — hence
+     the container width below. Change the map grid and this needs changing with it. */
+  /* Scoped by #ss-races so it beats the base .modebtn rule below, which sets
+     min-width:150px and is declared later — that min-width pushed three cards to 450px
+     inside a 358px phone column and scrolled the page sideways. */
+  #ss-races .racebtn { min-width: 0; text-align: center; border-top-width: 3px; padding: 10px 8px; }
   /* The paragraph moved out to #ss-race-desc below the row — inside the card it either
      set the row's height to the longest blurb or clipped the other two. */
   .racebtn .mb-sub { display: none; }
   /* 종족 얼굴 — 각 종족의 영웅 초상 */
   .racebtn .race-face {
-    display: block; width: 100%; height: 86px; margin: -2px 0 7px;
+    display: block; width: 100%; height: 118px; margin: -2px 0 7px;
     border-radius: 5px; background: #05080e; image-rendering: auto;
   }
   .racebtn.sel .race-face { box-shadow: 0 0 0 1px var(--orange); }
@@ -536,8 +550,8 @@
   }
   #ss-race-desc b { color: var(--text); font-weight: 700; }
   @media (max-width: 720px) {
-    .racebtn { max-width: none; }
-    .racebtn .race-face { height: 76px; }
+
+    .racebtn .race-face { height: 96px; }
   }
   .modebtn {
     min-width: 150px; padding: 12px 18px; text-align: center;
@@ -975,6 +989,30 @@
   #gm-restart { background: var(--orange); color: #10171f; border-color: transparent; }
   #gm-quit { color: var(--bad); }
 
+  /* ── Long-press description (touch) ─────────────────────────────────────
+     Every card in the HUD carries its stats and description in a `title`, which the
+     browser only reveals on mouse HOVER — so on a tablet that text was unreachable.
+     Holding a card for 400ms shows the same text here instead. */
+  #tip-pop {
+    position: fixed; z-index: 70; left: 50%; transform: translateX(-50%);
+    /* Clear of the bottom command panel — the first version floated at bottom:16px
+       and covered the very cards it was describing. */
+    bottom: 172px; width: min(460px, 92vw); box-sizing: border-box;
+    background: rgba(10,14,22,.97); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; box-shadow: 0 12px 40px rgba(0,0,0,.65);
+    font-size: 12.5px; line-height: 1.5; color: var(--text); white-space: pre-line;
+    pointer-events: none;              /* never eats the tap that dismisses it */
+  }
+  #tip-pop.hidden { display: none; }
+  /* On a short landscape tablet the HUD eats most of the height; sit higher still
+     rather than letting the panel run off the top of the screen. */
+  @media (max-height: 560px) { #tip-pop { bottom: 150px; font-size: 11.5px; padding: 9px 11px; } }
+  #tip-pop b { color: #fff; font-size: 13.5px; }
+  #tip-pop .tp-hint {
+    display: block; margin-top: 8px; font-family: var(--mono); font-size: 9.5px;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--dim); opacity: .7;
+  }
+
   #paused-tag {
     position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 12;
     background: #0d1520e8; border: 1px solid var(--line); color: var(--cyan);
@@ -1226,20 +1264,21 @@
     <canvas id="screen"></canvas>
     <div id="toast"></div>
     <div id="touchbar">
+      <!-- One button, not two. Pause and the end-match dialog were always the same
+           moment — opening the dialog already paused the match — so ⏸ now opens a
+           pause menu you resume, restart or quit from. -->
       <button class="tbtn" id="tb-pause" title="Pause (P)">⏸</button>
-      <button class="tbtn" id="tb-gamemenu" title="End match — restart or quit">⏹</button>
       <button class="tbtn" id="tb-voice" title="Voice chat — talk to the other players">🎤</button>
       <button class="tbtn" id="tb-chat" title="Chat with the other players (Enter)">💬</button>
       <button class="tbtn" id="tb-idle" title="Find idle worker (F)">👷</button>
       <button class="tbtn" id="tb-home" title="Go to base (Space)">🏠</button>
       <button class="tbtn" id="tb-hero" title="Select hero (H)">⭐</button>
-      <button class="tbtn" id="tb-amove" title="Attack-move (A)">⚔️</button>
-      <button class="tbtn" id="tb-cancel" title="Deselect (Esc)">✕</button>
+      <!-- Attack-move (⚔️) and Deselect (✕) used to sit here. Both are still on the
+           keyboard — A and Esc — they just were not worth a permanent touch button. -->
       <div class="tb-groups">
         <button class="tbtn grp" data-g="1">1</button>
         <button class="tbtn grp" data-g="2">2</button>
         <button class="tbtn grp" data-g="3">3</button>
-        <button class="tbtn grp" data-g="4">4</button>
       </div>
     </div>
     <canvas id="minimap" width="200" height="150"></canvas>
@@ -1257,15 +1296,16 @@
       </div>
     </div>
 
-    <!-- ⏹ End match — restart or quit. The game is held paused while this is open. -->
+    <!-- ⏸ Pause menu. Resume, restart or quit — the match is held paused while it is
+         open (offline; an online match keeps running and says so). -->
     <div id="gamemenu" class="hidden">
       <div class="gm-card">
-        <div class="gm-title">End this match?</div>
+        <div class="gm-title" id="gm-title">Paused</div>
         <div class="gm-sub" id="gm-sub">The match is paused while you decide.</div>
         <div class="gm-btns">
+          <button id="gm-cancel">▶ Keep Playing</button>
           <button id="gm-restart">↻ Restart</button>
           <button id="gm-quit">⏏ Quit to Menu</button>
-          <button id="gm-cancel">Keep Playing</button>
         </div>
       </div>
     </div>
@@ -1307,6 +1347,8 @@
     </div>
 
     <div id="paused-tag" class="hidden">⏸ PAUSED</div>
+    <!-- Filled by RC.UI long-press handling; see initLongPressTips. -->
+    <div id="tip-pop" class="hidden"></div>
   </div>
 
   <div id="hud">
@@ -1425,7 +1467,7 @@
     <div id="ss-squad"></div>
   </div>
   <div id="sec-race" class="mode-sec">
-    <div class="ss-h" id="race-h">Faction (enemy AI takes the other)</div>
+    <div class="ss-h" id="race-h">Choose Your Army (the computer takes another)</div>
     <div id="ss-races"></div>
     <div id="ss-race-desc"></div>
   </div>
@@ -1622,7 +1664,7 @@ Made for younger players. <b>No base building, no mining</b> — shards arrive o
   <button id="lobby-link" title="Copy a link that drops a friend straight into this game">🔗 Copy invite link</button>
   <div class="ss-h">Players</div>
   <div id="lobby-players" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; max-width:640px;"></div>
-  <div class="ss-h">Your faction</div>
+  <div class="ss-h">Your Army</div>
   <div id="lobby-races" style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;"></div>
   <div id="lobby-host" class="hidden" style="display:flex; flex-direction:column; align-items:center;">
     <div id="lobby-vs-opts" style="display:flex; flex-direction:column; align-items:center;">

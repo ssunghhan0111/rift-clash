@@ -333,28 +333,28 @@ RC.UNITS = {
   },
   volt: {
     id: 'volt', name: 'Volt Trooper', role: 'Infantry',
-    hp: 110, dmg: 9, range: 78, cd: 0.85, speed: 88, r: 14, sight: 200,
+    hp: 116, dmg: 9.5, range: 78, cd: 0.85, speed: 88, r: 14, sight: 200,
     cost: 60, time: 15, supply: 1, armor: 0, energy: 60, key: 'Q',
-    passive: { id: 'chain', pct: 0.45, range: 92, jumps: 1 },
+    passive: { id: 'chain', pct: 0.47, range: 92, jumps: 1 },
     desc: 'Basic ranged infantry. Its bolts arc to a second enemy, so massed Volts shred packed lines.'
   },
   shielder: {
     id: 'shielder', name: 'Shieldbearer', role: 'Shield Tank',
-    hp: 260, dmg: 7, range: 24, cd: 1.1, speed: 64, r: 18, sight: 170,
+    hp: 330, dmg: 8.9, range: 24, cd: 1.1, speed: 64, r: 18, sight: 170,
     cost: 110, time: 24, supply: 2, armor: 3, energy: 70, key: 'W',
-    passive: { id: 'guardaura', armor: 2, radius: 150, thorns: 0.25 },
+    passive: { id: 'guardaura', armor: 2.5, radius: 150, thorns: 0.25 },
     desc: 'Frontline damage-soaker. Everything standing behind it is armoured, and hitting it hurts.'
   },
   spark: {
     id: 'spark', name: 'Spark Cannon', role: 'Siege',
-    hp: 90, dmg: 26, range: 150, cd: 2.2, speed: 52, r: 16, sight: 185,
+    hp: 94, dmg: 27.3, range: 150, cd: 2.2, speed: 52, r: 16, sight: 185,
     cost: 150, time: 30, supply: 2, armor: 0, energy: 70, splash: 42, key: 'E',
     passive: { id: 'mark', amp: 0.25, dur: 5 },
     desc: 'Long-range siege unit. Its shells paint a target that your whole army then hits harder.'
   },
   hover: {
     id: 'hover', name: 'Hoverwing', role: 'Air',
-    hp: 90, dmg: 12, range: 90, cd: 0.8, speed: 130, r: 14,
+    hp: 162, dmg: 21.6, range: 90, cd: 0.8, speed: 130, r: 14,
     cost: 120, time: 22, supply: 2, armor: 0, energy: 60, flying: true, sight: 300, key: 'Q',
     passive: { id: 'swift', mul: 1.35, dur: 1.8 },
     desc: 'Fast air unit that accelerates the instant it fires — it is always leaving as it shoots.'
@@ -375,7 +375,7 @@ RC.UNITS = {
   },
   chaingunner: {
     id: 'chaingunner', name: 'Chaingunner', role: 'Heavy Gunner',
-    hp: 145, dmg: 6, range: 100, cd: 0.32, speed: 78, r: 15, sight: 195,
+    hp: 176, dmg: 7.3, range: 100, cd: 0.32, speed: 78, r: 15, sight: 195,
     cost: 95, time: 19, supply: 2, armor: 1, energy: 70, key: 'R',
     passive: { id: 'shred', amt: 1, dur: 4, max: 5 },
     desc: 'Twin-gun trooper. Its stream of fire peels armour clean off whatever it is pointed at.'
@@ -383,14 +383,14 @@ RC.UNITS = {
   // ── 신규 항공 ──
   heli: {
     id: 'heli', name: 'Rattler Heli', role: 'Gunship',
-    hp: 150, dmg: 17, range: 105, cd: 1.0, speed: 118, r: 16, sight: 255,
+    hp: 171, dmg: 19.4, range: 105, cd: 1.0, speed: 118, r: 16, sight: 255,
     cost: 150, time: 24, supply: 3, armor: 1, energy: 80, flying: true, splash: 20, key: 'W',
-    passive: { id: 'burn', dmg: 5, dur: 4, max: 3 },
+    passive: { id: 'burn', dmg: 5.7, dur: 4, max: 3 },
     desc: 'Ground-attack gunship firing incendiary rockets that leave the target burning.'
   },
   jet: {
     id: 'jet', name: 'Falcon Jet', role: 'Air Superiority',
-    hp: 120, dmg: 20, range: 120, cd: 0.7, speed: 170, r: 15,
+    hp: 171, dmg: 28.5, range: 120, cd: 0.7, speed: 170, r: 15,
     cost: 175, time: 26, supply: 3, armor: 0, energy: 70, flying: true, sight: 300, key: 'E',
     passive: { id: 'execute', below: 0.35, mul: 1.8 },
     desc: 'Very fast fighter. Falls on anything already wounded and finishes it outright.'
@@ -415,42 +415,42 @@ RC.UNITS = {
   },
   globling: {
     id: 'globling', name: 'Globling', role: 'Swarm Melee',
-    hp: 70, dmg: 7, range: 20, cd: 0.7, speed: 132, r: 12, sight: 160,
-    cost: 40, time: 8, supply: 1, armor: 0, energy: 50, regen: 5, race: 'gloop',
-    acid: { dmg: 2, dur: 4, shred: 1, max: 5 }, key: 'Q',
-    passive: { id: 'lifesteal', pct: 0.35 },
+    hp: 81, dmg: 8.1, range: 20, cd: 0.7, speed: 132, r: 12, sight: 160,
+    cost: 40, time: 8, supply: 1, armor: 0, energy: 50, regen: 5.8, race: 'gloop',
+    acid: { dmg: 2.3, dur: 4, shred: 1, max: 5 }, key: 'Q',
+    passive: { id: 'lifesteal', pct: 0.41 },
     desc: 'Cheap, fast swarm melee. Bites apply acid and feed it — a big enough swarm never stops healing.'
   },
   spitter: {
     id: 'spitter', name: 'Spitter', role: 'Acid Ranged',
-    hp: 90, dmg: 11, range: 120, cd: 1.0, speed: 86, r: 14, sight: 205,
-    cost: 65, time: 14, supply: 1, armor: 0, energy: 80, regen: 3, race: 'gloop',
-    acid: { dmg: 4, dur: 5, shred: 2, max: 5 }, key: 'W',
-    passive: { id: 'cleave', pct: 0.5, radius: 62 },
+    hp: 60, dmg: 7.4, range: 120, cd: 1.0, speed: 86, r: 14, sight: 205,
+    cost: 65, time: 14, supply: 1, armor: 0, energy: 80, regen: 2, race: 'gloop',
+    acid: { dmg: 2.7, dur: 5, shred: 2, max: 5 }, key: 'W',
+    passive: { id: 'cleave', pct: 0.34, radius: 62 },
     desc: 'Ranged acid-spitter. Its spray splatters onto everything crowded around the target.'
   },
   bloat: {
     id: 'bloat', name: 'Bloat', role: 'Acid Tank',
-    hp: 300, dmg: 10, range: 22, cd: 1.3, speed: 58, r: 18, sight: 150,
-    cost: 105, time: 22, supply: 2, armor: 2, energy: 0, regen: 6, race: 'gloop',
-    acid: { dmg: 3, dur: 4, shred: 1, max: 5 }, deathBurst: { radius: 110, dmg: 40 }, key: 'E',
-    passive: { id: 'thorns', pct: 0.35 },
+    hp: 252, dmg: 5.5, range: 22, cd: 1.3, speed: 58, r: 18, sight: 150,
+    cost: 105, time: 22, supply: 2, armor: 2, energy: 0, regen: 2, race: 'gloop',
+    acid: { dmg: 1, dur: 4, shred: 1, max: 5 }, deathBurst: { radius: 110, dmg: 14 }, key: 'E',
+    passive: { id: 'thorns', pct: 0.12 },
     desc: 'Giant slime that soaks damage. Regenerates fast, splashes back at whatever bites it, and bursts with acid on death.'
   },
   hydra: {
     id: 'hydra', name: 'Venom Hydra', role: 'Venom Artillery',
-    hp: 165, dmg: 15, range: 150, cd: 1.35, speed: 72, r: 17, sight: 185,
-    cost: 120, time: 24, supply: 2, armor: 1, energy: 90, regen: 4, race: 'gloop',
-    acid: { dmg: 7, dur: 6, shred: 3, max: 6 }, key: 'R',
-    passive: { id: 'venom', dmg: 8, dur: 6, max: 4 },
+    hp: 135, dmg: 12.3, range: 150, cd: 1.35, speed: 72, r: 17, sight: 185,
+    cost: 120, time: 24, supply: 2, armor: 1, energy: 90, regen: 3.3, race: 'gloop',
+    acid: { dmg: 5.7, dur: 6, shred: 3, max: 6 }, key: 'R',
+    passive: { id: 'venom', dmg: 6.5, dur: 6, max: 4 },
     desc: 'Three-headed serpent that hurls venom from far away. What it hits keeps dying long after the shot lands.'
   },
   floater: {
     id: 'floater', name: 'Floater', role: 'Air Bomber',
-    hp: 130, dmg: 16, range: 100, cd: 1.1, speed: 122, r: 16,
-    cost: 135, time: 22, supply: 2, armor: 0, energy: 80, regen: 3, race: 'gloop',
-    flying: true, sight: 255, splash: 18, acid: { dmg: 3, dur: 4, shred: 1, max: 4 }, key: 'Q',
-    passive: { id: 'burn', dmg: 4, dur: 5, max: 3 },
+    hp: 137, dmg: 16.9, range: 100, cd: 1.1, speed: 122, r: 16,
+    cost: 135, time: 22, supply: 2, armor: 0, energy: 80, regen: 3.2, race: 'gloop',
+    flying: true, sight: 255, splash: 18, acid: { dmg: 3.2, dur: 4, shred: 1, max: 4 }, key: 'Q',
+    passive: { id: 'burn', dmg: 4.2, dur: 5, max: 3 },
     desc: 'Drifting air unit that drops caustic spores which keep eating after they land.'
   },
 
@@ -468,41 +468,41 @@ RC.UNITS = {
   },
   ardent: {
     id: 'ardent', name: 'Ardent', role: 'Melee Vanguard',
-    hp: 105, dmg: 17, range: 22, cd: 0.8, speed: 96, r: 14, sight: 175,
+    hp: 109, dmg: 17.6, range: 22, cd: 0.8, speed: 96, r: 14, sight: 175,
     cost: 80, time: 16, supply: 2, armor: 1, energy: 60,
-    shield: 70, race: 'aether', key: 'Q',
-    passive: { id: 'lifesteal', pct: 0.3, toShield: true },
+    shield: 72, race: 'aether', key: 'Q',
+    passive: { id: 'lifesteal', pct: 0.31, toShield: true },
     desc: 'Shielded melee warrior. Every blow pours back into its own plasma shield.'
   },
   lancer: {
     id: 'lancer', name: 'Void Lancer', role: 'Ranged Support',
-    hp: 100, dmg: 19, range: 128, cd: 1.15, speed: 82, r: 15, sight: 215,
+    hp: 101, dmg: 19.2, range: 128, cd: 1.15, speed: 82, r: 15, sight: 215,
     cost: 125, time: 22, supply: 2, armor: 1, energy: 80,
-    shield: 90, race: 'aether', key: 'W',
+    shield: 91, race: 'aether', key: 'W',
     passive: { id: 'mark', amp: 0.22, dur: 4 },
     desc: 'Long-range shielded striker whose lance-fire leaves a target the rest of your army carves open.'
   },
   bastion: {
     id: 'bastion', name: 'Bastion', role: 'Heavy Siege',
-    hp: 190, dmg: 42, range: 140, cd: 2.0, speed: 56, r: 18, sight: 180,
+    hp: 127, dmg: 28.1, range: 140, cd: 2.0, speed: 56, r: 18, sight: 180,
     cost: 195, time: 32, supply: 4, armor: 3, energy: 70,
-    shield: 160, splash: 38, race: 'aether', key: 'E',
+    shield: 107, splash: 38, race: 'aether', key: 'E',
     passive: { id: 'knock', dist: 26, siege: 1.5 },
     desc: 'Walking siege platform with an enormous shield bank. Its shells hurl infantry back and tear buildings apart.'
   },
   seraph: {
     id: 'seraph', name: 'Seraph', role: 'Air Superiority',
-    hp: 110, dmg: 23, range: 118, cd: 0.75, speed: 158, r: 15,
+    hp: 131, dmg: 27.3, range: 118, cd: 0.75, speed: 158, r: 15,
     cost: 185, time: 26, supply: 4, armor: 0, energy: 80,
-    shield: 110, flying: true, sight: 300, race: 'aether', key: 'Q',
-    passive: { id: 'chain', pct: 0.4, range: 95, jumps: 1 },
+    shield: 131, flying: true, sight: 300, race: 'aether', key: 'Q',
+    passive: { id: 'chain', pct: 0.47, range: 95, jumps: 1 },
     desc: 'Swift shielded interceptor. Its beam forks to a second target on every pass.'
   },
   bladesworn: {
     id: 'bladesworn', name: 'Bladesworn', role: 'Blade Assassin',
-    hp: 95, dmg: 24, range: 24, cd: 0.55, speed: 122, r: 13, sight: 200,
+    hp: 79, dmg: 20, range: 24, cd: 0.55, speed: 122, r: 13, sight: 200,
     cost: 110, time: 18, supply: 2, armor: 0, energy: 70,
-    shield: 65, race: 'aether', key: 'R',
+    shield: 54, race: 'aether', key: 'R',
     passive: { id: 'crit', chance: 0.3, mul: 2.2 },
     desc: 'Lightning-fast duellist with two razor knives. Fragile, but a third of its cuts land lethal.'
   },
@@ -1316,7 +1316,7 @@ RC.kidBuildFor = function (raceId) {
 RC.RACES = {
   forge: {
     id: 'forge', name: 'Forge', tint: '#f08a2a',
-    blurb: 'Machine legion — the balanced all-rounder. The widest roster, army upgrades and towers, with Patch Bot / Pulse Coil support. Strong everywhere, extreme nowhere.',
+    blurb: 'Robot army. Good at everything, best at nothing — the safest army to learn on. It has the most different units to build, it can upgrade them, and it builds the sturdiest towers.',
     core: 'core', worker: 'wrench',
     buildable: ['cell', 'factory', 'hoverpad', 'arclab', 'stonethrower', 'rampart'],
     ai: {
@@ -1329,7 +1329,7 @@ RC.RACES = {
   },
   gloop: {
     id: 'gloop', name: 'Gloop', tint: '#5ddc7a',
-    blurb: 'Acid swarm — cheap, fast, self-healing units you field in overwhelming numbers. Low supply means far bigger armies; attacks melt armor and no healers are needed. Quantity IS the strategy.',
+    blurb: 'Bug swarm. Every bug is cheap, quick and heals itself, so you can have LOTS of them at once. One is easy to squash — fifty is a real problem. Their acid melts armour.',
     core: 'biocore', worker: 'slug',
     buildable: ['membrane', 'hatchery', 'spire', 'evochamber', 'venomspire', 'carapace'],
     ai: {
@@ -1342,7 +1342,7 @@ RC.RACES = {
   },
   aether: {
     id: 'aether', name: 'Aether', tint: '#b98cff',
-    blurb: 'Alien ascendants — a handful of shielded elites that warp in at forward Warp Conduits and hit like a siege. Heavy units eat supply, so you field FEW units — but each one is devastating.',
+    blurb: 'Alien warriors. You only get a few, but each one is huge, carries a shield that recharges, and hits very hard. They can also teleport to any Warp Conduit you have built.',
     core: 'nexus', worker: 'acolyte',
     buildable: ['conduit', 'warpgate', 'astralgate', 'conclave', 'prismlaser', 'aegiswall'],
     ai: {

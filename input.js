@@ -522,7 +522,12 @@ RC.Input = (function () {
     const k = e.key.toLowerCase();
 
     const me = g.playerOwner;
-    if (k === 'escape') { g.placing = null; g.selection = []; return; }
+    if (k === 'escape') {
+      const gm = document.getElementById('gamemenu');
+      if (gm && !gm.classList.contains('hidden')) { if (RC.UI) RC.UI.closeGameMenu(true); return; }
+      g.placing = null; g.selection = [];
+      return;
+    }
     // 확대/축소 — 휠이 없는 노트북용. 0 은 기본 배율로 복귀.
     if (k === '+' || k === '=') { e.preventDefault(); zoomBy(CFG.ZOOM_STEP, null, null); return; }
     if (k === '-' || k === '_') { e.preventDefault(); zoomBy(1 / CFG.ZOOM_STEP, null, null); return; }
@@ -539,7 +544,15 @@ RC.Input = (function () {
       return;
     }
     // 일시정지 — 온라인은 서버가 계속 돌기 때문에 막는다. 버튼 모양도 같이 바뀌도록 UI를 통한다.
-    if (k === 'p') { if (RC.UI && RC.UI.togglePause) RC.UI.togglePause(); else if (!RC.online) g.paused = !g.paused; return; }
+    // P opens the same pause menu the ⏸ button does, so the key and the button cannot
+    // end up meaning different things. Esc (below) closes it.
+    if (k === 'p') {
+      const gm = document.getElementById('gamemenu');
+      if (RC.UI && RC.UI.openGameMenu) {
+        if (gm && !gm.classList.contains('hidden')) RC.UI.closeGameMenu(true); else RC.UI.openGameMenu();
+      } else if (!RC.online) g.paused = !g.paused;
+      return;
+    }
     if (k === 's') {
       const ids = g.selection.filter(u => u.kind === 'unit' && u.owner === me).map(u => u.id);
       if (ids.length) RC.cmd(g, { t: 'stop', ids });
@@ -595,8 +608,10 @@ RC.Input = (function () {
       }
     }
 
-    // 컨트롤 그룹 1~4
-    if ('1234'.includes(k)) {
+    // 컨트롤 그룹 1~3 — 터치바가 세 개만 보여주므로 키보드도 셋으로 맞춘다.
+    // Three, not four: the touchbar shows three, and a keyboard-only group 4 would be
+    // a group a tablet player could fill but never select.
+    if ('123'.includes(k)) {
       if (e.ctrlKey) {
         g.groups = g.groups || {};
         g.groups[k] = g.selection.slice();
