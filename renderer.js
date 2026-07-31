@@ -3534,7 +3534,10 @@ RC.Renderer = (function () {
   const PARTY_COLS = ['#ffd24a', '#ff6ba8', '#63c7ff', '#5ddc7a', '#b98cff', '#ff9b3d', '#ffffff'];
   function drawParty(f) {
     const life = f.life || 2.2;
-    const prog = 1 - Math.max(0, f.t) / life;          // 0 → 1
+    // Clamped low as well as high, for the same reason as the ability effects above:
+    // an fx pushed with a t longer than its own `life` would otherwise drive negative
+    // particle radii straight into ctx.arc.
+    const prog = Math.min(1, Math.max(0, 1 - Math.max(0, f.t) / life));
     if (prog >= 1) return;
     const n = f.n || 40;
     const rnd = boomRng(f);
@@ -3581,9 +3584,28 @@ RC.Renderer = (function () {
     if (f.party) { drawParty(f); return; }
     // 스킬 이펙트 (범위 파동 / 치유 / 점멸)
     if (f.abil) {
-      const ULT_LIFE = { barrage: 1.1, swarm: 0.9, aegis: 1.0 };
-      const life = ULT_LIFE[f.abil] || (f.abil === 'nova' ? 0.5 : (f.abil === 'heal' ? 0.5 : 0.35));
-      const prog = 1 - Math.max(0, f.t) / life;
+      // `t` counts DOWN from the lifetime the ability picked when it pushed the effect
+      // (game.js decays it every tick and drops the entry at zero), so the first frame
+      // we see an effect tells us how long it was meant to run. Stamp that once and
+      // derive `prog` from it.
+      //
+      // This replaces a hand-written lifetime table that had drifted badly out of step
+      // with the abilities it was describing. It gave every unlisted effect 0.35s, while
+      // Firestorm pushes a 'salvo' for 1.0s, Bulwark a 'dome' for 1.0s, Ember's Flare a
+      // 'nova' for 0.6s against a 0.5s entry, and so on — nine of the ability effects
+      // pushed a longer `t` than the table allowed. For those, `1 - t/life` was NEGATIVE
+      // on the very first frame, `f.radius * prog` came out negative with it, and
+      // ctx.arc threw "The radius provided (-321.619) is negative". The global error
+      // boundary caught that as "Something went wrong" and ended the match — so using a
+      // hero's ultimate could kill the run outright.
+      //
+      // Deriving the lifetime from the effect itself means an ability can pick any
+      // duration it likes and the table can never fall out of date again.
+      if (f._life === undefined) f._life = Math.max(0.001, f.t);
+      // Clamped as well as fixed, deliberately. `prog` feeds a radius or an alpha in
+      // every branch below, and a crash out of a live match is far too high a price to
+      // pay for one bad frame of artwork.
+      const prog = Math.min(1, Math.max(0, 1 - Math.max(0, f.t) / f._life));
       ctx.save();
       if (f.abil === 'barrage') {
         // 궤도 폭격 — 하늘에서 떨어지는 광선 다발 + 확장하는 충격파 + 화구
