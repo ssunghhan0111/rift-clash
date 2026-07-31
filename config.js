@@ -783,6 +783,139 @@ RC.resolveHero = function (id) {
   return (RC.UNITS[a] && RC.UNITS[a].hero) ? a : RC.DEFAULT_HERO;
 };
 
+// ── Hero traits — what the front-page overview says about each hero ──────────
+// Read by the start-screen hero panel (main.js `renderHeroOverview`) and by nothing
+// else: this is PROSE, not balance. Nothing here is consumed by the sim, so editing a
+// line changes what the player is told and never what the hero does.
+//
+// Kept out of RC.UNITS deliberately. The unit table is the stat block the sim walks
+// every tick, and padding it with menu copy makes the thing that matters harder to
+// read. `pitch` is one line under the name; `strong`/`weak` are the two columns.
+//
+// The rule for writing these: every line must be checkable against the stat block or
+// the kit above it. "Toughest hero in the game" is true because Rook has the highest hp
+// in RC.HEROES — if a balance pass moves that, this line is now a lie and wants fixing.
+// Vague praise ("versatile", "well-rounded") teaches nobody anything and does not
+// belong here.
+//
+// Deliberately RELATIVE about health, absolute about everything else. RC.BALANCE.HP_MULT
+// rescales every hp in the game at load (1.35 today), so a line reading "620 HP" would
+// contradict the 837 the panel prints two inches above it. Range, cooldown and the
+// percentages in the kit are not rescaled, so those are safe to quote exactly.
+RC.HERO_TRAITS = {
+  rook: {
+    pitch: 'Stands in front of the thing you cannot afford to lose.',
+    strong: [
+      'Toughest hero in the game — the deepest health pool and the heaviest armour',
+      'Passive aura hands every nearby ally +2 armour',
+      'Bulwark can save a crystal that was already lost',
+      'Ground Slam freezes an entire push where it stands',
+    ],
+    weak: [
+      'Melee reach — has to walk into the damage to deal any',
+      'Slowest hero on the map',
+      'Nothing in the kit heals it back up',
+      'Little answer to an enemy that refuses to engage',
+    ],
+  },
+  thorn: {
+    pitch: 'Feeds on the fight and outlasts it.',
+    strong: [
+      'Heals for 30% of every hit it lands',
+      'Gets stronger the longer a fight runs',
+      'Venom keeps killing long after the trade is over',
+      'Hatch the Brood pays out five free bodies',
+    ],
+    weak: [
+      'Folds quickly if focused before it can feed',
+      'Poison needs time — weak in short, sharp bursts',
+      'Cannot protect the crystal directly',
+      'Struggles against anything it cannot reach',
+    ],
+  },
+  prism: {
+    pitch: 'Be where the fight is not, and stop it where it is.',
+    strong: [
+      'Highest basic damage of the five',
+      'Carries a shield on top of its health — the only hero that does',
+      'Phase Shift refreshes that shield on every blink',
+      'Rift Nova clears the crystal on demand',
+    ],
+    weak: [
+      'Thinnest health pool of the five',
+      'Once the shield is down it takes time to come back',
+      'A mistimed blink lands it inside the enemy army',
+      'Nothing in the kit heals an ally',
+    ],
+  },
+  ember: {
+    pitch: 'Makes ground the enemy cannot afford to stand on.',
+    strong: [
+      'Longest reach of any hero — 150, and it opens fire first',
+      'Auto-attacks stack a burn with no input from you',
+      'Cinder Line and Firestorm deny ground outright',
+      'Flare makes your whole army hit the marked target harder',
+    ],
+    weak: [
+      'Slowest swing in the roster — 1.1s between attacks',
+      'Thin armour and no self-heal at all',
+      'Damage arrives over time, never right now',
+      'Hazards do nothing to an enemy that simply walks around them',
+    ],
+  },
+  vale: {
+    pitch: 'Keeps the army alive through the push that should have killed it.',
+    strong: [
+      'Fastest hero on the map',
+      'The only hero that can repair buildings — the crystal included',
+      'Slipstream breaks freezes and every other hold',
+      'Sanctuary carries a run through the wave that should have ended it',
+    ],
+    weak: [
+      'Lowest damage of the five — wins no duel on its own',
+      'Needs an army around it to be worth anything',
+      'Fragile, and the first thing a smart enemy kills',
+      'No hard crowd control anywhere in the kit',
+    ],
+  },
+};
+
+// The bars in the overview are relative to the ROSTER, not to an absolute ceiling —
+// a player comparing heroes wants to know "more or less than the other four", and a
+// bar that never fills teaches nothing. Recomputed from RC.HEROES so a sixth hero
+// rescales the bars automatically instead of silently overflowing them.
+//
+// `atkSpd` is attacks per second (1 / cd) rather than the cooldown itself, so that on
+// every bar in the panel longer means better. Showing a raw cooldown would make Ember's
+// 1.1s read as the biggest bar in the row while being the worst attack speed in the game.
+RC.heroStatBars = function (id) {
+  const def = RC.UNITS[id];
+  if (!def || !def.hero) return [];
+  const of = h => RC.UNITS[h] || {};
+  const val = { hp: d => d.hp || 0, dmg: d => d.dmg || 0, atkSpd: d => d.cd ? 1 / d.cd : 0,
+                range: d => d.range || 0, armor: d => d.armor || 0, speed: d => d.speed || 0 };
+  const rows = [
+    { key: 'hp',     label: 'Health',       fmt: v => Math.round(v) },
+    { key: 'dmg',    label: 'Damage',       fmt: v => Math.round(v) },
+    { key: 'atkSpd', label: 'Attack speed', fmt: v => v.toFixed(2) + '/s' },
+    { key: 'range',  label: 'Range',        fmt: v => Math.round(v) },
+    { key: 'armor',  label: 'Armour',       fmt: v => Math.round(v) },
+    { key: 'speed',  label: 'Move speed',   fmt: v => Math.round(v) },
+  ];
+  return rows.map(r => {
+    const mine = val[r.key](def);
+    let max = 0;
+    for (const h of RC.HEROES) max = Math.max(max, val[r.key](of(h)));
+    return {
+      key: r.key, label: r.label, value: mine, text: r.fmt(mine),
+      // Floor at 6% so a zero-ish stat still renders as a visible stub rather than
+      // an empty row the player reads as a rendering bug.
+      pct: max > 0 ? Math.max(0.06, mine / max) : 0,
+      best: max > 0 && mine >= max,
+    };
+  });
+};
+
 // ── Hero skill bars ──────────────────────────────────────────────────────────
 // `def.skills` is the ordered bar the HUD and the hotkeys read: [Q, E, R]. The R entry
 // is the SAME OBJECT as `def.sig`, not a copy — the ultimate IS the signature, so every

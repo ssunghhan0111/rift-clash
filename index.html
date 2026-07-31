@@ -304,8 +304,58 @@
   /* ── Your hero, waving from the menu ────────────────────────────────────
      No panel chrome and a transparent canvas on purpose: the hero should look
      like it is standing ON the start screen, not sitting in a widget. */
+  /* The stage is now two columns: the hero on the left, its overview card on the
+     right. Below 900px the card drops underneath so the hero stays the first thing
+     on the page — on a phone the picture is the pick, and a stat table pushed above
+     the fold would bury it. */
+  #hero-bay { display: flex; align-items: center; justify-content: center; gap: 22px; flex-wrap: wrap; }
   #hero-stage { display: flex; flex-direction: column; align-items: center; margin: 2px 0 6px; }
   #hero-cv { width: 156px; height: 156px; display: block; }
+
+  /* ── Hero overview — what this hero is, before you commit to it ─────────
+     Three blocks, in the order a player asks the questions: how does it fight
+     (stat bars), what buttons does it have (Q/E/R), and what does it lose to
+     (strengths vs weaknesses). Everything here is read-only; the pick still
+     happens by clicking a portrait in #hero-row. */
+  #hero-overview {
+    width: min(430px, 92vw); text-align: left; background: rgba(8,12,20,.62);
+    border: 1px solid rgba(255,255,255,.10); border-radius: 12px; padding: 13px 15px 14px;
+  }
+  #hero-overview:empty { display: none; }
+  .ho-name { font-family: var(--mono); font-size: 14px; letter-spacing: .12em; text-transform: uppercase; color: #fff; }
+  .ho-name span { color: var(--dim); opacity: .8; }
+  .ho-pitch { font-size: 11.5px; color: var(--dim); line-height: 1.45; margin: 3px 0 11px; }
+  .ho-h { font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); opacity: .75; margin: 12px 0 6px; }
+  .ho-h:first-of-type { margin-top: 0; }
+
+  .ho-stat { display: grid; grid-template-columns: 74px 1fr 52px; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .ho-sl { font-size: 10.5px; color: var(--dim); }
+  .ho-sbar { display: block; height: 6px; background: #0d131c; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  /* display:block matters — the fill is a <span>, and left inline its width and height
+     are ignored, which renders every hero's bars identically full. */
+  .ho-sfill { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue)); border-radius: 999px; }
+  /* The roster-best value gets the orange treatment so "longest range in the game"
+     is visible without reading the other four heroes' cards. */
+  .ho-stat.best .ho-sfill { background: linear-gradient(90deg, var(--orange), #ffd15c); }
+  .ho-stat.best .ho-sv { color: var(--orange); }
+  .ho-sv { font-family: var(--mono); font-size: 10.5px; color: var(--text); text-align: right; }
+
+  .ho-skill { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 7px; }
+  .ho-si { font-size: 16px; line-height: 1.1; width: 22px; text-align: center; flex: none; }
+  .ho-sk { font-family: var(--mono); font-size: 9px; color: var(--dim); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 4px; margin-left: 5px; }
+  .ho-sn { font-size: 12px; font-weight: 700; color: #fff; }
+  .ho-sd { font-size: 10.5px; color: var(--dim); line-height: 1.42; margin-top: 1px; }
+  .ho-skill.ult .ho-sn { color: var(--orange); }
+
+  .ho-tt { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .ho-tt ul { list-style: none; margin: 0; padding: 0; }
+  .ho-tt li { font-size: 10.5px; line-height: 1.4; color: var(--dim); margin-bottom: 5px; padding-left: 13px; position: relative; }
+  .ho-tt li::before { position: absolute; left: 0; top: 0; }
+  .ho-good li::before { content: '+'; color: var(--good); font-weight: 700; }
+  .ho-bad li::before { content: '−'; color: var(--bad); font-weight: 700; }
+  @media (max-width: 560px) { .ho-tt { grid-template-columns: 1fr; gap: 4px; } }
   #hero-plate {
     font-family: var(--mono); font-size: 11.5px; letter-spacing: .13em;
     text-transform: uppercase; color: var(--text); margin-top: -12px;
@@ -522,16 +572,8 @@
   #ss-daily-start:hover { filter: brightness(1.08); }
   #daily-timer { font-size: 11px; color: var(--dim); }
 
-  /* ── Local profile strip ── */
-  #profile-strip {
-    width: min(560px, 94vw); box-sizing: border-box; margin: 0 0 6px;
-    display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; justify-content: center;
-    font-size: 12px; color: var(--dim);
-  }
-  #profile-strip:empty { display: none; }
-  #profile-strip b { color: var(--text); font-family: var(--mono); font-weight: 600; }
-  #profile-strip .ps-item { white-space: nowrap; }
-  #profile-strip .ps-sep { opacity: .4; }
+  /* The local profile strip that used to live here moved into #stats-modal — see
+     "Statistics popup" below. */
 
   /* ── Tutorial overlay ── */
   #tutorial {
@@ -637,14 +679,39 @@
   .rk-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--orange)); }
   .rk-xp { font-size: 11px; color: var(--dim); font-family: var(--mono); }
 
-  #goals-wrap { display: flex; flex-direction: column; align-items: center; margin-top: 10px; }
-  #goals-toggle { background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  /* ── Statistics popup ───────────────────────────────────────────────────
+     Match history and the goal checklist both moved in here. Neither is a thing
+     a player consults before pressing Play — they are things you go and look at —
+     so the front page keeps the level badge and a single button, and the detail
+     lives one click away. */
+  #stats-wrap { display: flex; justify-content: center; margin-top: 10px; }
+  #stats-open { background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
     border-radius: 6px; padding: 7px 16px; font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
-  #goals-toggle:hover { color: #fff; }
-  #goals-count { color: var(--dim); font-weight: 400; font-family: var(--mono); }
-  #goals-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
-    gap: 8px; width: min(720px, 92vw); margin-top: 12px; }
-  #goals-list.hidden { display: none; }
+  #stats-open:hover { color: #fff; border-color: rgba(255,255,255,.34); }
+  #stats-modal {
+    position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+    background: rgba(4,7,12,.74); backdrop-filter: blur(3px); padding: 18px;
+  }
+  #stats-modal.hidden { display: none; }
+  #stats-card {
+    width: min(720px, 100%); max-height: 86vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px 18px;
+    box-shadow: 0 18px 60px rgba(0,0,0,.6);
+  }
+  #stats-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  #stats-title { font-family: var(--mono); font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
+  #stats-close { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; }
+  #stats-close:hover { color: #fff; }
+  .st-h { font-family: var(--mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); opacity: .8; margin: 16px 0 8px; }
+  .st-h:first-child { margin-top: 0; }
+  .st-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+  .st-tile { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
+  .st-tv { font-family: var(--mono); font-size: 19px; font-weight: 700; color: #fff; line-height: 1.15; }
+  .st-tl { font-size: 10.5px; color: var(--dim); margin-top: 2px; }
+  .st-empty { font-size: 12px; color: var(--dim); line-height: 1.5; }
+
+  #goals-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 8px; }
   .goal { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
     padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; text-align: left; }
   .goal.done { border-color: var(--good, #35c46a); }
@@ -1215,15 +1282,20 @@
        The row underneath is the pick: five heroes, all unlocked, each keeping its own
        Mastery. The hero you are looking at when you press Play is the hero you deploy —
        the front page IS the pick, with no separate confirmation step. -->
-  <div id="hero-stage">
-    <canvas id="hero-cv" width="312" height="312"></canvas>
-    <div id="hero-plate">—<span class="hp-sub">Your Hero</span></div>
-    <div id="hero-mbar"><div id="hero-mbar-fill"></div></div>
-    <div id="hero-row"></div>
-    <div id="hero-tools">
-      <span id="star-count">★ 0</span>
-      <button id="wardrobe-toggle">Wardrobe</button>
+  <div id="hero-bay">
+    <div id="hero-stage">
+      <canvas id="hero-cv" width="312" height="312"></canvas>
+      <div id="hero-plate">—<span class="hp-sub">Your Hero</span></div>
+      <div id="hero-mbar"><div id="hero-mbar-fill"></div></div>
+      <div id="hero-row"></div>
+      <div id="hero-tools">
+        <span id="star-count">★ 0</span>
+        <button id="wardrobe-toggle">Wardrobe</button>
+      </div>
     </div>
+    <!-- Stats, kit and trade-offs for whichever hero is selected. Filled by
+         main.js `renderHeroOverview`, which re-runs on every portrait click. -->
+    <div id="hero-overview"></div>
   </div>
 
   <!-- The Star shop. Inventory is shared across the account, equipment is per hero. -->
@@ -1252,10 +1324,22 @@
   </div>
   <!-- Your local record — matches, W/L per faction, best Survival waves -->
   <div id="rank-strip"></div>
-  <div id="profile-strip"></div>
-  <div id="goals-wrap">
-    <button id="goals-toggle">🎯 Goals <span id="goals-count"></span></button>
-    <div id="goals-list" class="hidden"></div>
+  <div id="stats-wrap">
+    <button id="stats-open">📊 Show Statistics</button>
+  </div>
+
+  <!-- Everything that used to sit on the front page as #profile-strip and the goals
+       list. Hidden until asked for; see main.js `openStats`. -->
+  <div id="stats-modal" class="hidden">
+    <div id="stats-card" role="dialog" aria-modal="true" aria-labelledby="stats-title">
+      <div id="stats-head">
+        <span id="stats-title">Your Record</span>
+        <button id="stats-close" aria-label="Close">✕</button>
+      </div>
+      <div id="stats-body"></div>
+      <div class="st-h">Goals <span id="goals-count"></span></div>
+      <div id="goals-list"></div>
+    </div>
   </div>
 
   <div class="ss-h">Game Mode</div>

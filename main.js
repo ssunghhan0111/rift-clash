@@ -218,6 +218,59 @@ window.RC = window.RC || {};
     }
   }
 
+  // ── Hero overview ──────────────────────────────────────────────────────────
+  // The card beside the idling hero: how it fights, what its three buttons do, and
+  // what it is bad at. Re-rendered only when the PICK changes, not per frame — this
+  // is a few hundred nodes of innerHTML and rebuilding it at 60fps would cost more
+  // than the hero animation it sits next to.
+  //
+  // Everything here is descriptive. The panel deliberately has no controls of its own:
+  // the pick stays in #hero-row, so there is exactly one way to change hero and no
+  // question about which widget is authoritative.
+  let heroOvId = null;
+  function renderHeroOverview(force) {
+    const el = document.getElementById('hero-overview');
+    if (!el) return;
+    const id = heroPick();
+    if (!force && id === heroOvId) return;
+    heroOvId = id;
+    const def = RC.UNITS[id];
+    if (!def) { el.innerHTML = ''; return; }
+    const tr = (RC.HERO_TRAITS && RC.HERO_TRAITS[id]) || { pitch: '', strong: [], weak: [] };
+
+    const bars = (RC.heroStatBars ? RC.heroStatBars(id) : []).map(s => `
+      <div class="ho-stat${s.best ? ' best' : ''}">
+        <span class="ho-sl">${esc(s.label)}</span>
+        <span class="ho-sbar"><span class="ho-sfill" style="width:${Math.round(s.pct * 100)}%"></span></span>
+        <span class="ho-sv">${esc(s.text)}</span>
+      </div>`).join('');
+
+    // Read `def.skills`, NOT def.q/def.e — config.js folds the kit into that array at
+    // load and then deletes q and e off the unit. Reading the raw fields here silently
+    // yielded a one-skill panel showing only the ultimate.
+    const skills = (def.skills || []).filter(Boolean).map(s => `
+      <div class="ho-skill${s.ult ? ' ult' : ''}">
+        <span class="ho-si">${esc(s.ic || '•')}</span>
+        <span>
+          <span class="ho-sn">${esc(s.name)}<span class="ho-sk">${esc(s.key || '')}</span></span>
+          <div class="ho-sd">${esc(s.desc || '')}</div>
+        </span>
+      </div>`).join('');
+
+    const li = arr => (arr || []).map(x => `<li>${esc(x)}</li>`).join('');
+
+    el.innerHTML =
+      `<div class="ho-name">${esc(def.name)} <span>${esc(def.title || '')}</span></div>` +
+      `<div class="ho-pitch">${esc(tr.pitch || def.desc || '')}</div>` +
+      `<div class="ho-h">Combat</div>${bars}` +
+      `<div class="ho-h">Skills</div>${skills}` +
+      `<div class="ho-h">Strengths &amp; weaknesses</div>` +
+      `<div class="ho-tt">` +
+        `<ul class="ho-good">${li(tr.strong)}</ul>` +
+        `<ul class="ho-bad">${li(tr.weak)}</ul>` +
+      `</div>`;
+  }
+
   // The toggle row. Five canvases, each drawn with that hero's OWN cosmetics, so the
   // row doubles as a wardrobe overview: the player can see at a glance which of their
   // heroes they have dressed and which are still bare.
@@ -244,6 +297,7 @@ window.RC = window.RC || {};
         card.classList.add('sel');
         heroPlateId = null;                 // force the plate to re-render on the next frame
         drawMenuHero();
+        renderHeroOverview();
         buildWardrobe();
         if (RC.Audio) RC.Audio.play('click');
       });
@@ -251,6 +305,7 @@ window.RC = window.RC || {};
       heroCards.push({ cv: card.querySelector('canvas'), id });
     });
     drawHeroCards();
+    renderHeroOverview(true);
   }
   function drawHeroCards() {
     if (!RC.Renderer || !RC.Renderer.drawHeroIdle) return;
@@ -1168,30 +1223,102 @@ window.RC = window.RC || {};
     }
   }
 
-  // Compact local record shown under the daily banner (hidden until you've played one match).
+  // The front page keeps ONLY the rank badge — the level is the identity hook and a
+  // brand-new player should see LV 1 on the menu rather than an empty page. Matches,
+  // W/L, best waves and top faction are not pre-Play information, so they live in the
+  // statistics popup (`renderStats`) behind the Show Statistics button.
   function renderProfile() {
-    const el = document.getElementById('profile-strip');
-    if (!el || !RC.Profile) return;
+    if (!RC.Profile) return;
     const p = RC.Profile.get();
-    // Rank and goals render from the very first launch; only the stats line waits
-    // until there is actually a record to show.
-    renderRank(p); renderGoals(p);
-    if (!p.matches) { el.innerHTML = ''; return; }
+    renderRank(p);
+    // The popup is rebuilt on open rather than here, so a match played this session is
+    // always reflected; this call only keeps it fresh if it happens to be open already.
+    const modal = document.getElementById('stats-modal');
+    if (modal && !modal.classList.contains('hidden')) renderStats();
+  }
+
+  // ── Statistics popup ───────────────────────────────────────────────────────
+  // Two sections: the record, then the goal checklist. Goals still award XP exactly as
+  // before — only their front-page real estate went away — so this is where a player
+  // now goes to find out what is left to do.
+  function renderStats() {
+    const body = document.getElementById('stats-body');
+    if (!body || !RC.Profile) return;
+    const p = RC.Profile.get();
+    renderGoals(p);
+
+    if (!p.matches) {
+      body.innerHTML = '<div class="st-h">Match Record</div>'
+        + '<div class="st-empty">No matches yet. Play a game and your record shows up here — '
+        + 'wins and losses per faction, best Survival wave, and how far you have pushed Crystal Guard.</div>';
+      return;
+    }
+
     const bw = p.bestWave || {};
     const bestSurv = Math.max(bw.easy || 0, bw.medium || 0, bw.insane || 0);
-    const parts = [];
-    parts.push('<span class="ps-item">Matches <b>' + p.matches + '</b></span>');
-    parts.push('<span class="ps-item">Versus <b>' + (p.wins || 0) + '–' + (p.losses || 0) + '</b></span>');
-    if (bestSurv > 0) parts.push('<span class="ps-item">Best wave <b>' + bestSurv + '</b></span>');
-    // Crystal Guard keeps its own line rather than folding into "Best wave": the two
-    // curves are not comparable, and a kid deserves to see their own number on the
-    // front page instead of being buried under an adult Survival record.
-    if ((bw.kids || 0) > 0) parts.push('<span class="ps-item">💎 Crystal Guard <b>' + bw.kids + '</b></span>');
-    let bestRace = null, bestW = 0;
-    for (const r of (RC.RACE_ORDER || [])) { const f = p.faction[r] || { w: 0 }; if ((f.w || 0) > bestW) { bestW = f.w; bestRace = r; } }
-    if (bestRace) { const rr = RC.RACES[bestRace]; parts.push('<span class="ps-item">Top faction <b style="color:' + rr.tint + '">' + rr.name + '</b></span>'); }
-    el.innerHTML = parts.join('<span class="ps-sep">·</span>');
+    const tile = (v, l, col) =>
+      `<div class="st-tile"><div class="st-tv"${col ? ' style="color:' + col + '"' : ''}>${v}</div><div class="st-tl">${esc(l)}</div></div>`;
+
+    const rows = [];
+    rows.push(tile(p.matches, 'Matches played'));
+    rows.push(tile((p.wins || 0) + '–' + (p.losses || 0), 'Versus record'));
+    // Win rate is the number people actually want out of W/L, and computing it in your
+    // head is a nuisance. Guarded on wins+losses rather than p.matches: Survival and
+    // Crystal Guard runs count as matches but have no versus result, so dividing by
+    // p.matches would quietly under-report every player who likes Survival.
+    const decided = (p.wins || 0) + (p.losses || 0);
+    if (decided > 0) rows.push(tile(Math.round(100 * (p.wins || 0) / decided) + '%', 'Win rate'));
+    if (bestSurv > 0) rows.push(tile(bestSurv, 'Best Survival wave'));
+    // Crystal Guard keeps its own tile rather than folding into "Best wave": the two
+    // curves are not comparable, and a kid deserves to see their own number instead of
+    // it being buried under an adult Survival record.
+    if ((bw.kids || 0) > 0) rows.push(tile(bw.kids, '💎 Crystal Guard wave'));
+
+    let html = '<div class="st-h">Match Record</div><div class="st-grid">' + rows.join('') + '</div>';
+
+    // Per-faction W/L. The old strip could only afford to name the single best faction;
+    // with the room a popup gives, all three are shown — which is the comparison a
+    // player wanting to know what they are good at was trying to make anyway.
+    const fr = [];
+    for (const r of (RC.RACE_ORDER || [])) {
+      const f = p.faction[r] || { w: 0, l: 0 };
+      if (!(f.w || 0) && !(f.l || 0)) continue;
+      const rr = RC.RACES[r];
+      if (!rr) continue;
+      fr.push(tile((f.w || 0) + '–' + (f.l || 0), rr.name, rr.tint));
+    }
+    if (fr.length) html += '<div class="st-h">By Faction</div><div class="st-grid">' + fr.join('') + '</div>';
+
+    body.innerHTML = html;
   }
+
+  function openStats() {
+    const modal = document.getElementById('stats-modal');
+    if (!modal) return;
+    renderStats();
+    modal.classList.remove('hidden');
+    if (RC.Audio) RC.Audio.play('click');
+  }
+  function closeStats() {
+    const modal = document.getElementById('stats-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+  const statsBtn = document.getElementById('stats-open');
+  if (statsBtn) statsBtn.addEventListener('click', openStats);
+  const statsX = document.getElementById('stats-close');
+  if (statsX) statsX.addEventListener('click', closeStats);
+  // Click-outside and Escape both close. The modal is pure menu furniture — nothing is
+  // lost by dismissing it — so it should never take two attempts to get rid of.
+  const statsModal = document.getElementById('stats-modal');
+  if (statsModal) statsModal.addEventListener('click', e => { if (e.target === statsModal) closeStats(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && statsModal && !statsModal.classList.contains('hidden')) {
+      closeStats();
+      // The start screen has other Escape handlers; this one owns the key only while
+      // the popup is actually open.
+      e.stopPropagation();
+    }
+  }, true);
 
   // ── Commander rank + goals ─────────────────────────────
   // Shown from the very first launch, unlike the stats strip: a brand-new player
@@ -1225,10 +1352,6 @@ window.RC = window.RC || {};
         </div>
       </div>`).join('');
   }
-  const goalsBtn = document.getElementById('goals-toggle');
-  if (goalsBtn) goalsBtn.addEventListener('click', () => {
-    document.getElementById('goals-list').classList.toggle('hidden');
-  });
 
   // What the match just paid, on the victory/defeat screen. Practice and tutorial
   // matches record nothing, so `earned` is null and the block stays empty.

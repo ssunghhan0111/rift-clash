@@ -1839,34 +1839,111 @@ RC.Renderer = (function () {
   }
 
   // ══ EMBER — the Kindler ══════════════════════════════════════════════════
-  // The zoner reads as a walking furnace: a squat, heavy body with the fire visible
-  // INSIDE it rather than around it, and a long barrel because Ember outranges the whole
-  // roster. The flicker is driven off game time, not Math.random — the sim is seeded and
+  // Ember and Rook used to be the same silhouette wearing different palettes: both a
+  // wide rounded torso with a long horizontal barrel out to the right and a muzzle glow
+  // at the end of it. At gameplay zoom that is one sprite, and a player who cannot tell
+  // their zoner from their tank at a glance cannot play either of them.
+  //
+  // So the two are now built from opposite parts. Rook keeps the wide box, the shoulder
+  // pauldrons and the level barrel. Ember is narrow and hunched, its weapon is a stubby
+  // mortar angled UP over the shoulder rather than a barrel pointing forward, and it
+  // stands on thin digitigrade legs instead of a solid chassis. Nothing about the two
+  // outlines overlaps: Rook is a horizontal rectangle, Ember a forward-leaning wedge
+  // with a diagonal tube crossing it.
+  //
+  // The fire is the second read. Rook has one cool optic; Ember has a coal seam down the
+  // chest, vent slots that pulse, and embers drifting up off the mortar mouth — so even
+  // in silhouette-only conditions the glowing one is the zoner.
+  //
+  // Flicker is driven off performance.now(), never Math.random: the sim is seeded and
   // shared, and cosmetics must never draw from the RNG (see the note in _passiveAura).
   function drawEmber(R, c) {
     const t = performance.now() / 1000;
     const flick = 0.5 + 0.5 * Math.sin(t * 7.3) * Math.sin(t * 3.1);
-    // 등짐 연료통 — 뒤로 튀어나온 실루엣이 곧 정체성
-    ctx.fillStyle = c.dark;
-    rrect(-R * 1.05, -R * 0.52, R * 0.52, R * 1.04, 6); ctx.fill(); inkLine(c, R * 0.16);
-    ctx.fillStyle = c.body; rrect(-R * 0.66, -R * 0.7, R * 1.26, R * 1.4, 7); ctx.fill(); inkLine(c, R * 0.24);
-    celTop(c, -R * 0.6, -R * 0.64, R * 1.12, R * 0.34, 5);
-    // 몸통 격벽 사이로 보이는 노(爐)
-    ctx.globalAlpha = 0.55 + 0.35 * flick;
-    ctx.fillStyle = c.trim;
-    rrect(-R * 0.34, -R * 0.3, R * 0.66, R * 0.6, 4); ctx.fill();
-    ctx.globalAlpha = 1;
-    sglow(0, 0, R * 0.95, c.opticRGB, 0.28 + 0.2 * flick);
-    // 어깨 배기구 두 개
+    const breathe = Math.sin(t * 1.6) * R * 0.03;
+
+    // ── 다리 — 가늘고 굽은 2족. 룩의 육중한 차대와 정반대되는 실루엣의 시작점 ──
+    ctx.strokeStyle = c.ink; ctx.lineWidth = R * 0.17; ctx.lineCap = 'round';
+    [-1, 1].forEach(function (s) {
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.1, s * R * 0.3);
+      ctx.lineTo(-R * 0.34, s * R * 0.66);
+      ctx.lineTo(R * 0.06, s * R * 0.95);
+      ctx.stroke();
+    });
     ctx.fillStyle = c.steel;
     [-1, 1].forEach(function (s) {
-      ctx.beginPath(); ctx.arc(-R * 0.2, s * R * 0.78, R * 0.24, 0, TAU); ctx.fill(); inkLine(c, R * 0.1);
+      ctx.beginPath(); ctx.ellipse(R * 0.1, s * R * 0.95, R * 0.2, R * 0.13, 0, 0, TAU);
+      ctx.fill(); inkLine(c, R * 0.09);
     });
-    // 장포신 — 로스터 최장 사거리를 실루엣으로 예고한다
-    ctx.fillStyle = c.steel; rrect(R * 0.24, -R * 0.2, R * 1.34, R * 0.4, 3); ctx.fill(); inkLine(c, R * 0.14);
-    ctx.fillStyle = c.ink; rrect(R * 1.5, -R * 0.26, R * 0.22, R * 0.52, 3); ctx.fill();
-    sglow(R * 1.62, 0, R * 0.62, c.opticRGB, 0.45 + 0.3 * flick);
-    optic(c, R * 0.1, -R * 0.04, R * 0.26);
+
+    // ── 몸통 — 앞으로 기울어진 쐐기. 사각형이 아니라는 점이 핵심 ──
+    ctx.fillStyle = c.body;
+    ctx.beginPath();
+    ctx.moveTo(R * 0.52, -R * 0.16 + breathe);   // 앞으로 내민 가슴
+    ctx.lineTo(R * 0.3, R * 0.42);
+    ctx.lineTo(-R * 0.3, R * 0.5);
+    ctx.lineTo(-R * 0.46, -R * 0.34 + breathe);  // 뒤로 솟은 등
+    ctx.lineTo(-R * 0.02, -R * 0.56 + breathe);
+    ctx.closePath(); ctx.fill(); inkLine(c, R * 0.22);
+
+    // ── 가슴 석탄층 — 안에서 타는 불이 갈라진 틈으로 보인다 ──
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(R * 0.52, -R * 0.16 + breathe); ctx.lineTo(R * 0.3, R * 0.42);
+    ctx.lineTo(-R * 0.3, R * 0.5); ctx.lineTo(-R * 0.46, -R * 0.34 + breathe);
+    ctx.lineTo(-R * 0.02, -R * 0.56 + breathe); ctx.closePath();
+    ctx.clip();
+    ctx.globalAlpha = 0.6 + 0.35 * flick;
+    ctx.fillStyle = c.trim;
+    ctx.beginPath();
+    ctx.moveTo(R * 0.36, -R * 0.1); ctx.lineTo(R * 0.12, R * 0.34);
+    ctx.lineTo(-R * 0.04, R * 0.3); ctx.lineTo(R * 0.2, -R * 0.16);
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    // Glows stay deliberately low. Ember is the only hero carrying three light sources
+    // (chest seam, muzzle, embers) and at menu scale a bright one washes the wedge body
+    // out into the same orange blob Rook already is — which is the bug being fixed.
+    sglow(R * 0.16, R * 0.08, R * 0.62, c.opticRGB, 0.16 + 0.14 * flick);
+
+    // ── 등 배기 슬롯 세 개 — 룩의 둥근 어깨 대신 각진 핀 ──
+    ctx.fillStyle = c.dark;
+    for (let i = 0; i < 3; i++) {
+      const yy = -R * 0.34 + i * R * 0.26;
+      rrect(-R * 0.56, yy + breathe * 0.5, R * 0.24, R * 0.13, 2); ctx.fill();
+    }
+
+    // ── 어깨 위로 꺾어 올린 박격포 — 룩의 수평 포신과 절대 겹치지 않는 대각선 ──
+    ctx.save();
+    ctx.translate(-R * 0.12, -R * 0.42 + breathe);
+    ctx.rotate(-0.72);
+    ctx.fillStyle = c.steel; rrect(-R * 0.16, -R * 0.26, R * 1.0, R * 0.52, 4); ctx.fill(); inkLine(c, R * 0.16);
+    // 포구 링
+    ctx.fillStyle = c.ink; rrect(R * 0.78, -R * 0.32, R * 0.16, R * 0.64, 3); ctx.fill();
+    ctx.globalAlpha = 0.5 + 0.4 * flick;
+    ctx.fillStyle = c.trim;
+    ctx.beginPath(); ctx.ellipse(R * 0.82, 0, R * 0.1, R * 0.24, 0, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    // 포구 불빛은 회전 밖에서 — 대각선 끝을 월드 좌표로 근사
+    sglow(R * 0.46, -R * 0.98 + breathe, R * 0.5, c.opticRGB, 0.26 + 0.2 * flick);
+
+    // ── 떠오르는 불티 세 점. 정지 화면에서도 "불"이라고 읽히게 하는 마지막 신호 ──
+    ctx.fillStyle = c.trim;
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * 0.75 + i * 0.37) % 1;            // 0→1 상승 후 리셋
+      const ex = R * 0.4 + Math.sin((t + i * 2.1) * 2.3) * R * 0.16;
+      const ey = -R * 0.9 - ph * R * 0.85 + breathe;
+      ctx.globalAlpha = (1 - ph) * 0.8;
+      ctx.beginPath(); ctx.arc(ex, ey, R * 0.07 * (1 - ph * 0.5), 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 머리 — 작고 낮게 파묻힌 단안. 룩의 넓은 바이저와 다른 종류의 얼굴 ──
+    ctx.fillStyle = c.dark;
+    ctx.beginPath(); ctx.arc(R * 0.34, -R * 0.02 + breathe, R * 0.27, 0, TAU); ctx.fill(); inkLine(c, R * 0.12);
+    optic(c, R * 0.38, -R * 0.02 + breathe, R * 0.17);
   }
 
   // ══ VALE — the Mender ════════════════════════════════════════════════════
