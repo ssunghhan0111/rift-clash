@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>RIFT CLASH — browser real-time strategy</title>
-<meta name="description" content="Real-time strategy in the browser. Six planets, 1v1 and 2v2, co-op Survival, a daily challenge and voice chat. No download.">
+<meta name="description" content="Real-time strategy in the browser. Six planets, 1v1 and 2v2, co-op Survival and voice chat. No download.">
 
 <!-- Tab and home-screen icons. The SVG is what modern browsers use; the PNGs
      cover older ones, iOS ("Add to Home Screen") and the install prompt. -->
@@ -26,13 +26,13 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="RIFT CLASH">
 <meta property="og:title" content="RIFT CLASH — browser real-time strategy">
-<meta property="og:description" content="Six planets, 1v1 and 2v2, co-op Survival, a daily challenge and voice chat. Plays in the browser, no download.">
+<meta property="og:description" content="Six planets, 1v1 and 2v2, co-op Survival and voice chat. Plays in the browser, no download.">
 <meta property="og:image" content="og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="RIFT CLASH — browser real-time strategy">
-<meta name="twitter:description" content="Six planets, 1v1 and 2v2, co-op Survival, a daily challenge and voice chat. Plays in the browser, no download.">
+<meta name="twitter:description" content="Six planets, 1v1 and 2v2, co-op Survival and voice chat. Plays in the browser, no download.">
 <meta name="twitter:image" content="og-image.png">
 <style>
   :root {
@@ -294,6 +294,45 @@
     overflow-y: auto; padding: 26px 16px;
   }
   #startscreen.hidden { display: none; }
+
+  /* ── The two columns ────────────────────────────────────────────────────
+     The start screen used to be one tall stack: hero, then the footer, then the
+     Daily banner, then the level, then the game modes, then eight more pickers —
+     3,265px on Versus, over three screens before the Play button came into view.
+     Splitting it puts identity on the left and the decision on the right, so the
+     things you change most are near the button that acts on them.
+     One column under 980px, where side-by-side would squeeze both too narrow. */
+  #ss-main {
+    display: grid; grid-template-columns: minmax(320px, 460px) minmax(0, 820px);
+    gap: 40px; align-items: start; width: 100%; max-width: min(1400px, 96vw); margin-top: 6px;
+  }
+  #ss-left, #ss-right { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+  /* The hero stacks above its overview here — side-by-side in this column would leave
+     the stat bars too narrow to compare at a glance. */
+  #ss-left #hero-bay { flex-direction: column; gap: 12px; }
+  /* The left column was sticky with `max-height: calc(100vh - 60px); overflow-y: auto`.
+     That made it its own scroll pane nested inside the page's, and once strengths &
+     weaknesses was expanded the card ran to 878px — so on a 1366x768 laptop 170px of it
+     was simply unreachable behind a scrollbar most people never saw. One scrollbar per
+     page. Both columns now scroll with the document. */
+  @media (max-width: 980px) {
+    #ss-main { grid-template-columns: 1fr; gap: 18px; max-width: 640px; }
+  }
+
+  /* Level badge and the statistics button share one row — both are "how am I doing",
+     and separating them cost a whole band of vertical space for two small widgets. */
+  #ss-playerbar {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    flex-wrap: wrap; width: 100%; margin-bottom: 16px;
+  }
+
+  /* Everything that belongs at the bottom of a page, at the bottom of the page. */
+  #ss-footer {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    margin: 34px 0 4px; padding-top: 18px; width: 100%; max-width: min(1400px, 96vw);
+    border-top: 1px solid rgba(255,255,255,.06);
+  }
+
   #ss-title {
     font-family: var(--mono); font-weight: 700; letter-spacing: .22em;
     font-size: 30px; color: var(--orange); margin: 6px 0 2px;
@@ -318,7 +357,7 @@
      (strengths vs weaknesses). Everything here is read-only; the pick still
      happens by clicking a portrait in #hero-row. */
   #hero-overview {
-    width: min(430px, 92vw); text-align: left; background: rgba(8,12,20,.62);
+    width: 100%; max-width: 460px; text-align: left; background: rgba(8,12,20,.62);
     border: 1px solid rgba(255,255,255,.10); border-radius: 12px; padding: 13px 15px 14px;
   }
   #hero-overview:empty { display: none; }
@@ -349,6 +388,17 @@
   .ho-sd { font-size: 10.5px; color: var(--dim); line-height: 1.42; margin-top: 1px; }
   .ho-skill.ult .ho-sn { color: var(--orange); }
 
+  .ho-more { margin-top: 12px; }
+  .ho-more > summary {
+    cursor: pointer; list-style: none; user-select: none;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); opacity: .8; padding: 3px 0;
+  }
+  .ho-more > summary::-webkit-details-marker { display: none; }
+  .ho-more > summary::before { content: '▸ '; }
+  .ho-more[open] > summary::before { content: '▾ '; }
+  .ho-more > summary:hover { color: var(--text); }
+  .ho-more .ho-tt { margin-top: 7px; }
   .ho-tt { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .ho-tt ul { list-style: none; margin: 0; padding: 0; }
   .ho-tt li { font-size: 10.5px; line-height: 1.4; color: var(--dim); margin-bottom: 5px; padding-left: 13px; position: relative; }
@@ -422,26 +472,38 @@
     .herocard { width: 52px; }
     .herocard canvas { width: 38px; height: 38px; }
   }
-  #ss-credit { color: var(--dim); font-size: 10.5px; letter-spacing: .08em; opacity: .65; margin-bottom: 20px; }
+  #ss-credit { color: var(--dim); font-size: 10.5px; letter-spacing: .08em; opacity: .65; }
   .ss-h { color: var(--text); font-size: 13px; font-weight: 700; letter-spacing: .1em;
           align-self: center; margin: 14px 0 9px; text-transform: uppercase; }
 
-  #ss-maps { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 760px; }
+  #ss-maps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; width: 100%; }
+  @media (max-width: 980px) { #ss-maps { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 460px) { #ss-maps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  /* width:auto, not the old fixed 224px — as a grid item a fixed width ignores its
+     track, so four cards measured 932px inside an 811px column and ran off the edge
+     of the screen. The grid decides the width now. */
   .mapcard {
-    width: 224px; background: var(--panel); border: 2px solid var(--line);
+    width: auto; background: var(--panel); border: 2px solid var(--line);
     border-radius: 8px; padding: 0; cursor: pointer; overflow: hidden;
     transition: border-color .12s, transform .12s;
   }
   .mapcard:hover { transform: translateY(-2px); }
   .mapcard.sel { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
-  .mapcard canvas { display: block; width: 224px; height: 150px; background: #05080f; }
+  .mapcard canvas { display: block; width: 100%; height: 118px; background: #05080f; }
   /* Lobby map buttons carry the same globe, small */
   .mapbtn { display: flex; flex-direction: column; align-items: center; gap: 4px; }
   .map-globe { display: block; width: 76px; height: 76px; border-radius: 6px; background: #05080f; }
-  .mapcard .mc-name { font-size: 14px; font-weight: 700; color: #fff; padding: 8px 10px 2px; }
-  .mapcard .mc-desc { font-size: 11px; color: var(--dim); padding: 0 10px 10px; line-height: 1.4; min-height: 44px; }
+  .mapcard .mc-name { font-size: 13px; font-weight: 700; color: #fff; padding: 7px 8px 8px; text-align: center; }
+  /* Same treatment as the factions: six planets each carrying their own paragraph was
+     ~900px of map picker. The blurb for the SELECTED planet shows underneath instead. */
+  .mapcard .mc-desc { display: none; }
+  #ss-map-desc {
+    max-width: 700px; margin: 9px auto 0; font-size: 11.5px; line-height: 1.5;
+    color: var(--dim); text-align: center; min-height: 34px;
+  }
+  #ss-map-desc b { color: var(--text); font-weight: 700; }
 
-  #ss-modes, #ss-races { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
+  #ss-modes, #ss-races { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; width: 100%; }
   /* The depth picker sits directly under the mode cards and continues the same choice, so
      it lines up like them: a centred row of EQUAL-width cards. Left to inherit .mode-sec's
      column it stacked two ragged, differently-sized blocks, and two options of different
@@ -450,21 +512,32 @@
   #ss-depths .modebtn { width: 300px; text-align: left; }
   #ss-depths .modebtn .mb-sub { line-height: 1.45; margin-top: 4px; }
   @media (max-width: 720px) { #ss-depths .modebtn { width: 100%; max-width: 330px; } }
-  #ss-colors { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
+  #ss-colors { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
   .colorsw { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.4); transition: transform .08s ease; }
   .colorsw:hover { transform: scale(1.12); }
   .colorsw.sel { border-color: #fff; transform: scale(1.18); box-shadow: 0 0 0 2px rgba(255,255,255,0.35), 0 2px 8px rgba(0,0,0,0.5); }
-  .racebtn { min-width: 280px; max-width: 300px; text-align: left; border-top-width: 3px; }
-  .racebtn .mb-sub { line-height: 1.45; margin-top: 5px; }
+  /* Three across, not two-then-one. At 280px minimum these wrapped the third faction
+     onto its own row and ate ~750px of page; sharing the row keeps the comparison
+     side-by-side, which is the only way a faction picker is any use. */
+  .racebtn { flex: 1 1 0; min-width: 0; max-width: 250px; text-align: center; border-top-width: 3px; }
+  /* The paragraph moved out to #ss-race-desc below the row — inside the card it either
+     set the row's height to the longest blurb or clipped the other two. */
+  .racebtn .mb-sub { display: none; }
   /* 종족 얼굴 — 각 종족의 영웅 초상 */
   .racebtn .race-face {
-    display: block; width: 100%; height: 118px; margin: -2px 0 8px;
+    display: block; width: 100%; height: 86px; margin: -2px 0 7px;
     border-radius: 5px; background: #05080e; image-rendering: auto;
   }
   .racebtn.sel .race-face { box-shadow: 0 0 0 1px var(--orange); }
+  /* One description, for whichever faction is selected. */
+  #ss-race-desc {
+    max-width: 700px; margin: 9px auto 0; font-size: 11.5px; line-height: 1.5;
+    color: var(--dim); text-align: center; min-height: 34px;
+  }
+  #ss-race-desc b { color: var(--text); font-weight: 700; }
   @media (max-width: 720px) {
-    .racebtn { min-width: 210px; max-width: 260px; }
-    .racebtn .race-face { height: 92px; }
+    .racebtn { max-width: none; }
+    .racebtn .race-face { height: 76px; }
   }
   .modebtn {
     min-width: 150px; padding: 12px 18px; text-align: center;
@@ -487,9 +560,12 @@
   #btn-menu:hover { filter: brightness(1.15); }
 
   /* ── Game-mode picker ── */
-  #ss-gamemodes { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  #ss-gamemodes { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  /* Flexible rather than a fixed 210px: in the right-hand column three fixed cards
+     overflowed by ~38px and wrapped the third onto a row of its own, which read as
+     "Campaign is a different kind of thing" when it is just a third sibling. */
   .gmcard {
-    width: 210px; padding: 16px 16px 14px; cursor: pointer;
+    flex: 1 1 200px; max-width: 250px; padding: 16px 16px 14px; cursor: pointer;
     background: var(--panel); border: 2px solid var(--line); border-radius: 10px;
     border-top-width: 3px; text-align: center; transition: border-color .12s, transform .12s;
   }
@@ -546,31 +622,9 @@
      read as three different modes rather than three shades of the same one. */
   #ss-kids { background: var(--good); color: #08210f; }
 
-  /* ── Daily Challenge banner (front page) ── */
-  #daily-banner {
-    width: min(560px, 94vw); box-sizing: border-box; margin: 14px 0 6px;
-    display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: space-between;
-    background: linear-gradient(140deg, #2a2412, #1a1a24);
-    border: 1px solid #6b5a24; border-radius: 10px; padding: 13px 16px; text-align: left;
-  }
-  #daily-banner-main { flex: 1 1 300px; min-width: 0; }
-  #daily-banner-side { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-  #daily-top { display: flex; align-items: center; gap: 10px; }
-  #daily-badge {
-    font-family: var(--mono); font-size: 10px; letter-spacing: .16em; font-weight: 700;
-    color: #101010; background: #ffc857; padding: 3px 8px; border-radius: 4px;
-  }
-  #daily-date { font-family: var(--mono); font-size: 11px; color: var(--dim); }
-  #daily-name { margin-top: 8px; font-size: 18px; font-weight: 800; color: #ffe9a8; }
-  #daily-desc { margin-top: 3px; font-size: 12px; color: var(--dim); line-height: 1.4; }
-  #daily-extra { margin-top: 7px; font-size: 11.5px; color: #ffd98a; font-family: var(--mono); }
-  #daily-extra .none { color: var(--dim); }
-  #ss-daily-start {
-    background: #ffc857; color: #16140b; border: 0; border-radius: 6px;
-    padding: 10px 18px; font-size: 14px; font-weight: 800; cursor: pointer; white-space: nowrap;
-  }
-  #ss-daily-start:hover { filter: brightness(1.08); }
-  #daily-timer { font-size: 11px; color: var(--dim); }
+  /* The Daily Challenge banner used to sit here, between the hero and the game
+     modes. Removed from the front page; daily.js and the daily leaderboard board are
+     untouched, so re-adding the banner markup is all it would take to bring it back. */
 
   /* The local profile strip that used to live here moved into #stats-modal — see
      "Statistics popup" below. */
@@ -667,7 +721,7 @@
   @media (prefers-reduced-motion: reduce) { #attack-alert { animation: none; } }
 
   /* Commander rank + goals */
-  #rank-strip { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; flex-wrap: wrap; justify-content: center; }
+  #rank-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
   #rank-strip:empty { display: none; }
   .rk-badge { display: flex; align-items: center; gap: 7px; background: var(--panel-2);
     border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px 5px 6px; }
@@ -684,7 +738,7 @@
      a player consults before pressing Play — they are things you go and look at —
      so the front page keeps the level badge and a single button, and the detail
      lives one click away. */
-  #stats-wrap { display: flex; justify-content: center; margin-top: 10px; }
+  #stats-wrap { display: flex; justify-content: center; }
   #stats-open { background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
     border-radius: 6px; padding: 7px 16px; font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
   #stats-open:hover { color: #fff; border-color: rgba(255,255,255,.34); }
@@ -1282,6 +1336,10 @@
        The row underneath is the pick: five heroes, all unlocked, each keeping its own
        Mastery. The hero you are looking at when you press Play is the hero you deploy —
        the front page IS the pick, with no separate confirmation step. -->
+  <!-- Two columns: who you are on the left, what you are about to play on the right.
+       Collapses to a single column under 980px. -->
+  <div id="ss-main">
+  <div id="ss-left">
   <div id="hero-bay">
     <div id="hero-stage">
       <canvas id="hero-cv" width="312" height="312"></canvas>
@@ -1304,41 +1362,14 @@
     <div id="wardrobe"></div>
   </div>
 
-  <div id="ss-credit">Made in Jayden Game Studio</div>
-  <div id="ss-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <span>Online play is 13+</span></div>
-  <div id="who-row">Playing as <span id="who-name">—</span><button id="who-edit">change</button>
-    <button id="fs-btn2" title="Fullscreen">⛶ Fullscreen</button></div>
+  </div><!-- /#ss-left -->
 
-  <!-- Daily Challenge — front and centre every day; same seed & twist for everyone -->
-  <div id="daily-banner">
-    <div id="daily-banner-main">
-      <div id="daily-top"><span id="daily-badge">DAILY CHALLENGE</span><span id="daily-date"></span></div>
-      <div id="daily-name"></div>
-      <div id="daily-desc"></div>
-      <div id="daily-extra"></div>
-    </div>
-    <div id="daily-banner-side">
-      <button id="ss-daily-start">▶ Play Today's Run</button>
-      <span id="daily-timer"></span>
-    </div>
-  </div>
-  <!-- Your local record — matches, W/L per faction, best Survival waves -->
-  <div id="rank-strip"></div>
-  <div id="stats-wrap">
-    <button id="stats-open">📊 Show Statistics</button>
-  </div>
-
-  <!-- Everything that used to sit on the front page as #profile-strip and the goals
-       list. Hidden until asked for; see main.js `openStats`. -->
-  <div id="stats-modal" class="hidden">
-    <div id="stats-card" role="dialog" aria-modal="true" aria-labelledby="stats-title">
-      <div id="stats-head">
-        <span id="stats-title">Your Record</span>
-        <button id="stats-close" aria-label="Close">✕</button>
-      </div>
-      <div id="stats-body"></div>
-      <div class="st-h">Goals <span id="goals-count"></span></div>
-      <div id="goals-list"></div>
+  <div id="ss-right">
+  <!-- Level and record, on one line, above the thing you came here to do. -->
+  <div id="ss-playerbar">
+    <div id="rank-strip"></div>
+    <div id="stats-wrap">
+      <button id="stats-open">📊 Show Statistics</button>
     </div>
   </div>
 
@@ -1375,6 +1406,7 @@
   <div id="sec-map" class="mode-sec">
     <div class="ss-h">Map</div>
     <div id="ss-maps"></div>
+    <div id="ss-map-desc"></div>
   </div>
   <div id="sec-mode" class="mode-sec">
     <div class="ss-h">Mode</div>
@@ -1395,6 +1427,7 @@
   <div id="sec-race" class="mode-sec">
     <div class="ss-h" id="race-h">Faction (enemy AI takes the other)</div>
     <div id="ss-races"></div>
+    <div id="ss-race-desc"></div>
   </div>
   <div id="sec-color" class="mode-sec">
     <div class="ss-h">Your color</div>
@@ -1423,6 +1456,32 @@ Made for younger players. <b>No base building, no mining</b> — shards arrive o
   </div>
   <div id="ss-onlinehint" class="ss-note">
 <b>Play vs Computer</b> — a match against bots on your chosen map. <b>Play vs a Friend</b> — a real opponent over the internet; create a <b>public</b> game (anyone can find and join) or a <b>private</b> one (share a 4-letter code). Any empty seat is filled by a bot.
+  </div>
+  </div><!-- /#ss-right -->
+  </div><!-- /#ss-main -->
+
+  <!-- A real footer. All three of these used to sit in the MIDDLE of the page,
+       between the hero and the game modes, which is most of why the screen read as
+       a pile of widgets rather than a sequence. -->
+  <div id="ss-footer">
+  <div id="who-row">Playing as <span id="who-name">—</span><button id="who-edit">change</button>
+    <button id="fs-btn2" title="Fullscreen">⛶ Fullscreen</button></div>
+  <div id="ss-credit">Made in Jayden Game Studio</div>
+  <div id="ss-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <span>Online play is 13+</span></div>
+  </div>
+
+  <!-- Everything that used to sit on the front page as #profile-strip and the goals
+       list. Hidden until asked for; see main.js `openStats`. -->
+  <div id="stats-modal" class="hidden">
+    <div id="stats-card" role="dialog" aria-modal="true" aria-labelledby="stats-title">
+      <div id="stats-head">
+        <span id="stats-title">Your Record</span>
+        <button id="stats-close" aria-label="Close">✕</button>
+      </div>
+      <div id="stats-body"></div>
+      <div class="st-h">Goals <span id="goals-count"></span></div>
+      <div id="goals-list"></div>
+    </div>
   </div>
 </div>
 

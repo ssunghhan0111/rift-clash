@@ -227,7 +227,7 @@ window.RC = window.RC || {};
   // Everything here is descriptive. The panel deliberately has no controls of its own:
   // the pick stays in #hero-row, so there is exactly one way to change hero and no
   // question about which widget is authoritative.
-  let heroOvId = null;
+  let heroOvId = null, heroTraitsOpen = false;
   function renderHeroOverview(force) {
     const el = document.getElementById('hero-overview');
     if (!el) return;
@@ -264,11 +264,24 @@ window.RC = window.RC || {};
       `<div class="ho-pitch">${esc(tr.pitch || def.desc || '')}</div>` +
       `<div class="ho-h">Combat</div>${bars}` +
       `<div class="ho-h">Skills</div>${skills}` +
-      `<div class="ho-h">Strengths &amp; weaknesses</div>` +
-      `<div class="ho-tt">` +
-        `<ul class="ho-good">${li(tr.strong)}</ul>` +
-        `<ul class="ho-bad">${li(tr.weak)}</ul>` +
-      `</div>`;
+      // Collapsed by default. Stats and skills are what you compare while flicking
+      // between heroes; the trade-offs are what you read once, when deciding. Keeping
+      // them open cost ~200px on a page that was already too tall.
+      // <details> rather than a hand-rolled toggle: it keeps its own open/closed state,
+      // is keyboard-operable and screen-reader-labelled for free, and cannot desync
+      // from a JS flag when the panel re-renders on the next hero click.
+      `<details class="ho-more"${heroTraitsOpen ? ' open' : ''}>` +
+        `<summary>Strengths &amp; weaknesses</summary>` +
+        `<div class="ho-tt">` +
+          `<ul class="ho-good">${li(tr.strong)}</ul>` +
+          `<ul class="ho-bad">${li(tr.weak)}</ul>` +
+        `</div>` +
+      `</details>`;
+
+    // Remember the choice across hero switches. A player comparing trade-offs between
+    // two heroes should not have to reopen the section on every click.
+    const det = el.querySelector('.ho-more');
+    if (det) det.addEventListener('toggle', () => { heroTraitsOpen = det.open; });
   }
 
   // The toggle row. Five canvases, each drawn with that hero's OWN cosmetics, so the
@@ -413,6 +426,23 @@ window.RC = window.RC || {};
     }
   }
 
+  // The faction blurb lives under the row rather than inside the card: three cards
+  // sharing one row cannot also carry three paragraphs without either stretching to the
+  // longest one or clipping the other two.
+  function showRaceDesc(rid) {
+    const el = document.getElementById('ss-race-desc');
+    const r = RC.RACES[rid];
+    if (!el || !r) return;
+    el.innerHTML = '<b style="color:' + r.tint + '">' + esc(r.name) + '</b> — ' + esc(r.blurb);
+  }
+
+  // As with the factions: the description for the selected planet, once, under the grid.
+  function showMapDesc(map) {
+    const el = document.getElementById('ss-map-desc');
+    if (!el || !map) return;
+    el.innerHTML = '<b>' + esc(map.name) + '</b> — ' + esc(map.desc);
+  }
+
   function buildStartScreen() {
     buildHeroRow();
     buildWardrobe();
@@ -429,12 +459,14 @@ window.RC = window.RC || {};
         selMap = map.id;
         mapWrap.querySelectorAll('.mapcard').forEach(c => c.classList.remove('sel'));
         card.classList.add('sel');
+        showMapDesc(map);
       });
       mapWrap.appendChild(card);
       const cv2 = card.querySelector('canvas');
       mapGlobes.push({ cv: cv2, map });
       drawMapPreview(cv2, map);
     });
+    showMapDesc(RC.MAPS.find(m => m.id === selMap) || RC.MAPS[0]);
 
     const modeWrap = document.getElementById('ss-modes');
     modeWrap.innerHTML = '';
@@ -468,11 +500,13 @@ window.RC = window.RC || {};
           selRace = rid;
           raceWrap.querySelectorAll('.modebtn').forEach(c => c.classList.remove('sel'));
           btn.classList.add('sel');
+          showRaceDesc(rid);
         });
         raceWrap.appendChild(btn);
         raceFaces.push({ cv: btn.querySelector('canvas'), race: rid });
       });
       drawRaceFaces();
+      showRaceDesc(selRace);
     }
 
     buildColorPicker();
@@ -482,7 +516,6 @@ window.RC = window.RC || {};
     buildSquad();
     buildDiff();
     buildVsDiff();
-    renderDailyCard();     // Daily banner is always on the front page now
     renderProfile();       // your local record, under the banner
   }
 
@@ -1188,40 +1221,10 @@ window.RC = window.RC || {};
   const kidsBtn = document.getElementById('ss-kids');
   if (kidsBtn) kidsBtn.addEventListener('click', startKids);
 
-  // ── Daily Challenge card ────────────────────────────────
-  // Rendered fresh each time the start screen opens, so a player who leaves the
-  // tab open overnight sees the new day's twist rather than a stale card.
-  function renderDailyCard() {
-    if (!RC.Daily) return;
-    const d = RC.Daily.today();
-    const set = (id, txt) => { const e = document.getElementById(id); if (e) e.textContent = txt; };
-    set('daily-date', d.date + ' · UTC');
-    set('daily-name', d.icon + '  ' + d.name);
-    set('daily-desc', d.desc);
-    set('daily-timer', 'New challenge in ' + RC.Daily.timeLeftLabel());
-    // Your progress on today's run, and — if online — your rank on the daily board.
-    const extra = document.getElementById('daily-extra');
-    if (extra) {
-      const best = RC.Profile ? RC.Profile.dailyBest() : 0;
-      extra.innerHTML = best > 0
-        ? 'Your best today: <b>wave ' + best + '</b> · <span class="rank">checking rank…</span>'
-        : '<span class="none">You haven’t played today’s run yet.</span>';
-      const rankEl = () => extra.querySelector('.rank');
-      if (best > 0 && RC.Leaderboard && RC.Leaderboard.available && RC.Leaderboard.available()) {
-        const me = (RC.Leaderboard.getName() || '').trim().toLowerCase();
-        RC.Leaderboard.top('daily', 100).then(res => {
-          const rows = (res && res.rows) || [];
-          let rank = 0;
-          for (let i = 0; i < rows.length && me; i++) {
-            if ((rows[i].name || '').trim().toLowerCase() === me) { rank = i + 1; break; }
-          }
-          const el = rankEl(); if (el) el.textContent = rank ? ('you’re rank #' + rank) : 'not yet on the board';
-        }).catch(() => { const el = rankEl(); if (el) el.textContent = ''; });
-      } else if (best > 0) {
-        const el = rankEl(); if (el) el.textContent = '';
-      }
-    }
-  }
+  // The Daily Challenge card that used to render here is gone with the front-page
+  // banner. `startDaily` above is left in place with nothing calling it: the daily
+  // leaderboard board still reads RC.Daily, and keeping the entry point means
+  // restoring the mode is a markup change rather than a rewrite.
 
   // The front page keeps ONLY the rank badge — the level is the identity hook and a
   // brand-new player should see LV 1 on the menu rather than an empty page. Matches,
@@ -1396,15 +1399,6 @@ window.RC = window.RC || {};
     if (next) rows.push(`<div class="ov-xp" style="color:var(--dim)">Next: ${esc(next.name)} — ${next.have}/${next.goal}</div>`);
     box.innerHTML = rows.join('');
   }
-  const dailyBtn = document.getElementById('ss-daily-start');
-  if (dailyBtn) dailyBtn.addEventListener('click', startDaily);
-  // Keep the countdown fresh while the player lingers on the menu (twist rolls at UTC midnight).
-  setInterval(() => {
-    if (ss && !ss.classList.contains('hidden') && RC.Daily) {
-      const e = document.getElementById('daily-timer');
-      if (e) e.textContent = 'New challenge in ' + RC.Daily.timeLeftLabel();
-    }
-  }, 30000);
   document.getElementById('tut-learn').addEventListener('click', openTutorial);
   document.getElementById('tut-practice').addEventListener('click', startPractice);
   document.getElementById('tut-guided').addEventListener('click', startGuided);
