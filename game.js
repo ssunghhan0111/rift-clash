@@ -145,6 +145,7 @@ window.RC = window.RC || {};
       this.obstacles = [];
       this.terrain = [];
       this.fx = [];
+      this.hazards = [];      // 지속 지형 효과 — _tickHazards 참조
       this.selection = [];
       this.placing = null;
       // z = zoom. Client-side only, exactly like x/y — the server never reads the
@@ -175,6 +176,10 @@ window.RC = window.RC || {};
       this.res = {};
       this.upgrades = {};
       const pick = this._racePick || {};
+      // The hero is picked SEPARATELY from the race — see HERO_DESIGN.md §4. Kept across
+      // reset() exactly like _racePick, so restarting a match does not silently hand the
+      // player a different hero than the one on the start screen.
+      this._heroPick = this._heroPick || {};
       this.players.forEach(p => {
         this.teamMap[p.owner] = p.team;
         p.race = pick[p.owner] || p.race || 'forge';
@@ -389,6 +394,108 @@ window.RC = window.RC || {};
         foe.hitFlash = 0.09;                                  // 건물 피격 섬광
       }
       return dealt;
+    }
+
+    // ── Which hero does this seat deploy? ─────────────────────────────────
+    // This used to be `RC.RACES[race].hero` — one hero per faction, decided by a choice
+    // the player made about something else entirely. Now it is its own answer:
+    //
+    //   · a human seat takes the pick the player made on the start screen, handed in via
+    //     setHeroPick() (main.js reads it from the profile)
+    //   · a bot seat takes the hero that matches its personality, so the label the player
+    //     already saw is borne out by what walks onto the map
+    //   · anything unrecognised resolves to the default rather than throwing — a stored
+    //     pick can outlive a hero we renamed, and RC.resolveHero handles the old ids
+    //
+    // Note what is NOT here: the race. A Rook can deploy with Gloop, and the palette
+    // split in renderer.js is what keeps it looking right when it does.
+    heroFor(owner) {
+      const picked = this._heroPick && this._heroPick[owner];
+      if (picked) return RC.resolveHero(picked);
+      const persona = this.aiPersona && this.aiPersona[owner];
+      const byPersona = persona && RC.AI_PERSONA_HERO && RC.AI_PERSONA_HERO[persona.id];
+      if (byPersona) return RC.resolveHero(byPersona);
+      return RC.DEFAULT_HERO;
+    }
+
+    // Called before setup/reset by whoever knows the picks: main.js for the local player,
+    // the server for an online seat. Merged rather than replaced so setting one seat does
+    // not silently clear the others.
+    setHeroPick(map) {
+      this._heroPick = Object.assign(this._heroPick || {}, map || {});
+    }
+
+    // ── Ground hazards ────────────────────────────────────────────────────
+    // A patch of ground that keeps doing something for a few seconds after whoever made
+    // it has walked away. Three kinds today, all three from the new heroes:
+    //
+    //   fire   (Ember)  damages enemies standing in it
+    //   banner (Rook)   armours allies in it, wades enemies in it
+    //   ward   (Vale)   flattens damage taken by allies in it, heals them, and hands out
+    //                   a one-time save
+    //
+    // Written as ONE list with ONE containment test (circle distance) rather than a
+    // system per ability, because the second shape is what turns this into a framework
+    // nobody wants to touch. Cinder Line is a chain of overlapping discs for exactly
+    // that reason — see the 'line' case in entities.js.
+    //
+    // Buffs are re-applied every tick as short-lived fields rather than stamped once on
+    // cast, so a unit that walks in halfway through is covered and a unit that walks out
+    // loses it on its own. That is the same Math.max-with-a-timer idiom the passive
+    // auras use, and it means nothing has to remember to clean up.
+    _tickHazards(dt) {
+      const hz = this.hazards;
+      if (!hz || !hz.length) return;
+      for (const h of hz) {
+        h.t -= dt;
+        const inside = h._in || (h._in = new Set());
+        const still = new Set();
+        for (const u of this.units) {
+          if (u.dead || u.boarded) continue;
+          const near = RC.dist(h.x, h.y, u.x, u.y) <= h.radius + (u.r || 0);
+          const friend = u.owner === h.owner || !this.areEnemies(u.owner, h.owner);
+          if (near) still.add(u.id);
+          if (h.kind === 'fire') {
+            if (!near || friend) continue;         // 아군은 자기 불에 안 탄다
+            this.hurt(u, (h.dps || 0) * dt, h.owner, null);
+          } else if (h.kind === 'banner') {
+            if (!near) continue;
+            if (friend) {
+              // Same field the Shielder's aura writes, so the non-stacking rule applies
+              // for free: a unit under a banner AND a Dropship gets the better one.
+              u.auraArmor = Math.max(u.auraArmor || 0, h.armor || 0);
+              u.auraArmorT = 0.25;
+            } else if (h.slowDur) {
+              u.slow = Math.max(u.slow || 0, h.slowDur);
+            }
+          } else if (h.kind === 'ward') {
+            if (!near || !friend) continue;
+            u.wardT = Math.max(u.wardT || 0, 0.3);
+            u.wardDr = Math.max(u.wardDr || 0, h.dr || 0);
+            u.wardHps = Math.max(u.wardHps || 0, h.hps || 0);
+            // The save is granted once per unit per sanctuary. Re-granting it every tick
+            // would make the field an immunity rather than a reprieve.
+            if (h.save && !inside.has(u.id)) u.wardSave = true;
+            if (h.hasteMul) {
+              u.haste = Math.max(u.haste || 0, 0.35);
+              u.hasteFire = Math.min(u.hasteFire || 1, 1 / h.hasteMul);
+              u.hasteSpd = Math.max(u.hasteSpd || 1, 1);
+            }
+          }
+        }
+        // Backdraft — pay out on anything that LEFT this tick. Tracked per hazard, so
+        // two overlapping fires each get their own exit toll rather than sharing one.
+        if (h.kind === 'fire' && h.exitDmg && !h.part) {
+          for (const u of this.units) {
+            if (u.dead || still.has(u.id) || !inside.has(u.id)) continue;
+            if (!this.areEnemies(u.owner, h.owner)) continue;
+            this.hurt(u, h.exitDmg, h.owner, null);
+            if (h.exitSlow) u.slow = Math.max(u.slow || 0, h.exitSlow);
+          }
+        }
+        h._in = still;
+      }
+      this.hazards = hz.filter(h => h.t > 0);
     }
 
     // ── Wind ──────────────────────────────────────────────────────────────
@@ -609,10 +716,10 @@ window.RC = window.RC || {};
           u.gatherFrom(this.findNearestNode(u.x, u.y));
         }
 
-        // 영웅 (오프라인 전용)
-        if (this.heroesEnabled && rdef.hero) {
+        // 영웅 (오프라인 전용) — 종족이 아니라 소유자의 선택에서 온다
+        if (this.heroesEnabled) {
           const hx = s.x + (s.x < center.x ? 95 : -95);
-          const h = new RC.Unit(rdef.hero, hx, s.y, p.owner);
+          const h = new RC.Unit(this.heroFor(p.owner), hx, s.y, p.owner);
           this.units.push(h);
           this.heroOf[p.owner] = h;
         }
@@ -669,8 +776,8 @@ window.RC = window.RC || {};
           const nn = this.findNearestNode(u.x, u.y);
           if (nn) u.gatherFrom(nn);
         }
-        if (this.heroesEnabled && rdef.hero) {
-          const h = new RC.Unit(rdef.hero, base.x + 95, base.y, p.owner);
+        if (this.heroesEnabled) {
+          const h = new RC.Unit(this.heroFor(p.owner), base.x + 95, base.y, p.owner);
           this.units.push(h);
           this.heroOf[p.owner] = h;
         }
@@ -756,8 +863,8 @@ window.RC = window.RC || {};
         this.buildings.push(b);
         this.kidsBases[p.owner] = b;
         p.spawn = { x: b.x, y: b.y };
-        if (this.heroesEnabled && rd.hero) {
-          const h = new RC.Unit(rd.hero, b.x - 90, b.y + 60, p.owner);
+        if (this.heroesEnabled) {
+          const h = new RC.Unit(this.heroFor(p.owner), b.x - 90, b.y + 60, p.owner);
           this.units.push(h);
           this.heroOf[p.owner] = h;
         }
@@ -1142,6 +1249,7 @@ window.RC = window.RC || {};
       });
 
       RC.AI.update(dt, this);
+      this._tickHazards(dt);
       this._applyWind(dt);
       this._ageAlerts(dt);
       if (this.kids && RC.Kids) RC.Kids.update(dt, this);

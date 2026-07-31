@@ -177,36 +177,168 @@ window.RC = window.RC || {};
   }
 
   // ── 메뉴 히어로 ────────────────────────────────────────────────────────────
-  // The hero the player will actually deploy, idling on the start screen.
+  // The hero the player will actually deploy, idling on the start screen — and the five
+  // portraits under it that switch between them.
   //
-  // Heroes are being decoupled from races (see HERO_DESIGN.md): the pick will live in
-  // its own Hero Bay tab and persist across matches. Until that tab ships, the stored
-  // pick is read if present and the selected race's hero is the fallback — so the menu
-  // is already reading from the future source of truth and swapping the tab in later
-  // touches nothing here.
-  const HERO_KEY = 'riftclash_hero';
-  function heroPick() {
-    let id = null;
-    try { id = window.localStorage.getItem(HERO_KEY); } catch (e) {}
-    if (id && RC.UNITS[id] && RC.UNITS[id].hero) return id;
-    const r = RC.RACES[selRace];
-    return (r && r.hero) || 'warden';
-  }
-  let heroPlateId = null;
+  // The hero is no longer chosen by the race (HERO_DESIGN.md §4): all five are unlocked
+  // from the first launch, each keeps its own Mastery, and the pick lives in the profile.
+  // The front page IS the pick — the hero the player is looking at when they press Play
+  // is the hero that walks onto the map, with no separate confirmation step.
+  function heroPick() { return RC.Profile ? RC.Profile.heroPick() : RC.DEFAULT_HERO; }
+  function heroCos(id) { return RC.Profile ? RC.Profile.cosmeticsOf(id) : null; }
+
+  let heroPlateId = null, heroPlateM = -1;
   function drawMenuHero() {
     if (!RC.Renderer || !RC.Renderer.drawHeroIdle) return;
     const cv = document.getElementById('hero-cv');
     if (!cv || !cv.isConnected) return;
     const id = heroPick();
-    RC.Renderer.drawHeroIdle(cv, id, selRace);
-    // The plate is DOM, so only touch it when the hero actually changed — rewriting
-    // innerHTML twenty times a second is how a menu ends up dropping frames.
-    if (id !== heroPlateId) {
-      heroPlateId = id;
+    RC.Renderer.drawHeroIdle(cv, id, selRace, heroCos(id));
+    // The plate is DOM, so only touch it when something on it actually changed —
+    // rewriting innerHTML twenty times a second is how a menu drops frames.
+    const rec = RC.Profile ? RC.Profile.heroes()[id] : null;
+    const m = rec ? rec.mastery : 1;
+    if (id !== heroPlateId || m !== heroPlateM) {
+      heroPlateId = id; heroPlateM = m;
       const plate = document.getElementById('hero-plate');
       const def = RC.UNITS[id];
-      if (plate && def) plate.innerHTML = esc(def.name) + '<span class="hp-sub">Your Hero</span>';
+      if (plate && def) {
+        const title = def.title ? ' <span class="hp-title">' + esc(def.title) + '</span>' : '';
+        plate.innerHTML = esc(def.name) + title + '<span class="hp-sub">Mastery ' + m + '</span>';
+      }
+      // The bar under the plate is Mastery progress — the number that PERSISTS. It is
+      // deliberately not the in-match level bar: those are two different numbers and
+      // showing them the same way is how players come to believe they are one.
+      const bar = document.getElementById('hero-mbar-fill');
+      if (bar && rec && RC.Profile) {
+        const need = RC.Profile.masteryToNext(rec.mastery);
+        const pct = rec.mastery >= RC.MASTERY.maxLevel ? 100 : Math.round(100 * rec.xp / need);
+        bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+      }
     }
+  }
+
+  // The toggle row. Five canvases, each drawn with that hero's OWN cosmetics, so the
+  // row doubles as a wardrobe overview: the player can see at a glance which of their
+  // heroes they have dressed and which are still bare.
+  const heroCards = [];
+  function buildHeroRow() {
+    const row = document.getElementById('hero-row');
+    if (!row) return;
+    row.innerHTML = '';
+    heroCards.length = 0;
+    const cur = heroPick();
+    const recs = RC.Profile ? RC.Profile.heroes() : {};
+    RC.HEROES.forEach(id => {
+      const def = RC.UNITS[id];
+      if (!def) return;
+      const card = document.createElement('div');
+      card.className = 'herocard' + (id === cur ? ' sel' : '');
+      card.innerHTML = '<canvas width="132" height="132"></canvas>'
+        + '<div class="hc-name">' + esc(def.name) + '</div>'
+        + '<div class="hc-m">M' + ((recs[id] && recs[id].mastery) || 1) + '</div>';
+      card.addEventListener('click', () => {
+        if (RC.Profile) RC.Profile.setHeroPick(id);
+        if (RC.NetClient && RC.NetClient.connected) RC.NetClient.send({ t: 'hero', hero: id });
+        row.querySelectorAll('.herocard').forEach(c => c.classList.remove('sel'));
+        card.classList.add('sel');
+        heroPlateId = null;                 // force the plate to re-render on the next frame
+        drawMenuHero();
+        buildWardrobe();
+        if (RC.Audio) RC.Audio.play('click');
+      });
+      row.appendChild(card);
+      heroCards.push({ cv: card.querySelector('canvas'), id });
+    });
+    drawHeroCards();
+  }
+  function drawHeroCards() {
+    if (!RC.Renderer || !RC.Renderer.drawHeroIdle) return;
+    for (const h of heroCards) {
+      if (h.cv && h.cv.isConnected) RC.Renderer.drawHeroIdle(h.cv, h.id, selRace, heroCos(h.id));
+    }
+  }
+
+  // ── Wardrobe ───────────────────────────────────────────────────────────────
+  // The Star shop. Inventory is shared across the account and equipment is per hero, so
+  // this panel is really two different verbs sharing one grid: an item you do not own
+  // shows its price and buying it puts it in the shared inventory, and an item you do
+  // own equips onto the hero currently selected.
+  //
+  // Buying deliberately does NOT equip. A purchase that silently changed how a hero
+  // looked would be a surprise rather than a reward, and the player may well have bought
+  // the crown for a different hero than the one they are standing in front of.
+  function starLabel() {
+    const w = RC.Profile ? RC.Profile.wallet() : { stars: 0 };
+    const e = document.getElementById('star-count');
+    if (e) e.textContent = '★ ' + w.stars;
+  }
+  function buildWardrobe() {
+    const box = document.getElementById('wardrobe');
+    if (!box || !RC.Profile) return;
+    const hid = heroPick();
+    const cos = RC.Profile.cosmeticsOf(hid);
+    const rows = [];
+    RC.COSMETIC_SLOTS.forEach(slot => {
+      const items = (RC.COSMETICS[slot] || []).map(item => {
+        const owned = RC.Profile.owns(slot, item.id);
+        const worn = cos[slot] === item.id;
+        const cls = 'wd-item' + (worn ? ' worn' : '') + (owned ? '' : ' locked');
+        const tag = owned ? (worn ? 'Worn' : 'Wear') : ('★ ' + item.stars);
+        return '<button class="' + cls + '" data-slot="' + slot + '" data-id="' + item.id + '">'
+             + '<span class="wd-n">' + esc(item.name) + '</span>'
+             + '<span class="wd-t">' + tag + '</span></button>';
+      }).join('');
+      rows.push('<div class="wd-row"><div class="wd-slot">' + slot + '</div><div class="wd-items">' + items + '</div></div>');
+    });
+    box.innerHTML = rows.join('');
+    box.querySelectorAll('.wd-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const slot = btn.dataset.slot, id = btn.dataset.id;
+        if (RC.Profile.owns(slot, id)) {
+          RC.Profile.equip(hid, slot, id);
+        } else {
+          const r = RC.Profile.buy(slot, id);
+          // Say WHY it failed. A button that does nothing when you cannot afford it
+          // teaches the player that the button is broken, not that they are short.
+          if (!r.ok && r.reason === 'poor') {
+            const item = RC.cosmetic(slot, id);
+            if (game && game.notify) game.notify('Not enough stars — ' + item.stars + ' needed, you have ' + r.stars + '.');
+            return;
+          }
+        }
+        heroPlateId = null;
+        buildWardrobe(); starLabel(); drawMenuHero(); drawHeroCards();
+        if (RC.Audio) RC.Audio.play('click');
+      });
+    });
+    starLabel();
+  }
+  { const t = document.getElementById('wardrobe-toggle');
+    if (t) t.addEventListener('click', () => {
+      const p = document.getElementById('wardrobe-panel');
+      if (p) { p.classList.toggle('hidden'); if (!p.classList.contains('hidden')) buildWardrobe(); }
+    }); }
+  { const c = document.getElementById('wardrobe-close');
+    if (c) c.addEventListener('click', () => {
+      const p = document.getElementById('wardrobe-panel'); if (p) p.classList.add('hidden');
+    }); }
+
+  // Hand the local player's pick to the match, and dress the hero once it exists.
+  //
+  // Called from every offline mode start. The pick has to be set BEFORE setup/reset,
+  // because that is when the hero is spawned; the cosmetics are attached after, because
+  // the unit did not exist until then.
+  function applyHeroPick() {
+    if (!game) return;
+    const id = heroPick();
+    if (game.setHeroPick) game.setHeroPick({ [game.playerOwner || 1]: id });
+    return id;
+  }
+  function dressHero() {
+    if (!game || !game.heroOf) return;
+    const h = game.heroOf[game.playerOwner];
+    if (h) h.cos = heroCos(h.type);
   }
 
   // Map cards show the planet as a turning globe rather than a flat top-down thumbnail.
@@ -227,6 +359,8 @@ window.RC = window.RC || {};
   }
 
   function buildStartScreen() {
+    buildHeroRow();
+    buildWardrobe();
     const mapWrap = document.getElementById('ss-maps');
     mapWrap.innerHTML = '';
     mapGlobes.length = 0;
@@ -528,7 +662,9 @@ window.RC = window.RC || {};
     RC.online = false; game.practice = false; game.heroesEnabled = true;
     goFullscreen(); audioGo();
     game.playerColorId = selColor;
+    applyHeroPick();
     game.setupMission(def);
+    dressHero();
     RC.AI.reset(); resize();
     RC.Input.centerOn(game.spawn1.x, game.spawn1.y);
     closeBrief();
@@ -561,7 +697,9 @@ window.RC = window.RC || {};
     const racePick = {};
     mode.players.forEach(p => { racePick[p.owner] = p.ai ? RC.otherRace(selRace) : selRace; });
     game.playerColorId = selColor;
+    applyHeroPick();
     game.setup(RC.getMap(selMap), mode, racePick, selVsDiff);
+    dressHero();
     RC.AI.reset();
     resize();
     RC.Input.centerOn(game.spawn1.x, game.spawn1.y);
@@ -590,7 +728,9 @@ window.RC = window.RC || {};
     goFullscreen();
     audioGo();
     game.playerColorId = selColor;
+    applyHeroPick();
     game.setupSurvival({ race: selRace, ally: selSquad === 'ally', difficulty: selDiff });
+    dressHero();
     openRunToken(selDiff);
     RC.AI.reset();
     resize();
@@ -610,7 +750,9 @@ window.RC = window.RC || {};
     goFullscreen();
     audioGo();
     game.playerColorId = selColor;
+    applyHeroPick();
     game.setupKids({ race: selRace });
+    dressHero();
     RC.AI.reset();
     resize();
     if (game.crystal) RC.Input.centerOn(game.crystal.x, game.crystal.y);
@@ -629,7 +771,9 @@ window.RC = window.RC || {};
     goFullscreen();
     audioGo();
     game.playerColorId = selColor;
+    applyHeroPick();
     game.setupSurvival({ race: selRace, ally: false, difficulty: 'medium', daily: true });
+    dressHero();
     openRunToken('daily');
     RC.AI.reset();
     resize();
@@ -1095,6 +1239,26 @@ window.RC = window.RC || {};
     if (!earned || !RC.Progress) return;
     const rows = [];
     if (earned.xpGained > 0) rows.push(`<div class="ov-xp">+${earned.xpGained} xp</div>`);
+    // ── Stars, ITEMISED ──
+    // The breakdown is the point. A player who is told "+18 ★" learns nothing about what
+    // to do again next match; a player who is told "+5 Victory, +3 Objective held, +10
+    // First match today" has been handed three reasons to press Restart.
+    if (earned.stars > 0) {
+      rows.push(`<div class="ov-stars">★ +${earned.stars} stars <span class="ov-startot">(${earned.starTotal} total)</span></div>`);
+      (earned.starLines || []).forEach(l => {
+        rows.push(`<div class="ov-starline">+${l.stars} · ${esc(l.why)}</div>`);
+      });
+    }
+    // Mastery — the hero's persistent number. Named on the screen so the player learns
+    // that it is not the level bar they just watched fill up during the match.
+    if (earned.hero && RC.UNITS[earned.hero]) {
+      const hn = esc(RC.UNITS[earned.hero].name);
+      if (earned.masteryUp > 0) {
+        rows.push(`<div class="ov-lvup">🎖 ${hn} — Mastery ${earned.mastery}</div>`);
+      } else if (earned.heroXp > 0) {
+        rows.push(`<div class="ov-xp" style="color:var(--dim)">${hn} +${earned.heroXp} mastery xp</div>`);
+      }
+    }
     if (earned.levelUp) {
       rows.push(`<div class="ov-lvup">⭐ Level ${earned.levelUp} — ${esc(RC.Progress.rankOf(earned.levelUp))}</div>`);
       if (RC.Audio && RC.Audio.play) RC.Audio.play('levelup');
@@ -1687,6 +1851,10 @@ window.RC = window.RC || {};
 
   N.on('__open', () => {
     N.send({ t: 'setName', name: myName() });     // claim our name before anyone sees the list
+    // The hero is picked on the start screen, not in the lobby, so it is sent once on
+    // connect (and again whenever the player changes it below). The server validates it
+    // through RC.resolveHero — a client can send anything.
+    N.send({ t: 'hero', hero: heroPick() });
     // Coming back to a match beats everything else this socket could be doing.
     if (resuming && resumeInfo) {
       showReconnect('Reconnecting to your match…');
@@ -2130,7 +2298,7 @@ window.RC = window.RC || {};
     } else {
       // 메뉴 화면 — 종족 얼굴만 가볍게 애니메이션 (초당 ~20프레임)
       faceAcc += dt;
-      if (faceAcc >= 0.05) { faceAcc = 0; drawRaceFaces(); drawMapGlobes(); }
+      if (faceAcc >= 0.05) { faceAcc = 0; drawRaceFaces(); drawMapGlobes(); drawHeroCards(); }
       // The hero gets its own, faster budget: the faces only breathe, but the hero
       // waves, and a wave at 20fps reads as a stutter rather than a gesture.
       heroAcc += dt;

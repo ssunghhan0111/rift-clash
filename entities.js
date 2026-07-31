@@ -84,6 +84,18 @@ window.RC = window.RC || {};
     e.chillStk = 0; e.chillT = 0; e.frozen = 0; e.freezeFx = 0;
     e.markT = 0; e.markAmp = 0;
     e.auraArmor = 0; e.auraArmorT = 0;
+    // ── Aura fields, written by _passiveAura, consumed by the owner's own update ──
+    // Auras write a SHORT-LIVED field with Math.max rather than applying their effect
+    // directly, which is what makes them NON-STACKING: two Prisms in range set the same
+    // field and the stronger one wins, instead of each restoring shields on its own.
+    // See the note on _passiveAura. `auraArmor` already worked this way; the healing and
+    // shield auras were converted to match when heroes stopped belonging to a race and
+    // a Prism could stand inside an Aether army that already had a shield aura.
+    e.auraShield = 0; e.auraShieldT = 0;
+    e.auraHeal = 0; e.auraHealT = 0;
+    // ── Sanctuary (Vale's signature) ──
+    // wardDr flattens incoming damage; wardSave is the one-time "should have died".
+    e.wardT = 0; e.wardDr = 0; e.wardSave = false; e.wardFx = 0;
   }
   RC.initStatus = initStatus;
 
@@ -95,7 +107,11 @@ window.RC = window.RC || {};
   // that deals damage. A Crystal Guard run that used to reach wave 11 stalled out at 7
   // holding a pile of immortal medics. So healers mend the ARMY, never each other — one
   // rule, stated once, rather than a heal number tuned down until the loop is merely slow.
-  const HEAL_AURA = { mender: 1, bloom: 1 };
+  //
+  // Vale's `mendaura` is on this list for the same reason, even though Vale is a hero
+  // and there is only ever one: Vale healing a Patch Bot that heals Vale back is the
+  // identical loop with two units instead of nine.
+  const HEAL_AURA = { mender: 1, bloom: 1, mendaura: 1 };
   function isHealer(e) { return !!(e && e.def && e.def.passive && HEAL_AURA[e.def.passive.id]); }
 
   // 상태이상 감쇠 + 지속 피해. 반환값은 이번 틱에 입은 지속 피해량.
@@ -118,6 +134,24 @@ window.RC = window.RC || {};
     if (e.frozen > 0) e.frozen = Math.max(0, e.frozen - dt);
     if (e.freezeFx > 0) e.freezeFx = Math.max(0, e.freezeFx - dt);
     if (e.auraArmorT > 0) { e.auraArmorT -= dt; if (e.auraArmorT <= 0) e.auraArmor = 0; }
+    // Aura fields expire on their own, so nothing has to remember to remove them when
+    // the source dies, walks away, or is out-ranked by a stronger source.
+    if (e.auraShieldT > 0) {
+      e.auraShieldT -= dt;
+      if (e.maxShield && e.shield < e.maxShield) RC.restoreShield(e, e.auraShield * dt);
+      if (e.auraShieldT <= 0) e.auraShield = 0;
+    }
+    if (e.auraHealT > 0) {
+      e.auraHealT -= dt;
+      if (e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + e.auraHeal * dt);
+      if (e.auraHealT <= 0) e.auraHeal = 0;
+    }
+    if (e.wardT > 0) {
+      e.wardT = Math.max(0, e.wardT - dt);
+      if (e.wardHps && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + e.wardHps * dt);
+      if (!e.wardT) { e.wardDr = 0; e.wardSave = false; e.wardHps = 0; }
+    }
+    if (e.wardFx > 0) e.wardFx = Math.max(0, e.wardFx - dt);
     return dot;
   }
   RC.tickStatus = tickStatus;
@@ -128,7 +162,17 @@ window.RC = window.RC || {};
   // Any hit resets the recharge delay, so shields only regrow out of combat.
   function dealDamage(foe, dealt) {
     if (!foe || dealt <= 0) return 0;
-    // ── Guard (the Warden's dome) ──
+    // ── Sanctuary (Vale's signature) ──
+    // Sits OUTSIDE the guard pool and outside shields, because it is a property of the
+    // ground rather than of the target: everything friendly standing in the circle takes
+    // less, whatever it happens to be wearing. Applied first so the reduction benefits
+    // the guard pool and the shield too, not just the hp underneath them.
+    if (foe.wardT > 0 && foe.wardDr) {
+      dealt *= (1 - foe.wardDr);
+      foe.wardFx = 0.2;
+      if (dealt <= 0) return 0;
+    }
+    // ── Guard (Rook's dome) ──
     // A temporary pool that sits IN FRONT of shields and hp and works on units and
     // buildings alike, which is what lets one ability cover the crystal and, upgraded,
     // everything standing near it. Hooked here because every damage path in the game —
@@ -157,7 +201,18 @@ window.RC = window.RC || {};
       }
     }
     foe.hp -= dealt;
-    if (foe.hp <= 0) { foe.hp = 0; foe.dead = true; }
+    if (foe.hp <= 0) {
+      // Sanctuary's one-time save. Consumed rather than refreshed: the ability promises
+      // "the blow that would have killed you", once each, not immortality for six
+      // seconds. It also does NOT heal — a unit saved at 1 hp is still about to die
+      // unless somebody does something about it, which is the point.
+      if (foe.wardT > 0 && foe.wardSave) {
+        foe.wardSave = false;
+        foe.hp = 1; foe.wardFx = 0.5;
+        return dealt;
+      }
+      foe.hp = 0; foe.dead = true;
+    }
     return dealt;
   }
   RC.dealDamage = dealDamage;
@@ -265,6 +320,11 @@ window.RC = window.RC || {};
       // Burn is venom with a different colour. Keeping it a separate id costs one line
       // here and buys a Rattler that reads as incendiary instead of as a snake.
       case 'burn':  applyVenom(foe, { dmg: p.dmg, dur: p.dur, max: p.max, fire: true }); break;
+      // Scorch (Ember) — burn by another name, and deliberately the same currency, so
+      // Ember's auto-attacks stack INTO a Rattler's burn instead of running a parallel
+      // little system of their own. It is the only hero passive that rewards simply
+      // leaving the hero shooting, which is what a long-range caster should want.
+      case 'scorch': applyVenom(foe, { dmg: p.dmg || 4, dur: p.dur || 4, max: p.max || 3, fire: true }); break;
       case 'shred': applyShred(foe, p); break;
       case 'mark':  applyMark(foe, p); break;
       case 'lifesteal': {
@@ -399,7 +459,7 @@ window.RC = window.RC || {};
 
     update(dt, game) {
       if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - dt);   // 피격 섬광 감쇠
-      // The Warden's dome sits on a building far more often than on a unit, so the
+      // Rook's dome sits on a building far more often than on a unit, so the
       // Shatter detonation lives here. tickGuard reports the tick it ENDS on, which is
       // the only moment the explosion can fire — a guard that is merely absent tells us
       // nothing about whether it expired or was never cast.
@@ -613,6 +673,9 @@ window.RC = window.RC || {};
       const lv = this.level - 1;
       if (sk.dmgPerLevel)    a.dmg    = (sk.dmg || 0) + sk.dmgPerLevel * lv;
       if (sk.shieldPerLevel) a.shield = (sk.shield || 0) + sk.shieldPerLevel * lv;
+      if (sk.healPerLevel)   a.heal   = (sk.heal || 0) + sk.healPerLevel * lv;
+      if (sk.armorPerLevel)  a.armor  = (sk.armor || 0) + sk.armorPerLevel * lv;
+      if (sk.ampPerLevel)    a.amp    = (sk.amp || 0) + sk.ampPerLevel * lv;
       return a;
     }
 
@@ -625,6 +688,8 @@ window.RC = window.RC || {};
       if (sig.shieldPerLevel) a.shield = sig.shield + sig.shieldPerLevel * lv;
       if (sig.dmgPerLevel)    a.dmg    = sig.dmg + sig.dmgPerLevel * lv;
       if (sig.countPerLevel)  a.count  = Math.min(sig.maxCount || 99, sig.count + sig.countPerLevel * lv);
+      if (sig.dpsPerLevel)    a.dps    = (sig.dps || 0) + sig.dpsPerLevel * lv;
+      if (sig.hpsPerLevel)    a.hps    = (sig.hps || 0) + sig.hpsPerLevel * lv;
       // Upgrades carry uniquely-named fields (durAdd, countAdd, radiusMul, ...), so this
       // merge never has to know WHICH upgrade it holds. Add one to config.js with a new
       // field name and it lands here without touching this code.
@@ -644,6 +709,8 @@ window.RC = window.RC || {};
         if (up.burstDmg)   { a.burstDmg = up.burstDmg; a.burstRadius = up.burstRadius || 90; }
         if (up.hatchSpd)  a.hatchSpd = up.hatchSpd;
         if (up.hatchDmg)  a.hatchDmg = up.hatchDmg;
+        if (up.exitDmg)   { a.exitDmg = up.exitDmg; a.exitSlow = up.exitSlow || 0; }
+        if (up.hasteMul)  a.hasteMul = up.hasteMul;
       }
       return a;
     }
@@ -1239,12 +1306,24 @@ window.RC = window.RC || {};
           }
           return;
         }
-        case 'bloom': {
+        // ── The non-stacking rule ────────────────────────────────────────────
+        // Two sources of the SAME aura do not add up; the stronger one wins. Written
+        // as a short-lived Math.max field that the target's own tickStatus consumes,
+        // exactly the way guardaura below has always worked.
+        //
+        // This became necessary the moment heroes stopped belonging to a race. Prism's
+        // passive is `shieldaura` and so is the Aether Ardent's, so a Prism deploying
+        // with Aether used to double-dip — and Vale's `mendaura` would have done the
+        // same next to a Forge Patch Bot. Rather than special-casing heroes, the rule
+        // is general: same `passive.id`, strongest instance only.
+        case 'bloom':
+        case 'mendaura': {
           for (const u of game.units) {
-            if (u.dead || u.owner !== this.owner || u.hp >= u.maxHp) continue;
+            if (u.dead || u === this || u.owner !== this.owner || u.hp >= u.maxHp) continue;
             if (isHealer(u)) continue;                     // 힐러끼리는 못 살린다
             if (RC.dist(this.x, this.y, u.x, u.y) > R) continue;
-            u.hp = Math.min(u.maxHp, u.hp + (p.hps || 4) * dt);
+            u.auraHeal = Math.max(u.auraHeal || 0, p.hps || 4);
+            u.auraHealT = 0.35;                            // 갱신 주기(0.25s)보다 살짝 길게
           }
           return;
         }
@@ -1252,7 +1331,8 @@ window.RC = window.RC || {};
           for (const u of game.units) {
             if (u.dead || u.owner !== this.owner || !u.maxShield || u.shield >= u.maxShield) continue;
             if (RC.dist(this.x, this.y, u.x, u.y) > R) continue;
-            RC.restoreShield(u, (p.sps || 12) * dt);
+            u.auraShield = Math.max(u.auraShield || 0, p.sps || 12);
+            u.auraShieldT = 0.35;
           }
           return;
         }
@@ -1425,40 +1505,142 @@ window.RC = window.RC || {};
           return true;                     // 이동기 — 적이 없어도 시전된다
         }
 
-        // ── E: Crystal Shockwave (Ironclad Warden) ──
-        // Bulwark's twin, and deliberately built out of the same parts: it is centred on
-        // whatever the hero is defending (_domeHost — the crystal in Crystal Guard, the
-        // hero itself otherwise) and it shoves outward FROM that point, never from the
-        // Warden. Pushing away from the hero scatters enemies wherever the hero happens to
-        // be standing; pushing away from the objective always clears the thing you care
-        // about, which is the only thing the button is for.
+        // ── E: Hold the Line (Rook) ──
+        // Rook's only ability that points at the ARMY rather than at the objective. It
+        // replaced a shockwave measured from the crystal, which answered the same
+        // question as Bulwark — "the crystal is about to die" — and so was a wasted
+        // button on a three-button hero.
         //
-        // Flyers are shoved too. They are above the terrain, not above a pressure wave,
-        // and a shockwave that politely ignored the air wing would read as broken to the
-        // six-year-old who just watched everything else get thrown.
-        case 'shock': {
-          const from = this._domeHost(game) || this;
-          const R = ab.radius || 340;
-          let hit = 0;
+        // Placed under Rook's own feet, deliberately, and this is the whole design of
+        // it: every other area ability in the kit is aimed somewhere clever
+        // (_pressurePoint, _domeHost) and this one is aimed at where the player has
+        // chosen to STAND. It is the ability that makes positioning the hero matter.
+        //
+        // The buff writes the same auraArmor field the Shielder's aura does, so it obeys
+        // the non-stacking rule for free: standing a Rook next to a Dropship gives you
+        // the better of the two, not the sum.
+        case 'banner': {
+          const R = ab.radius || 200;
+          const dur = ab.dur || 5;
+          game.hazards = game.hazards || [];
+          game.hazards.push({
+            kind: 'banner', x: this.x, y: this.y, radius: R, t: dur, max: dur,
+            owner: this.owner, armor: ab.armor || 3, slowDur: ab.slowDur || 0.6,
+          });
+          game.fx.push({ abil: 'aegis', ax: this.x, ay: this.y, t: 0.8, radius: R, owner: this.owner });
+          return true;                     // 진영 강화기 — 적이 없어도 시전된다
+        }
+
+        // ── Q: Cinder Line (Ember) ──
+        // Aimed along `facing` rather than at a target, so it is the one hero ability in
+        // the game the player aims by WALKING. The burst on contact is small; the line
+        // it leaves behind is the ability. A choke Ember has drawn a line across costs
+        // the enemy something to cross whether or not Ember is still standing there.
+        case 'line': {
+          const len = ab.len || 300, w = ab.width || 60;
+          const ca = Math.cos(this.facing), sa = Math.sin(this.facing);
+          const inLine = (e) => {
+            const dx = e.x - this.x, dy = e.y - this.y;
+            const along = dx * ca + dy * sa;
+            if (along < -w * 0.5 || along > len) return false;
+            return Math.abs(-dx * sa + dy * ca) <= w * 0.5 + (e.r || 0);
+          };
+          for (const u of game.units) {
+            if (u.dead || !game.areEnemies(u.owner, this.owner) || !inLine(u)) continue;
+            this._hit(u, ab.dmg || 30, game);
+          }
+          for (const b of game.buildings) {
+            if (b.dead || !b.done || !game.areEnemies(b.owner, this.owner) || !inLine(b)) continue;
+            this._hit(b, (ab.dmg || 30) * 0.6, game);
+          }
+          // The hazard is a chain of overlapping discs rather than a rectangle, so the
+          // one circle-distance test every other hazard already uses covers it too. A
+          // second hazard SHAPE would mean a second containment test forever after.
+          game.hazards = game.hazards || [];
+          const step = w * 0.55, n = Math.max(2, Math.round(len / step));
+          for (let i = 0; i <= n; i++) {
+            const d = (i / n) * len;
+            game.hazards.push({
+              kind: 'fire', x: this.x + ca * d, y: this.y + sa * d, radius: w * 0.5,
+              t: ab.hazDur || 4, max: ab.hazDur || 4, owner: this.owner,
+              dps: ab.hazDps || 8, part: true,
+            });
+          }
+          game.fx.push({ abil: 'salvo', ax: this.x + ca * len * 0.5, ay: this.y + sa * len * 0.5, t: 0.4, radius: w, owner: this.owner });
+          return true;                     // 지형기 — 적이 없어도 시전된다
+        }
+
+        // ── E: Flare (Ember) ──
+        // Reuses the existing MARK status rather than inventing a second damage-amp
+        // system. Mark is already read by both damage paths (Unit._hit and game.hurt),
+        // which is exactly the property Flare needs: the amp has to apply to towers and
+        // splash too, or "everyone hits them harder" is a lie told to the player.
+        case 'flare': {
+          const at = this._pressurePoint(game, (ab.radius || 180) * 2.2) || { x: this.x, y: this.y };
+          let any = false;
+          const amp = { dur: ab.dur || 6, amp: ab.amp || 0.25 };
           for (const u of game.units) {
             if (u.dead || !game.areEnemies(u.owner, this.owner)) continue;
-            if (RC.dist(from.x, from.y, u.x, u.y) > R) continue;
-            this._hit(u, ab.dmg || 35, game);
-            u.slow = Math.max(u.slow || 0, ab.slowDur || 1.5);
-            // Direction is measured from the origin, so a unit standing exactly on it has
-            // no direction to be thrown in — fall back to its own facing rather than NaN.
-            const a2 = (u.x === from.x && u.y === from.y)
-                     ? u.facing : Math.atan2(u.y - from.y, u.x - from.x);
-            const push = ab.push || 170;
-            u.x = Math.max(u.r, Math.min(RC.CFG.WORLD_W - u.r, u.x + Math.cos(a2) * push));
-            u.y = Math.max(u.r, Math.min(RC.CFG.WORLD_H - u.r, u.y + Math.sin(a2) * push));
-            // Whatever it was walking towards is now behind it — drop the order so it has
-            // to re-approach instead of teleporting its target back into range next tick.
-            u.path = null; u._pathGoal = null;
-            hit++;
+            if (RC.dist(at.x, at.y, u.x, u.y) > (ab.radius || 180)) continue;
+            RC.applyMark(u, amp); any = true;
           }
-          if (!hit) return false;          // 밀어낼 적이 없으면 소모하지 않는다
-          game.fx.push({ abil: 'aegis', ax: from.x, ay: from.y, t: 0.9, radius: R, owner: this.owner });
+          for (const b of game.buildings) {
+            if (b.dead || !b.done || !game.areEnemies(b.owner, this.owner)) continue;
+            if (RC.dist(at.x, at.y, b.x, b.y) > (ab.radius || 180) + b.r) continue;
+            RC.applyMark(b, amp); any = true;
+          }
+          if (!any) return false;          // 표시할 적이 없으면 소모하지 않는다
+          game.fx.push({ abil: 'nova', ax: at.x, ay: at.y, t: 0.6, radius: ab.radius || 180, owner: this.owner });
+          return true;
+        }
+
+        // ── Q: Mend Pulse (Vale) ──
+        // The only hero ability that reaches BUILDINGS on purpose, crystal included. It
+        // is the one thing in the game that can undo objective damage, which is why the
+        // number is modest and the cooldown is short: it should be a steady trickle a
+        // present player earns, never a single button that erases a lost wave.
+        case 'mend': {
+          const R = ab.radius || 190, amount = ab.heal || 60;
+          let any = false;
+          for (const u of game.units) {
+            if (u.dead || u.owner !== this.owner || u.hp >= u.maxHp) continue;
+            if (RC.dist(this.x, this.y, u.x, u.y) > R) continue;
+            u.hp = Math.min(u.maxHp, u.hp + amount);
+            game.fx.push({ abil: 'heal', ax: u.x, ay: u.y, t: 0.35, radius: (u.r || 12) + 5, owner: this.owner });
+            any = true;
+          }
+          for (const b of game.buildings) {
+            if (b.dead || b.owner !== this.owner || b.hp >= b.maxHp) continue;
+            if (RC.dist(this.x, this.y, b.x, b.y) > R + b.r) continue;
+            b.hp = Math.min(b.maxHp, b.hp + amount);
+            game.fx.push({ abil: 'heal', ax: b.x, ay: b.y, t: 0.35, radius: (b.r || 24) + 6, owner: this.owner });
+            any = true;
+          }
+          if (!any) return false;          // 아무것도 안 다쳤으면 소모하지 않는다
+          game.fx.push({ abil: 'heal', ax: this.x, ay: this.y, t: 0.5, radius: R, owner: this.owner });
+          return true;
+        }
+
+        // ── E: Slipstream (Vale) ──
+        // Writes the generic `haste` buff that already exists for the Hoverwing's Strafe
+        // Run, so nothing new had to be invented for the speed half. The CLEANSE is the
+        // half that matters: it is the only answer in the game to Rook's Ground Slam and
+        // Prism's Static Prison, and giving the support hero the counter to the control
+        // heroes is what stops freeze chains from being unanswerable.
+        case 'slip': {
+          const R = ab.radius || 200;
+          let any = false;
+          for (const u of game.units) {
+            if (u.dead || u.owner !== this.owner) continue;
+            if (RC.dist(this.x, this.y, u.x, u.y) > R) continue;
+            u.haste = Math.max(u.haste || 0, ab.dur || 4);
+            u.hasteSpd = Math.max(u.hasteSpd || 1, ab.speedMul || 1.35);
+            u.hasteFire = Math.min(u.hasteFire || 1, 1);
+            if (ab.cleanse) { u.frozen = 0; u.slow = 0; u.freezeFx = 0; u.chillStk = 0; u.chillT = 0; }
+            any = true;
+          }
+          if (!any) return false;
+          game.fx.push({ abil: 'warp', ax: this.x, ay: this.y, t: 0.6, radius: R, owner: this.owner });
           return true;
         }
 
@@ -1620,6 +1802,47 @@ window.RC = window.RC || {};
           }
           game.fx.push({ abil: 'aegis', ax: at.x, ay: at.y, t: 1.0, radius: R, owner: this.owner });
           void hit;                       // fires even on an empty field — see cast()
+          return true;
+        }
+
+        // ── SIGNATURE: Firestorm (Ember) ──
+        // The only ultimate that is not an event. Bulwark, Rift Nova and Hatch the Brood
+        // all resolve the instant they are cast; Firestorm puts something on the map and
+        // walks away, so its value depends on whether the enemy has anywhere else to go.
+        // Cast on the pressure point for the same reason Rift Nova is: the player chose
+        // WHEN, and the sim should not spend that choice on two stragglers underfoot.
+        case 'firestorm': {
+          const R = ab.radius || 220;
+          const at = this._pressurePoint(game, R * 2.2) || { x: this.x, y: this.y };
+          game.hazards = game.hazards || [];
+          game.hazards.push({
+            kind: 'fire', x: at.x, y: at.y, radius: R, t: ab.dur || 8, max: ab.dur || 8,
+            owner: this.owner, dps: ab.dps || 26,
+            exitDmg: ab.exitDmg || 0, exitSlow: ab.exitSlow || 0,
+          });
+          game.fx.push({ abil: 'salvo', ax: at.x, ay: at.y, t: 1.0, radius: R, owner: this.owner });
+          return true;                     // 지형기 — 빈 땅에도 시전된다
+        }
+
+        // ── SIGNATURE: Sanctuary (Vale) ──
+        // Rook's Bulwark and this are the two "hold on" ultimates and they are opposites
+        // on purpose: Bulwark is one pool of hp on ONE thing (the objective) that anyone
+        // can chew through, Sanctuary is a percentage off EVERYTHING friendly standing in
+        // a circle. The dome saves the crystal; the sanctuary saves the army.
+        //
+        // Applied continuously by the hazard tick rather than stamped once on cast, so a
+        // unit that walks in halfway through is protected — a version that only blessed
+        // whoever was already inside would punish the reinforcements it exists to save.
+        case 'sanctuary': {
+          const R = ab.radius || 280;
+          const at = this._pressurePoint(game, R * 2.0) || { x: this.x, y: this.y };
+          game.hazards = game.hazards || [];
+          game.hazards.push({
+            kind: 'ward', x: at.x, y: at.y, radius: R, t: ab.dur || 6, max: ab.dur || 6,
+            owner: this.owner, dr: ab.dr || 0.35, hps: ab.hps || 20,
+            save: !!ab.guardOnce, hasteMul: ab.hasteMul || 0,
+          });
+          game.fx.push({ abil: 'dome', ax: at.x, ay: at.y, t: 1.0, radius: R, owner: this.owner });
           return true;
         }
 

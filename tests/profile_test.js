@@ -8,6 +8,9 @@ global.localStorage = {
   removeItem: k => { delete store[k]; },
 };
 let DAY = 100;
+// profile.js now owns the per-hero Mastery record and the Star wallet, so it needs the
+// roster (RC.HEROES / RC.resolveHero / RC.MASTERY / RC.STARS) that config.js defines.
+require('../config.js');
 require('../profile.js');
 RC.Daily = { dayNumber: () => DAY };
 const P = RC.Profile;

@@ -205,6 +205,18 @@ RC.AI_PERSONA = {
               firstWaveMul: 1.5, waveSizeMul: 1.6, workerCapMul: 1.15, tech: true },
 };
 RC.AI_PERSONA_ORDER = ['balanced', 'rusher', 'turtler', 'skylord', 'macro'];
+
+// Which hero a bot brings. Personality-flavoured rather than random, so a Turtler that
+// plants banners and a Rusher that dives with the gap-closer reinforce the label the
+// player already saw on the pre-game screen — the bot's hero should be evidence of its
+// personality, not a coin flip that contradicts it.
+RC.AI_PERSONA_HERO = {
+  balanced: 'prism',
+  rusher:   'thorn',
+  turtler:  'rook',
+  skylord:  'ember',
+  macro:    'vale',
+};
 // Personalities the game rolls for a random enemy. `balanced` is in the pool: leaving it
 // out meant every single match was against a bot carrying personality multipliers, so the
 // plain difficulty profile the numbers above are tuned around was never actually played.
@@ -267,6 +279,10 @@ RC.PASSIVE = {
                 desc: 'Bathes nearby allies in energy, recharging their plasma shields even mid-fight.' },
   guardaura:  { ic: '🛡️', name: 'Bulwark Field', kid: 'Friends next to it are tougher.',
                 desc: 'Nearby allies gain armour, and attackers take a share of their own hit back.' },
+  mendaura:   { ic: '💚', name: 'Field Mend',    kid: 'Friends nearby slowly heal up.',
+                desc: 'A steady mend on every nearby ally — quiet, constant, and it never stops.' },
+  scorch:     { ic: '🔥', name: 'Scorch',        kid: 'Its shots set things on fire.',
+                desc: 'Every shot leaves the target burning, and the burns stack up as it keeps firing.' },
   chill:      { ic: '❄️', name: 'Cryo Coils',    kid: 'Its shots make enemies slow — then FROZEN.',
                 desc: 'Every hit chills. Enough stacked chill freezes the target solid for a moment.' },
   venom:      { ic: '🧪', name: 'Venom',         kid: 'Its bite keeps hurting after it hits.',
@@ -499,11 +515,31 @@ RC.UNITS = {
     desc: 'Support caster whose mere presence recharges the whole army’s shields, even mid-fight.'
   },
 
-  // ══ Heroes — one per race. Gain XP from nearby enemy kills, level up (skills rank up
-  //    automatically), and revive at your base after a delay + shard cost if slain. ══
-  warden: {
-    id: 'warden', name: 'Ironclad Warden', role: 'Hero', hero: true,
-    hp: 600, dmg: 22, range: 30, cd: 1.0, speed: 80, r: 22, sight: 230,
+  // ══ Heroes — FIVE, and none of them belongs to a race. ══════════════════════
+  //
+  //    Any hero can deploy with any faction: the player picks the hero on the start
+  //    screen and the race separately, so `RC.RACES[x].hero` is gone and no hero def
+  //    carries a `race:` tag. Two consequences the rest of the code has to honour:
+  //
+  //      · PALETTE — the hero owns body/light/dark/trim/ink, the race owns
+  //        steel/eye/opticRGB/psi. See heroIdleColors() in renderer.js.
+  //      · SUMMONS — anything a hero creates must be race-free too, which is why
+  //        Thorn hatches `thornling` and not the Gloop Globling it used to.
+  //
+  //    Levelling is TWO numbers and they are not the same (see HERO_DESIGN.md §2):
+  //      · Match Level 1–10, below — XP from enemies dying nearby, carries the stats,
+  //        RESETS every match.
+  //      · Mastery 1–30, in RC.MASTERY — persists per hero in the profile, unlocks
+  //        options and cosmetics, and NEVER touches a stat.
+  //
+  //    ROOK   the Anchor  — stand in front of the thing you cannot afford to lose
+  //    THORN  the Reaper  — feed on the fight and outlast it
+  //    PRISM  the Weaver  — be where the fight isn't, and stop it where it is
+  //    EMBER  the Kindler — make ground the enemy cannot stand on
+  //    VALE   the Mender  — keep the army alive through the push that should have killed it
+  rook: {
+    id: 'rook', name: 'Rook', title: 'the Anchor', role: 'Hero', hero: true,
+    hp: 620, dmg: 22, range: 30, cd: 1.0, speed: 78, r: 22, sight: 230,
     cost: 0, time: 0, supply: 0, armor: 3, energy: 200, key: 'H',
     grow: { hp: 70, dmg: 4, armor: 0.5 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
@@ -517,16 +553,16 @@ RC.UNITS = {
       desc: 'Leaps at the fight and lands hard enough to freeze everything around the impact.',
       dist: 190, radius: 150, dmg: 55, dmgPerLevel: 5, freeze: 1.1, shake: 0.35,
     },
-    // Bulwark's twin. Both are measured from the CRYSTAL rather than from the Warden,
-    // and both answer the same question — "the crystal is about to die" — in opposite
-    // ways: the dome eats the damage, the shockwave removes the thing dealing it. The
-    // damage here is almost an afterthought on purpose. This is time, not a wave clear;
-    // an E that killed the wave would make the ultimate redundant.
+    // Hold the Line replaced the old Crystal Shockwave, which was measured from the
+    // crystal and answered the same question as Bulwark: "the crystal is about to die".
+    // A hero whose E and R mean the same thing has wasted a button. The banner answers a
+    // different question — "I need this ground for five seconds" — and it is the only
+    // ability in the kit that helps the ARMY rather than the objective.
     e: {
-      id: 'shock', ic: '🌊', name: 'Crystal Shockwave', key: 'E', slot: 'e', cost: 55, cd: 15,
-      kid: 'BOOM! Shoves all the bad guys away from the crystal!',
-      desc: 'Slams a pulse out from the crystal, hurling every enemy around it far back and leaving them reeling.',
-      radius: 340, push: 170, dmg: 35, dmgPerLevel: 3, slowDur: 1.5, shake: 0.6,
+      id: 'banner', ic: '🚩', name: 'Hold the Line', key: 'E', slot: 'e', cost: 50, cd: 14,
+      kid: 'Plants a flag — your team gets tougher, theirs gets slower!',
+      desc: 'Drives a banner into the ground. Enemies around it wade; allies around it fight behind heavier armour.',
+      radius: 200, dur: 5, armor: 3, armorPerLevel: 0.2, slowDur: 0.6, dmg: 0, shake: 0.3,
     },
     sig: {
       id: 'dome', ic: '🛡️', name: 'Bulwark', key: 'R', slot: 'r', ult: true,
@@ -543,17 +579,17 @@ RC.UNITS = {
           desc: 'When the dome ends it detonates, damaging and reeling everything around the crystal.', shatterDmg: 70, shatterSlow: 1.6 },
       ],
     },
-    desc: 'A towering war machine. Grows stronger with every battle — you need it to win.'
+    desc: 'A towering war machine that stands where you tell it to and refuses to move.'
   },
-  matriarch: {
-    id: 'matriarch', name: 'Brood Matriarch', role: 'Hero', hero: true, race: 'gloop', regen: 4,
-    hp: 480, dmg: 18, range: 120, cd: 1.0, speed: 84, r: 21, sight: 240,
+  thorn: {
+    id: 'thorn', name: 'Thorn', title: 'the Reaper', role: 'Hero', hero: true, regen: 4,
+    hp: 500, dmg: 18, range: 120, cd: 1.0, speed: 84, r: 21, sight: 240,
     cost: 0, time: 0, supply: 0, armor: 1, energy: 220, key: 'H',
     acid: { dmg: 4, dur: 5, shred: 2, max: 6 },
     grow: { hp: 55, dmg: 4, armor: 0.4 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
     passive: { id: 'lifesteal', pct: 0.3 },
-    // ── KIT ── Q poisons, E eats, R hatches. See the Warden above for why Q/E run on
+    // ── KIT ── Q poisons, E eats, R hatches. See Rook above for why Q/E run on
     //    energy and a cooldown while R runs on the fight-charge meter.
     q: {
       id: 'spray', ic: '🧪', name: 'Venom Spray', key: 'Q', slot: 'q', cost: 40, cd: 8,
@@ -571,7 +607,10 @@ RC.UNITS = {
       id: 'brood', ic: '🥚', name: 'Hatch the Brood', key: 'R', slot: 'r', ult: true,
       kid: 'Hatches a bunch of babies to fight for you!',
       desc: 'Splits the ground open where the fight is thickest and hatches free globlings that fight for a while.',
-      count: 5, countPerLevel: 0.4, maxCount: 12, spawn: 'globling', life: 26, radius: 130, shake: 0.5,
+      // spawn is `thornling`, NOT the Gloop Globling it used to be. A race-free hero that
+      // summoned a faction unit would look wrong in a Forge army and would quietly hand
+      // one of Gloop's units to everybody.
+      count: 5, countPerLevel: 0.4, maxCount: 12, spawn: 'thornling', life: 26, radius: 130, shake: 0.5,
       ups: [
         { id: 'many',   ic: '🐛', name: 'Bigger Brood', kid: 'Three more babies!',
           desc: 'Three extra hatchlings every time.', countAdd: 3 },
@@ -581,16 +620,16 @@ RC.UNITS = {
           desc: 'Hatchlings arrive enraged — faster, and they bite much harder.', hatchSpd: 1.35, hatchDmg: 1.4 },
       ],
     },
-    desc: 'Acid-spewing matriarch. Feeds on the fallen to grow — essential to victory.'
+    desc: 'Acid-spewing brood queen. Feeds on the fallen — the longer the fight, the stronger she is.'
   },
-  archon: {
-    id: 'archon', name: 'Radiant Archon', role: 'Hero', hero: true, race: 'aether',
-    hp: 420, dmg: 26, range: 95, cd: 0.95, speed: 88, r: 22, sight: 250,
+  prism: {
+    id: 'prism', name: 'Prism', title: 'the Weaver', role: 'Hero', hero: true,
+    hp: 440, dmg: 26, range: 95, cd: 0.95, speed: 88, r: 22, sight: 250,
     cost: 0, time: 0, supply: 0, armor: 2, energy: 220, shield: 320, key: 'H',
     grow: { hp: 45, dmg: 5, armor: 0.4, shield: 55 },
     revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
     passive: { id: 'shieldaura', sps: 10, radius: 170 },
-    // ── KIT ── Q repositions, E locks a group down, R clears the crystal. See the Warden
+    // ── KIT ── Q repositions, E locks a group down, R clears the crystal. See Rook
     //    above for why Q/E run on energy and a cooldown while R runs on fight-charge.
     q: {
       id: 'blink', ic: '🌀', name: 'Phase Shift', key: 'Q', slot: 'q', cost: 35, cd: 7,
@@ -604,8 +643,8 @@ RC.UNITS = {
       desc: 'Snaps a lattice of static shut around a knot of enemies, freezing every one of them solid.',
       radius: 175, dmg: 30, dmgPerLevel: 3, freeze: 1.8, shake: 0.35,
     },
-    // ── SIGNATURE ── The Archon's answer is MAKE SPACE. The shove is measured from the
-    //    CRYSTAL rather than from the Archon, so it always clears the thing you are
+    // ── SIGNATURE ── Prism's answer is MAKE SPACE. The shove is measured from the
+    //    CRYSTAL rather than from the hero, so it always clears the thing you are
     //    defending instead of scattering enemies wherever the hero happens to stand.
     sig: {
       id: 'riftnova', ic: '⚡', name: 'Rift Nova', key: 'R', slot: 'r', ult: true,
@@ -621,8 +660,127 @@ RC.UNITS = {
           desc: 'Leaves the ground churning — everything hit stays slowed far longer.', slowSet: 4 },
       ],
     },
-    desc: 'A being of pure energy wrapped in a colossal shield. Grows radiant with every kill.'
+    desc: 'A being of pure energy wrapped in a colossal shield. Never where you swung.'
   },
+
+  // ── EMBER — the Kindler ────────────────────────────────────────────────────
+  // The zoner. Every other hero answers "a push is landing" by absorbing it, removing
+  // it or outlasting it; Ember answers by making the ground it is standing on cost
+  // something. Two mechanics no other unit has — a persistent ground HAZARD that ticks
+  // on whoever stands in it, and a damage-AMP debuff — and both are deliberately generic
+  // (see game.js `hazards` and `RC.ampMul`) so future content can reuse them.
+  ember: {
+    id: 'ember', name: 'Ember', title: 'the Kindler', role: 'Hero', hero: true,
+    hp: 460, dmg: 20, range: 150, cd: 1.1, speed: 82, r: 20, sight: 260,
+    cost: 0, time: 0, supply: 0, armor: 1, energy: 210, key: 'H',
+    grow: { hp: 50, dmg: 5, armor: 0.3 },
+    revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
+    // Longest basic range in the roster, and the attacks stack a burn — Ember is worth
+    // leaving on auto-attack in a way no other hero is.
+    passive: { id: 'scorch', dmg: 4, dur: 4, max: 3 },
+    q: {
+      id: 'line', ic: '🔥', name: 'Cinder Line', key: 'Q', slot: 'q', cost: 40, cd: 8,
+      kid: 'Draws a line of fire — don’t step on it!',
+      desc: 'Rakes a burning line across the ground ahead. What it touches burns, and the line keeps burning after.',
+      len: 300, width: 60, dmg: 30, dmgPerLevel: 3, hazDps: 8, hazDur: 4, shake: 0.25,
+    },
+    e: {
+      id: 'flare', ic: '🎯', name: 'Flare', key: 'E', slot: 'e', cost: 45, cd: 12,
+      kid: 'Paints the bad guys — everyone hits them harder!',
+      desc: 'Bursts a flare over the thickest knot of enemies. Everything caught in it takes more damage from every source.',
+      radius: 180, dur: 6, amp: 0.25, ampPerLevel: 0.01, dmg: 0, shake: 0.2,
+    },
+    sig: {
+      id: 'firestorm', ic: '🌋', name: 'Firestorm', key: 'R', slot: 'r', ult: true,
+      kid: 'Sets the whole place on fire!',
+      desc: 'Drops a slow, spreading fire over the fight that keeps burning long after the wave arrives.',
+      radius: 220, dur: 8, dps: 26, dpsPerLevel: 2.5, shake: 0.7,
+      ups: [
+        { id: 'wildfire', ic: '🌪️', name: 'Wildfire',  kid: 'The fire gets MUCH bigger!',
+          desc: 'Forty percent more ground covered.', radiusMul: 1.4 },
+        { id: 'longburn', ic: '⏳', name: 'Long Burn',  kid: 'The fire lasts way longer.',
+          desc: 'The fire burns for four extra seconds.', durAdd: 4 },
+        { id: 'backdraft', ic: '💨', name: 'Backdraft', kid: 'Running out of the fire HURTS.',
+          desc: 'Anything that leaves the fire takes a parting burst and is left reeling.', exitDmg: 45, exitSlow: 1.6 },
+      ],
+    },
+    desc: 'An artillery caster who fights by deciding where the enemy is not allowed to stand.'
+  },
+
+  // ── VALE — the Mender ──────────────────────────────────────────────────────
+  // The support, and the only hero whose whole kit points at the ARMY rather than at
+  // the enemy. Vale is what makes co-op Survival feel different rather than just harder.
+  // Note the Q repairs BUILDINGS as well as units, which includes the crystal — it is
+  // the only hero ability in the game that can undo objective damage.
+  vale: {
+    id: 'vale', name: 'Vale', title: 'the Mender', role: 'Hero', hero: true,
+    hp: 470, dmg: 16, range: 110, cd: 1.05, speed: 90, r: 20, sight: 250,
+    cost: 0, time: 0, supply: 0, armor: 1, energy: 240, key: 'H',
+    grow: { hp: 55, dmg: 3, armor: 0.3 },
+    revive: { base: 6, perLevel: 12, cost: 80, costPerLevel: 22 },
+    passive: { id: 'mendaura', hps: 5, radius: 175 },
+    q: {
+      id: 'mend', ic: '💚', name: 'Mend Pulse', key: 'Q', slot: 'q', cost: 40, cd: 7,
+      kid: 'Heals your whole team — and fixes the crystal!',
+      desc: 'A pulse of repair across everything friendly nearby, walls and crystal included.',
+      radius: 190, heal: 60, healPerLevel: 8, shake: 0.15,
+    },
+    e: {
+      id: 'slip', ic: '💨', name: 'Slipstream', key: 'E', slot: 'e', cost: 45, cd: 13,
+      kid: 'Everyone runs super fast and gets un-frozen!',
+      desc: 'Drags the air along behind your army — faster for a few seconds, and whatever was holding them lets go.',
+      radius: 200, dur: 4, speedMul: 1.35, cleanse: true, shake: 0.2,
+    },
+    sig: {
+      id: 'sanctuary', ic: '🕊️', name: 'Sanctuary', key: 'R', slot: 'r', ult: true,
+      kid: 'Nobody on your team can die for a bit!',
+      desc: 'Raises a still place over the fight — everything friendly inside heals, takes far less, and survives the blow that would have killed it.',
+      radius: 280, dur: 6, dr: 0.35, hps: 20, hpsPerLevel: 2, guardOnce: true, shake: 0.6,
+      ups: [
+        { id: 'widesanct', ic: '⭕', name: 'Wide Sanctuary', kid: 'The safe circle gets bigger!',
+          desc: 'Thirty-five percent more ground covered.', radiusMul: 1.35 },
+        { id: 'grace',     ic: '⏳', name: 'Longer Grace',   kid: 'It lasts longer!',
+          desc: 'The sanctuary holds for three extra seconds.', durAdd: 3 },
+        { id: 'rally',     ic: '⚔️', name: 'Rally',          kid: 'Your team attacks faster too!',
+          desc: 'Allies inside also swing a quarter faster.', hasteMul: 1.25 },
+      ],
+    },
+    desc: 'A field mender. Turns the push that should have killed you into one you walk away from.'
+  },
+
+  // ── Thornling — Thorn's summon, and deliberately NOT a faction unit ─────────
+  // Hatched by 'brood' and nothing else: no race can build it, it costs nothing, it
+  // takes no supply and it expires (`temp` is set at the spawn site). It exists so a
+  // race-free hero can summon without borrowing Gloop's Globling — which would both
+  // look wrong in a Forge army and hand one faction's unit to all three.
+  //
+  // Statted a shade under the Globling on purpose: a free, expiring body should lose
+  // to a body someone paid 40 shards and a supply for.
+  thornling: {
+    id: 'thornling', name: 'Thornling', role: 'Summon',
+    hp: 62, dmg: 6, range: 20, cd: 0.7, speed: 128, r: 11, sight: 160,
+    cost: 0, time: 0, supply: 0, armor: 0, energy: 0, regen: 4,
+    summonOnly: true,
+    passive: { id: 'lifesteal', pct: 0.35 },
+    desc: 'A short-lived hatchling. Free, hungry, and gone in half a minute.'
+  },
+};
+
+// ── The hero roster ──────────────────────────────────────────────────────────
+// FIVE heroes, all unlocked from the first launch. There are no hero slots to buy:
+// the player toggles between them on the start screen and each keeps its own Mastery,
+// so switching costs you options you have not earned on THAT hero — never power.
+//
+// Order is the order they appear in the start-screen toggle row.
+RC.HEROES = ['rook', 'thorn', 'prism', 'ember', 'vale'];
+RC.DEFAULT_HERO = 'rook';
+
+// Old ids, so a stored `riftclash_hero` from before the roster grew still resolves.
+// Cheap to keep and the alternative is a player coming back to find their hero gone.
+RC.HERO_ALIAS = { warden: 'rook', matriarch: 'thorn', archon: 'prism' };
+RC.resolveHero = function (id) {
+  const a = RC.HERO_ALIAS[id] || id;
+  return (RC.UNITS[a] && RC.UNITS[a].hero) ? a : RC.DEFAULT_HERO;
 };
 
 // ── Hero skill bars ──────────────────────────────────────────────────────────
@@ -630,8 +788,11 @@ RC.UNITS = {
 // is the SAME OBJECT as `def.sig`, not a copy — the ultimate IS the signature, so every
 // place that already reasoned about `def.sig` (Crystal Guard's upgrade cards, the kid
 // charge button, the AI's "is it worth it yet" check) keeps working untouched.
-for (const _hid of ['warden', 'matriarch', 'archon']) {
+// Driven off RC.HEROES rather than a hand-written list, so adding a sixth hero is one
+// entry in one array and never "why does the new hero have no Q button?".
+for (const _hid of RC.HEROES) {
   const _h = RC.UNITS[_hid];
+  if (!_h) throw new Error('RC.HEROES lists an unknown hero: ' + _hid);
   _h.skills = [_h.q, _h.e, _h.sig];
   delete _h.q; delete _h.e;
 }
@@ -681,6 +842,114 @@ RC.HERO = {
   // Q/E scale with level the same way the signature does, so a level-10 hero's whole bar
   // is worth pressing rather than just its ultimate.
   skillKeys: ['Q', 'E', 'R'],
+};
+
+// ── Mastery — the OTHER level, and the one that persists ─────────────────────
+// Read HERO_DESIGN.md §2 before changing anything here. The whole design rests on one
+// rule, and it is a rule about what this number may NOT do:
+//
+//   Mastery persists forever, per hero, and NEVER changes hp, damage, armour, shields,
+//   cooldowns, energy or any other simulated quantity. It unlocks OPTIONS.
+//
+// That is what lets a Mastery-28 player and a Mastery-1 player queue against each other
+// with no matchmaking bracket — which matters enormously while the online population is
+// small, because every extra bracket is a longer queue.
+//
+// The enforcement is structural, not documentary: nothing under RC.MASTERY is read by
+// entities.js or game.js, and `RC.Unit` has no reference to the profile. If a reviewer
+// can find a path from a Mastery value to a stat, the design has been violated.
+RC.MASTERY = {
+  maxLevel: 30,
+  // Cost of level N is xpBase + (N-1) * xpStep, so the curve is linear rather than
+  // exponential: a player who plays twice as much is roughly twice as far along, not
+  // ten times. Exponential curves are for games that sell the skip.
+  xpBase: 260, xpStep: 90,
+  // What each match is worth, paid on a LOSS as well as a win for the same reason
+  // profile XP is (see Profile.recordMatchEnd). Survival pays per wave.
+  matchXp: 55, winBonus: 45, wavePer: 7,
+};
+
+// ── Stars — the cosmetic currency ────────────────────────────────────────────
+// Paid at the end of every match, spent only on how a hero LOOKS. Stars must never buy
+// power; the moment they do, every balance guarantee above is void.
+//
+// Each clause below is here for a reason worth keeping:
+//   · finish/loss pay — a player rewarded only for winning quits the first time they
+//     meet someone better. Profile XP already works this way.
+//   · performance is capped and shallow (about 2x between a great match and a poor one,
+//     not 10x) — a steep curve turns a cosmetic economy into a skill-gated one, and the
+//     players who most need a reason to return are the ones losing.
+//   · `daily` is the single biggest line — coming back tomorrow should beat grinding
+//     tonight. This is the clause that does the retention work.
+//   · NOTHING scales with match length, because that pays a player to stall a won game,
+//     which is the most corrosive incentive an RTS economy can have.
+RC.STARS = {
+  finish: 3,          // just for reaching the end screen, win or lose
+  win: 5,
+  wavePer2: 1,        // survival: +1 per 2 waves cleared …
+  waveCap: 12,        // … capped, so wave 60 is not a payday
+  levelPer2: 1,       // +1 per 2 Match Levels the hero reached …
+  levelCap: 5,        // … capped at 5
+  crystalHeld: 3,     // objective never dropped below half
+  daily: 10,          // first finished match of the UTC day
+  cap: 30,            // hard ceiling per match
+};
+
+// ── Cosmetics ────────────────────────────────────────────────────────────────
+// Bought once with Stars into a SHARED account inventory, then equipped PER HERO. Buy
+// the crown once and decide separately whether Rook or Vale wears it: five heroes worth
+// of personality without five times the Stars, and no purchase is wasted when the
+// player changes favourites.
+//
+// Items are drawn generically against the rig each hero's draw function returns (see
+// `heroRig` in renderer.js), so one hat lands correctly on all five heroes and adding an
+// item is one entry here plus one small draw function — never five.
+//
+// `pal` items recolour ACCENT channels only. Ownership readability is non-negotiable:
+// a player must be able to tell their units from the enemy's instantly, and player
+// colour is what does that. See RC.COSMETIC_SAFE below.
+RC.COSMETICS = {
+  hat: [
+    { id: 'none',   name: 'Bare',        stars: 0 },
+    { id: 'crown',  name: 'Crown',       stars: 90 },
+    { id: 'horns',  name: 'Horns',       stars: 60 },
+    { id: 'halo',   name: 'Halo',        stars: 75 },
+    { id: 'cap',    name: 'Field Cap',   stars: 40 },
+  ],
+  suit: [
+    { id: 'none',   name: 'Standard',    stars: 0 },
+    { id: 'cloak',  name: 'Cloak',       stars: 120 },
+    { id: 'plate',  name: 'Heavy Plate', stars: 180 },
+    { id: 'sash',   name: 'Sash',        stars: 90 },
+  ],
+  shoes: [
+    { id: 'none',   name: 'Standard',    stars: 0 },
+    { id: 'tread',  name: 'Treads',      stars: 55 },
+    { id: 'greave', name: 'Greaves',     stars: 80 },
+    { id: 'spark',  name: 'Sparkboots',  stars: 90 },
+  ],
+  palette: [
+    { id: 'none',   name: 'Signature',   stars: 0 },
+    { id: 'ash',    name: 'Ash',         stars: 25, tint: '#8d939c' },
+    { id: 'coal',   name: 'Coal',        stars: 25, tint: '#4a4f5a' },
+    { id: 'rust',   name: 'Rust',        stars: 25, tint: '#b5502e' },
+    { id: 'jade',   name: 'Jade',        stars: 25, tint: '#2fae86' },
+    { id: 'plum',   name: 'Plum',        stars: 25, tint: '#8a5bb8' },
+    { id: 'gold',   name: 'Gold',        stars: 40, tint: '#d8a521' },
+  ],
+};
+RC.COSMETIC_SLOTS = ['hat', 'suit', 'shoes', 'palette'];
+
+// In a match a cosmetic palette is blended only this far toward the player's colour
+// before it is clamped back. On the MENU there is no enemy to confuse it with, so the
+// skin runs at full strength there — the same item, louder where it is safe to be.
+RC.COSMETIC_SAFE = 0.55;
+
+// Item lookup that never returns undefined, because a stored id can outlive an item we
+// removed and a menu that throws is worse than a hero wearing the default hat.
+RC.cosmetic = function (slot, id) {
+  const list = RC.COSMETICS[slot] || [];
+  return list.find(i => i.id === id) || list[0] || { id: 'none', name: '—', stars: 0 };
 };
 
 // ── Buildings ─────────────────────────────────────────
@@ -915,7 +1184,7 @@ RC.RACES = {
   forge: {
     id: 'forge', name: 'Forge', tint: '#f08a2a',
     blurb: 'Machine legion — the balanced all-rounder. The widest roster, army upgrades and towers, with Patch Bot / Pulse Coil support. Strong everywhere, extreme nowhere.',
-    core: 'core', worker: 'wrench', hero: 'warden',
+    core: 'core', worker: 'wrench',
     buildable: ['cell', 'factory', 'hoverpad', 'arclab', 'stonethrower', 'rampart'],
     ai: {
       worker: 'wrench', supply: 'cell',
@@ -928,7 +1197,7 @@ RC.RACES = {
   gloop: {
     id: 'gloop', name: 'Gloop', tint: '#5ddc7a',
     blurb: 'Acid swarm — cheap, fast, self-healing units you field in overwhelming numbers. Low supply means far bigger armies; attacks melt armor and no healers are needed. Quantity IS the strategy.',
-    core: 'biocore', worker: 'slug', hero: 'matriarch',
+    core: 'biocore', worker: 'slug',
     buildable: ['membrane', 'hatchery', 'spire', 'evochamber', 'venomspire', 'carapace'],
     ai: {
       worker: 'slug', supply: 'membrane',
@@ -941,7 +1210,7 @@ RC.RACES = {
   aether: {
     id: 'aether', name: 'Aether', tint: '#b98cff',
     blurb: 'Alien ascendants — a handful of shielded elites that warp in at forward Warp Conduits and hit like a siege. Heavy units eat supply, so you field FEW units — but each one is devastating.',
-    core: 'nexus', worker: 'acolyte', hero: 'archon',
+    core: 'nexus', worker: 'acolyte',
     buildable: ['conduit', 'warpgate', 'astralgate', 'conclave', 'prismlaser', 'aegiswall'],
     ai: {
       worker: 'acolyte', supply: 'conduit',

@@ -311,7 +311,67 @@
     text-transform: uppercase; color: var(--text); margin-top: -12px;
   }
   #hero-plate .hp-sub { display: block; font-size: 9.5px; letter-spacing: .16em; color: var(--dim); opacity: .8; }
-  @media (max-height: 700px) { #hero-cv { width: 112px; height: 112px; } }
+  #hero-plate .hp-title { color: var(--dim); opacity: .75; }
+  /* Mastery progress. Deliberately styled unlike the in-match level bar: they are two
+     different numbers (see HERO_DESIGN.md §2) and showing them alike is how a player
+     comes to believe they are one. */
+  #hero-mbar { width: 128px; height: 3px; background: rgba(255,255,255,.10); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  #hero-mbar-fill { height: 100%; width: 0; background: var(--accent, #6fb3ff); transition: width .25s ease; }
+  #hero-row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  .herocard {
+    width: 62px; padding: 3px 2px 4px; border-radius: 8px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.03);
+    text-align: center; transition: border-color .15s, background .15s, transform .1s;
+  }
+  .herocard:hover { border-color: rgba(255,255,255,.26); transform: translateY(-1px); }
+  .herocard.sel { border-color: var(--accent, #6fb3ff); background: rgba(111,179,255,.10); }
+  .herocard canvas { width: 46px; height: 46px; display: block; margin: 0 auto; }
+  .hc-name { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--text); }
+  .hc-m { font-family: var(--mono); font-size: 8.5px; color: var(--dim); opacity: .8; }
+  #hero-tools { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  #star-count { font-family: var(--mono); font-size: 12px; color: #ffd15c; letter-spacing: .08em; }
+  #wardrobe-toggle {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer; color: var(--text);
+    border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.04);
+  }
+  #wardrobe-toggle:hover { border-color: rgba(255,255,255,.34); }
+  #wardrobe-panel {
+    width: min(560px, 92vw); margin: 8px auto 0; padding: 10px 12px 12px;
+    border: 1px solid rgba(255,255,255,.10); border-radius: 10px; background: rgba(8,12,20,.72);
+  }
+  #wardrobe-panel.hidden { display: none; }
+  #wardrobe-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 8px;
+  }
+  #wardrobe-close { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 13px; }
+  .wd-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+  .wd-slot {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--dim); width: 56px; flex: none; padding-top: 5px;
+  }
+  .wd-items { display: flex; flex-wrap: wrap; gap: 5px; }
+  .wd-item {
+    display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: pointer;
+    padding: 4px 8px; border-radius: 6px; color: var(--text);
+    border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03);
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  }
+  .wd-item:hover { border-color: rgba(255,255,255,.30); }
+  .wd-item.worn { border-color: var(--accent, #6fb3ff); background: rgba(111,179,255,.12); }
+  .wd-item.locked .wd-t { color: #ffd15c; }
+  .wd-item .wd-t { font-size: 8.5px; color: var(--dim); }
+  /* Star payout on the end screen — itemised, so the number teaches something. */
+  .ov-stars { font-family: var(--mono); font-size: 13px; color: #ffd15c; letter-spacing: .06em; margin-top: 2px; }
+  .ov-stars .ov-startot { color: var(--dim); font-size: 10.5px; }
+  .ov-starline { font-family: var(--mono); font-size: 10px; color: var(--dim); opacity: .85; }
+  @media (max-height: 700px) {
+    #hero-cv { width: 112px; height: 112px; }
+    .herocard { width: 52px; }
+    .herocard canvas { width: 38px; height: 38px; }
+  }
   #ss-credit { color: var(--dim); font-size: 10.5px; letter-spacing: .08em; opacity: .65; margin-bottom: 20px; }
   .ss-h { color: var(--text); font-size: 13px; font-weight: 700; letter-spacing: .1em;
           align-self: center; margin: 14px 0 9px; text-transform: uppercase; }
@@ -1151,10 +1211,25 @@
   <div id="ss-title">RIFT<b>CLASH</b></div>
   <div id="ss-sub">Choose how you want to play</div>
 
-  <!-- Your hero. Idles, looks around, and waves — see Renderer.drawHeroIdle. -->
+  <!-- Your hero. Idles, looks around, and waves — see Renderer.drawHeroIdle.
+       The row underneath is the pick: five heroes, all unlocked, each keeping its own
+       Mastery. The hero you are looking at when you press Play is the hero you deploy —
+       the front page IS the pick, with no separate confirmation step. -->
   <div id="hero-stage">
     <canvas id="hero-cv" width="312" height="312"></canvas>
     <div id="hero-plate">—<span class="hp-sub">Your Hero</span></div>
+    <div id="hero-mbar"><div id="hero-mbar-fill"></div></div>
+    <div id="hero-row"></div>
+    <div id="hero-tools">
+      <span id="star-count">★ 0</span>
+      <button id="wardrobe-toggle">Wardrobe</button>
+    </div>
+  </div>
+
+  <!-- The Star shop. Inventory is shared across the account, equipment is per hero. -->
+  <div id="wardrobe-panel" class="hidden">
+    <div id="wardrobe-head">Wardrobe <button id="wardrobe-close">✕</button></div>
+    <div id="wardrobe"></div>
   </div>
 
   <div id="ss-credit">Made in Jayden Game Studio</div>

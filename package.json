@@ -2,13 +2,13 @@
   "name": "rift-clash",
   "version": "1.2.0",
   "private": true,
-  "description": "RIFT CLASH — browser RTS with an authoritative Node WebSocket server",
+  "description": "RIFT CLASH \u2014 browser RTS with an authoritative Node WebSocket server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "npm run test:sim && npm run test:browser",
-    "test:sim": "node tests/wavecheck.js && node tests/simtest.js && node tests/kidstest.js && node tests/kidsuitest.js && node tests/kidscoop_test.js && node tests/inputmap_test.js && node tests/sighttest.js && node tests/reachtest.js && node tests/planettest.js && node tests/hardentest.js && node tests/herokit_test.js && node tests/passive_test.js && node tests/aidiff_test.js && node tests/aiecon_test.js && node tests/profile_test.js && node tests/heroidle_test.js",
-    "test:browser": "node tests/lobbytest.js && node tests/uitest.js && node tests/devtest.js && node tests/touchtest.js && node tests/fstest.js && node tests/voicetest.js && node tests/sharetest.js && node tests/herotest.js && node tests/zoomtest.js && node tests/resumetest.js",
+    "test:sim": "node tests/wavecheck.js && node tests/simtest.js && node tests/kidstest.js && node tests/kidsuitest.js && node tests/kidscoop_test.js && node tests/inputmap_test.js && node tests/sighttest.js && node tests/reachtest.js && node tests/planettest.js && node tests/hardentest.js && node tests/herokit_test.js && node tests/passive_test.js && node tests/aidiff_test.js && node tests/aiecon_test.js && node tests/profile_test.js && node tests/heroidle_test.js && node tests/roster_test.js",
+    "test:browser": "node tests/lobbytest.js && node tests/uitest.js && node tests/devtest.js && node tests/touchtest.js && node tests/fstest.js && node tests/voicetest.js && node tests/sharetest.js && node tests/herotest.js && node tests/zoomtest.js && node tests/resumetest.js && node tests/heroui_test.js",
     "test:waves": "node tests/wavecheck.js",
     "test:survival": "node tests/simtest.js",
     "test:kids": "node tests/kidstest.js && node tests/kidsuitest.js && node tests/kidscoop_test.js",
@@ -34,7 +34,9 @@
     "test:profile": "node tests/profile_test.js",
     "test:zoom": "node tests/zoomtest.js",
     "test:harden": "node tests/hardentest.js",
-    "test:resume": "node tests/resumetest.js"
+    "test:resume": "node tests/resumetest.js",
+    "test:roster": "node tests/roster_test.js",
+    "test:heroui": "node tests/heroui_test.js"
   },
   "devDependencies": {
     "jsdom": "^25.0.0"

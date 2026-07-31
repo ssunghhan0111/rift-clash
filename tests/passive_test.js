@@ -475,8 +475,33 @@ head('Auras — presence, not events');
   const gob = unit(g4, 'globling', 1020, 1010, 1);
   [slug2, gob].forEach(u => { u.def = Object.assign({}, u.def, { regen: 0 }); u.hp = 20; });
   slug._passiveAura(0.25, g4);
+  // The heal no longer lands inside _passiveAura: the aura WRITES a short-lived field
+  // and the recipient's own tickStatus spends it. That indirection is what makes auras
+  // non-stacking (see the note on _passiveAura), so the test ticks the recipient.
+  RC.tickStatus(slug2, 0.25); RC.tickStatus(gob, 0.25);
   ok(slug2.hp === 20, 'the same rule holds for the Gloop bloom');
   ok(gob.hp > 20, 'which still feeds the swarm');
+
+  // Two sources of the SAME aura do not add up — the stronger one wins. This became
+  // load-bearing when heroes stopped belonging to a race: Prism's passive is `shieldaura`
+  // and so is the Aether Ardent's, so a Prism deploying with Aether used to double-dip.
+  const g4b = makeGame();
+  const s1 = unit(g4b, 'slug', 1000, 1000, 1);
+  const s2 = unit(g4b, 'slug', 1010, 1000, 1);
+  const patient = unit(g4b, 'globling', 1005, 1005, 1);
+  patient.def = Object.assign({}, patient.def, { regen: 0 }); patient.hp = 20;
+  s1._passiveAura(0.25, g4b);
+  s2._passiveAura(0.25, g4b);
+  RC.tickStatus(patient, 0.25);
+  const oneSource = patient.hp - 20;
+  const g4c = makeGame();
+  const only = unit(g4c, 'slug', 1000, 1000, 1);
+  const patient2 = unit(g4c, 'globling', 1005, 1005, 1);
+  patient2.def = Object.assign({}, patient2.def, { regen: 0 }); patient2.hp = 20;
+  only._passiveAura(0.25, g4c);
+  RC.tickStatus(patient2, 0.25);
+  ok(Math.abs(oneSource - (patient2.hp - 20)) < 1e-6,
+     'two identical healing auras do not stack — strongest wins, not the sum');
 
   // Bulwark Field: armour that follows the Shieldbearer around and falls off on its own.
   const g5 = makeGame();
@@ -498,7 +523,23 @@ head('Auras — presence, not events');
   const lancer = unit(g6, 'lancer', 1050, 1000, 1);
   lancer.shield = 0;
   oracle._passiveAura(0.25, g6);
+  RC.tickStatus(lancer, 0.25);        // 실드 오라도 같은 필드 경유 — 위 주석 참조
   ok(lancer.shield > 0, 'the Oracle recharges a nearby shield (' + lancer.shield.toFixed(1) + ')');
+
+  // Same rule for shields: a Prism standing in an Aether army that already has an
+  // Ardent must not restore twice as fast as either would alone.
+  const g6b = makeGame();
+  const o1 = unit(g6b, 'oracle', 1000, 1000, 1);
+  const o2 = unit(g6b, 'oracle', 1010, 1000, 1);
+  const l2 = unit(g6b, 'lancer', 1050, 1000, 1); l2.shield = 0;
+  o1._passiveAura(0.25, g6b); o2._passiveAura(0.25, g6b);
+  RC.tickStatus(l2, 0.25);
+  const g6c = makeGame();
+  const o3 = unit(g6c, 'oracle', 1000, 1000, 1);
+  const l3 = unit(g6c, 'lancer', 1050, 1000, 1); l3.shield = 0;
+  o3._passiveAura(0.25, g6c);
+  RC.tickStatus(l3, 0.25);
+  ok(Math.abs(l2.shield - l3.shield) < 1e-6, 'two shield auras do not stack either');
 
   // Field hospital: the dropship patches up whoever is riding inside.
   const g7 = makeGame();

@@ -188,7 +188,7 @@ const BASE = 'http://127.0.0.1:' + PORT + '/index.html';
       cmds: [...document.querySelectorAll('#cmd-grid .cmd .l')].map(e => e.textContent.trim()),
     };
   });
-  ok(/warden|matriarch|archon/i.test(panel.name), 'selecting the online hero shows "' + panel.name + '"');
+  ok(/rook|thorn|prism/i.test(panel.name), 'selecting the online hero shows "' + panel.name + '"');
   ok(panel.cmds.length >= 3, 'the online hero has no skill buttons (' + panel.cmds.join(', ') + ')');
   console.log('  selected "' + panel.name + '" → skills: ' + panel.cmds.join(', ') + ' ✓');
 

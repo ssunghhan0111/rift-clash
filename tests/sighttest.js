@@ -261,7 +261,7 @@ console.log('\n=== live 1v1 match, no orders issued ===');
 // ── 13. melee units can actually reach a building (pre-existing deadlock) ─
 console.log('\n=== melee vs buildings ===');
 {
-  for (const [ut, bt] of [['globling', 'crystal'], ['bloat', 'core'], ['ardent', 'core'], ['warden', 'crystal'], ['shielder', 'factory']]) {
+  for (const [ut, bt] of [['globling', 'crystal'], ['bloat', 'core'], ['ardent', 'core'], ['rook', 'crystal'], ['shielder', 'factory']]) {
     const g = arena();
     const b = new RC.Building(bt, 1700, 800, 2, true);
     g.buildings.push(b);

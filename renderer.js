@@ -1373,6 +1373,12 @@ RC.Renderer = (function () {
         c.eye = '#ff5a3c'; c.opticRGB = '255,90,60';   // hostile red glare
       }
       if (!c.psi) c.psi = PSI;
+      // A hero's cosmetic palette, CLAMPED. Applied here rather than at each call site so
+      // every in-match path — the battlefield, the portrait, the minimap blip — gets the
+      // same clamped colour and none of them can forget. The clamp is the ownership rule:
+      // player colour has to stay dominant or a player cannot tell their hero from the
+      // enemy's at a glance. See applyCosmeticPalette.
+      if (u.cos) applyCosmeticPalette(c, u.cos, RC.COSMETIC_SAFE);
     }
     return c;
   }
@@ -1519,9 +1525,19 @@ RC.Renderer = (function () {
     else if (u.type === 'chaingunner') drawChaingunner(R, c);
     else if (u.type === 'hydra') drawHydra(R, c);
     else if (u.type === 'bladesworn') drawBladesworn(R, c);
-    else if (u.type === 'warden') drawWarden(R, c);
-    else if (u.type === 'matriarch') drawMatriarch(R, c);
-    else if (u.type === 'archon') drawArchon(R, c);
+    else if (u.type === 'thornling') drawGlobling(R, c);   // 소환수 — 글로블링 실루엣 재사용
+    // Heroes. `u.cos` is what the player has equipped (see drawCosmetics); it is absent
+    // on every non-hero and on any hero nobody has dressed, so the two calls cost one
+    // undefined check each in the hot path.
+    else if (HERO_RIG[u.type]) {
+      drawCosmetics(R, c, u.type, u.cos, 'under');
+      if (u.type === 'rook') drawWarden(R, c);
+      else if (u.type === 'thorn') drawMatriarch(R, c);
+      else if (u.type === 'prism') drawArchon(R, c);
+      else if (u.type === 'ember') drawEmber(R, c);
+      else drawVale(R, c);
+      drawCosmetics(R, c, u.type, u.cos, 'over');
+    }
     else { ctx.fillStyle = c.body; rrect(-R, -R, R * 2, R * 2, 3); ctx.fill(); }
   }
 
@@ -1820,6 +1836,246 @@ RC.Renderer = (function () {
     ctx.fillStyle = c.ink; rrect(R * 1.38, -R * 0.3, R * 0.2, R * 0.6, 3); ctx.fill();
     sglow(R * 1.5, 0, R * 0.55, c.opticRGB, 0.6);
     visorSlit(c, R * 0.05, -R * 0.02, R * 0.5, R * 0.2);
+  }
+
+  // ══ EMBER — the Kindler ══════════════════════════════════════════════════
+  // The zoner reads as a walking furnace: a squat, heavy body with the fire visible
+  // INSIDE it rather than around it, and a long barrel because Ember outranges the whole
+  // roster. The flicker is driven off game time, not Math.random — the sim is seeded and
+  // shared, and cosmetics must never draw from the RNG (see the note in _passiveAura).
+  function drawEmber(R, c) {
+    const t = performance.now() / 1000;
+    const flick = 0.5 + 0.5 * Math.sin(t * 7.3) * Math.sin(t * 3.1);
+    // 등짐 연료통 — 뒤로 튀어나온 실루엣이 곧 정체성
+    ctx.fillStyle = c.dark;
+    rrect(-R * 1.05, -R * 0.52, R * 0.52, R * 1.04, 6); ctx.fill(); inkLine(c, R * 0.16);
+    ctx.fillStyle = c.body; rrect(-R * 0.66, -R * 0.7, R * 1.26, R * 1.4, 7); ctx.fill(); inkLine(c, R * 0.24);
+    celTop(c, -R * 0.6, -R * 0.64, R * 1.12, R * 0.34, 5);
+    // 몸통 격벽 사이로 보이는 노(爐)
+    ctx.globalAlpha = 0.55 + 0.35 * flick;
+    ctx.fillStyle = c.trim;
+    rrect(-R * 0.34, -R * 0.3, R * 0.66, R * 0.6, 4); ctx.fill();
+    ctx.globalAlpha = 1;
+    sglow(0, 0, R * 0.95, c.opticRGB, 0.28 + 0.2 * flick);
+    // 어깨 배기구 두 개
+    ctx.fillStyle = c.steel;
+    [-1, 1].forEach(function (s) {
+      ctx.beginPath(); ctx.arc(-R * 0.2, s * R * 0.78, R * 0.24, 0, TAU); ctx.fill(); inkLine(c, R * 0.1);
+    });
+    // 장포신 — 로스터 최장 사거리를 실루엣으로 예고한다
+    ctx.fillStyle = c.steel; rrect(R * 0.24, -R * 0.2, R * 1.34, R * 0.4, 3); ctx.fill(); inkLine(c, R * 0.14);
+    ctx.fillStyle = c.ink; rrect(R * 1.5, -R * 0.26, R * 0.22, R * 0.52, 3); ctx.fill();
+    sglow(R * 1.62, 0, R * 0.62, c.opticRGB, 0.45 + 0.3 * flick);
+    optic(c, R * 0.1, -R * 0.04, R * 0.26);
+  }
+
+  // ══ VALE — the Mender ════════════════════════════════════════════════════
+  // The support reads as the opposite of Ember: tall, narrow, unarmoured, with a lantern
+  // out in FRONT instead of a gun. The halo ring is the tell — it is the only sprite in
+  // the roster whose silhouette is mostly empty space, which is what makes a Vale in a
+  // crowd findable at a glance when you need to protect it.
+  function drawVale(R, c) {
+    const t = performance.now() / 1000;
+    const pulse = 0.55 + 0.45 * Math.sin(t * 2.2);
+    // 뒤로 흐르는 로브 자락
+    ctx.fillStyle = c.dark;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.2, -R * 0.62); ctx.lineTo(-R * 1.18, -R * 0.2);
+    ctx.lineTo(-R * 1.18, R * 0.2); ctx.lineTo(-R * 0.2, R * 0.62);
+    ctx.closePath(); ctx.fill(); inkLine(c, R * 0.14);
+    ctx.fillStyle = c.body; rrect(-R * 0.44, -R * 0.6, R * 0.92, R * 1.2, 8); ctx.fill(); inkLine(c, R * 0.22);
+    celTop(c, -R * 0.38, -R * 0.54, R * 0.8, R * 0.3, 5);
+    // 치유 고리 — 발치를 도는 얇은 링
+    ctx.strokeStyle = c.trim; ctx.lineWidth = R * 0.09;
+    ctx.globalAlpha = 0.5 + 0.3 * pulse;
+    ctx.beginPath(); ctx.ellipse(0, R * 0.86, R * 1.0, R * 0.3, 0, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 1;
+    // 앞으로 내민 등불 — 총이 아니라 등불이라는 점이 이 영웅의 전부다
+    ctx.strokeStyle = c.ink; ctx.lineWidth = R * 0.13; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(R * 0.3, -R * 0.1); ctx.lineTo(R * 1.05, -R * 0.34); ctx.stroke();
+    sglow(R * 1.12, -R * 0.36, R * 0.85, c.opticRGB, 0.35 + 0.3 * pulse);
+    ctx.fillStyle = c.trim;
+    ctx.beginPath(); ctx.arc(R * 1.12, -R * 0.36, R * 0.26 + R * 0.04 * pulse, 0, TAU); ctx.fill();
+    inkLine(c, R * 0.1);
+    ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.8;
+    ctx.beginPath(); ctx.arc(R * 1.05, -R * 0.44, R * 0.09, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    optic(c, R * 0.04, -R * 0.12, R * 0.24);
+  }
+
+  // ══ Cosmetics ════════════════════════════════════════════════════════════
+  // Hats, costumes and shoes are drawn GENERICALLY against a per-hero rig — a handful of
+  // anchor points in the hero's own local space — instead of being written into each
+  // hero's draw function.
+  //
+  // That choice is the whole cosmetic system. Five heroes x three slots x N items is a
+  // combinatorial trap, and it is where most procedural wardrobe systems die at about
+  // item eight. With a rig, one hat draws correctly on all five heroes and adding an item
+  // is one entry in RC.COSMETICS plus one small function here — never five.
+  //
+  // The rig is a table rather than a return value from the draw functions on purpose:
+  // drawUnitSprite runs for every unit every frame, and allocating an anchor object per
+  // sprite per frame to serve the handful that wear anything would be a poor trade.
+  //
+  // Anchors are in units of R (the drawn radius), so they scale with the sprite whether
+  // it is on the menu at 312px or on the battlefield at 22px.
+  // head.x/y are in units of R and are consumed as `R * a.x`; torso.w/h and feet.r are
+  // fractions of R too. Every number here was read off the matching draw function above,
+  // so moving a shoulder means moving its anchor in the same commit.
+  const HERO_RIG = {
+    rook:  { head: { x: 0.05, y: -0.92, r: 0.56 }, torso: { x: -0.62, y: -0.2, w: 1.24, h: 0.9 },
+             feet: [{ x: -0.12, y: 0.74, r: 0.34 }, { x: -0.12, y: -0.74, r: 0.34 }] },
+    thorn: { head: { x: 0, y: -1.02, r: 0.5 }, torso: { x: -0.5, y: -0.16, w: 1.0, h: 0.86 },
+             feet: [{ x: -0.5, y: 0.86, r: 0.24 }, { x: 0.28, y: 0.9, r: 0.24 }] },
+    prism: { head: { x: 0, y: -0.98, r: 0.52 }, torso: { x: -0.46, y: -0.2, w: 0.92, h: 0.84 },
+             feet: [{ x: -0.3, y: 0.82, r: 0.26 }, { x: 0.3, y: 0.82, r: 0.26 }] },
+    ember: { head: { x: -0.02, y: -0.96, r: 0.54 }, torso: { x: -0.6, y: -0.2, w: 1.2, h: 0.9 },
+             feet: [{ x: -0.2, y: 0.82, r: 0.3 }, { x: 0.24, y: 0.86, r: 0.3 }] },
+    vale:  { head: { x: 0, y: -0.9, r: 0.46 }, torso: { x: -0.44, y: -0.18, w: 0.88, h: 0.82 },
+             feet: [{ x: -0.18, y: 0.86, r: 0.24 }, { x: 0.22, y: 0.88, r: 0.24 }] },
+  };
+  function heroRig(type) { return HERO_RIG[type] || null; }
+
+  // Every item function receives anchors already converted to PIXELS by drawCosmetics,
+  // so an item never has to remember to multiply by R. One conversion, one place.
+  //
+  // ── Hats ── drawn last, over the head anchor
+  const HATS = {
+    crown(R, c, a) {
+      const w = a.r * 1.5, h = a.r * 0.8;
+      ctx.fillStyle = c.trim;
+      ctx.beginPath();
+      ctx.moveTo(a.x - w * 0.5, a.y + h * 0.5);
+      ctx.lineTo(a.x - w * 0.5, a.y - h * 0.2);
+      ctx.lineTo(a.x - w * 0.22, a.y + h * 0.1);
+      ctx.lineTo(a.x, a.y - h * 0.6);
+      ctx.lineTo(a.x + w * 0.22, a.y + h * 0.1);
+      ctx.lineTo(a.x + w * 0.5, a.y - h * 0.2);
+      ctx.lineTo(a.x + w * 0.5, a.y + h * 0.5);
+      ctx.closePath(); ctx.fill(); inkLine(c, R * 0.1);
+    },
+    horns(R, c, a) {
+      const s = a.r;
+      ctx.fillStyle = c.trim;
+      [-1, 1].forEach(function (k) {
+        ctx.beginPath();
+        ctx.moveTo(a.x + k * s * 0.3, a.y + s * 0.35);
+        ctx.quadraticCurveTo(a.x + k * s * 1.25, a.y + s * 0.1, a.x + k * s * 0.95, a.y - s * 0.95);
+        ctx.quadraticCurveTo(a.x + k * s * 0.6, a.y - s * 0.15, a.x + k * s * 0.05, a.y + s * 0.35);
+        ctx.closePath(); ctx.fill(); inkLine(c, R * 0.08);
+      });
+    },
+    halo(R, c, a) {
+      const s = a.r;
+      sglow(a.x, a.y - s * 0.7, s * 2.0, c.opticRGB, 0.4);
+      ctx.strokeStyle = c.trim; ctx.lineWidth = R * 0.11;
+      ctx.beginPath(); ctx.ellipse(a.x, a.y - s * 0.7, s * 0.95, s * 0.34, 0, 0, TAU); ctx.stroke();
+    },
+    cap(R, c, a) {
+      const w = a.r * 1.45, h = a.r * 0.62;
+      ctx.fillStyle = c.dark;
+      rrect(a.x - w * 0.5, a.y - h * 0.35, w, h, 4); ctx.fill(); inkLine(c, R * 0.1);
+      ctx.fillStyle = c.steel;
+      rrect(a.x + w * 0.28, a.y + h * 0.05, w * 0.55, h * 0.3, 3); ctx.fill(); inkLine(c, R * 0.07);
+    },
+  };
+
+  // ── Costumes ── drawn first, so the body and the hat both sit over them
+  const SUITS = {
+    cloak(R, c, a) {
+      ctx.fillStyle = c.dark; ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y - a.h * 0.5);
+      ctx.lineTo(a.x - a.w * 0.6, a.y + a.h * 0.9);
+      ctx.lineTo(a.x + a.w * 0.5, a.y + a.h * 1.15);
+      ctx.lineTo(a.x + a.w, a.y - a.h * 0.5);
+      ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; inkLine(c, R * 0.12);
+    },
+    plate(R, c, a) {
+      ctx.fillStyle = c.steel;
+      rrect(a.x + a.w * 0.12, a.y - a.h * 0.15, a.w * 0.76, a.h * 0.95, 4);
+      ctx.fill(); inkLine(c, R * 0.14);
+      ctx.strokeStyle = c.ink; ctx.lineWidth = R * 0.06;
+      for (let i = 1; i < 3; i++) {
+        const y = a.y - a.h * 0.15 + a.h * 0.95 * (i / 3);
+        ctx.beginPath(); ctx.moveTo(a.x + a.w * 0.14, y); ctx.lineTo(a.x + a.w * 0.86, y); ctx.stroke();
+      }
+    },
+    sash(R, c, a) {
+      ctx.fillStyle = c.trim;
+      ctx.beginPath();
+      ctx.moveTo(a.x + a.w * 0.05, a.y - a.h * 0.2);
+      ctx.lineTo(a.x + a.w * 0.42, a.y - a.h * 0.35);
+      ctx.lineTo(a.x + a.w * 0.95, a.y + a.h * 0.75);
+      ctx.lineTo(a.x + a.w * 0.58, a.y + a.h * 0.9);
+      ctx.closePath(); ctx.fill(); inkLine(c, R * 0.09);
+    },
+  };
+
+  // ── Shoes ── one function, called once per foot, so a six-legged hero wears six
+  const SHOES = {
+    tread(R, c, f) {
+      ctx.fillStyle = c.ink;
+      rrect(f.x - f.r * 0.9, f.y - f.r * 0.35, f.r * 1.8, f.r * 0.95, 3); ctx.fill();
+      ctx.fillStyle = c.steel;
+      rrect(f.x - f.r * 0.75, f.y - f.r * 0.2, f.r * 1.5, f.r * 0.3, 2); ctx.fill();
+    },
+    greave(R, c, f) {
+      ctx.fillStyle = c.steel;
+      rrect(f.x - f.r * 0.7, f.y - f.r * 1.1, f.r * 1.4, f.r * 1.5, 3); ctx.fill(); inkLine(c, R * 0.09);
+    },
+    spark(R, c, f) {
+      sglow(f.x, f.y + f.r * 0.4, f.r * 2.2, c.opticRGB, 0.45);
+      ctx.fillStyle = c.trim;
+      rrect(f.x - f.r * 0.8, f.y - f.r * 0.2, f.r * 1.6, f.r * 0.7, 4); ctx.fill(); inkLine(c, R * 0.08);
+    },
+  };
+
+  // What this hero is wearing. Called from drawUnitSprite around the body, so a costume
+  // sits under it and a hat over it. Does nothing for a unit that is not a hero or is
+  // wearing nothing, which is almost every unit on the map.
+  //
+  // `phase` is 'under' (costume) or 'over' (shoes, hat) — one function, called twice,
+  // rather than two functions that could drift apart about which slot draws when.
+  function drawCosmetics(R, c, type, cos, phase) {
+    if (!cos) return;
+    const rig = heroRig(type);
+    if (!rig) return;
+    if (phase === 'under') {
+      if (cos.suit && cos.suit !== 'none' && SUITS[cos.suit] && rig.torso) {
+        const t = rig.torso;
+        SUITS[cos.suit](R, c, { x: t.x * R, y: t.y * R, w: t.w * R, h: t.h * R });
+      }
+      return;
+    }
+    if (cos.shoes && cos.shoes !== 'none' && SHOES[cos.shoes] && rig.feet) {
+      for (const f of rig.feet) SHOES[cos.shoes](R, c, { x: f.x * R, y: f.y * R, r: f.r * R });
+    }
+    if (cos.hat && cos.hat !== 'none' && HATS[cos.hat] && rig.head) {
+      const h = rig.head;
+      HATS[cos.hat](R, c, { x: h.x * R, y: h.y * R, r: h.r * R });
+    }
+  }
+
+  // Apply a cosmetic palette to a colour set.
+  //
+  // `strength` is the whole ownership-readability rule in one argument. On the menu there
+  // is no enemy to be confused with, so a skin runs at 1 — full strength, exactly the
+  // colour the player bought. In a MATCH the same skin is blended only RC.COSMETIC_SAFE
+  // of the way from the player's colour, because a player has to tell their units from
+  // the enemy's instantly and player colour is what does that. Give someone free rein
+  // over colour and they will eventually build a hero that reads as the opponent's.
+  function applyCosmeticPalette(c, cos, strength) {
+    if (!cos || !cos.palette || cos.palette === 'none') return c;
+    const item = RC.cosmetic ? RC.cosmetic('palette', cos.palette) : null;
+    if (!item || !item.tint) return c;
+    const k = strength == null ? 1 : strength;
+    c.body = mix(c.body, item.tint, k);
+    c.light = mix(c.light, shade(item.tint, 0.32), k);
+    c.dark = mix(c.dark, shade(item.tint, -0.46), k);
+    c.trim = mix(c.trim, shade(item.tint, 0.55), k);
+    c.ink = mix(c.ink, shade(item.tint, -0.72), k);
+    return c;
   }
 
   // 선택 유닛 초상화 — 작은 캔버스에 확대/애니메이션으로 '카메라 피드'처럼 보여준다
@@ -4233,16 +4489,24 @@ RC.Renderer = (function () {
   // rather than an object literal is deliberate — that function is the one place
   // guaranteed to emit all nine keys, and a missing key here would reach softGlow()
   // as 'rgba(undefined,1)' and throw out of the menu build. See its comment.
-  const HERO_TINT = { warden: '#c8703a', matriarch: '#7cc23f', archon: '#9a7cf0' };
-  function heroIdleColors(heroId, raceId) {
+  // One signature colour per hero, and every hero in RC.HEROES needs an entry or
+  // heroIdleColors falls back to Rook's and two heroes silently look identical.
+  const HERO_TINT = {
+    rook: '#c8703a', thorn: '#7cc23f', prism: '#9a7cf0',
+    ember: '#e0562b', vale: '#3fc2b8',
+  };
+  function heroIdleColors(heroId, raceId, cos) {
     const c = raceFaceColors(raceId || 'forge');
-    const base = HERO_TINT[heroId] || HERO_TINT.warden;
+    const base = HERO_TINT[heroId] || HERO_TINT.rook;
     c.body = base;
     c.light = shade(base, 0.32);
     c.dark = shade(base, -0.46);
     c.trim = shade(base, 0.55);
     c.ink = shade(base, -0.72);
-    return c;
+    // Full strength on the menu: there is no enemy here to be confused with, so the
+    // player sees exactly the colour they bought. In a match the same skin is clamped —
+    // see applyCosmeticPalette and RC.COSMETIC_SAFE.
+    return applyCosmeticPalette(c, cos, 1);
   }
 
   // The waving arm. Drawn OVER the sprite rather than inside each hero's draw
@@ -4276,10 +4540,11 @@ RC.Renderer = (function () {
     ctx.restore();
   }
 
-  // canvas: any sized canvas. heroId: 'warden' | 'matriarch' | 'archon'.
+  // canvas: any sized canvas. heroId: any id in RC.HEROES.
   // raceId only tints the hardware — the hero is the same hero whichever race it
   // deploys with, which is the whole point of decoupling the two.
-  function drawHeroIdle(canvas, heroId, raceId) {
+  // cos: what this hero is wearing, { hat, suit, shoes, palette }; optional.
+  function drawHeroIdle(canvas, heroId, raceId, cos) {
     const def = RC.UNITS[heroId];
     if (!canvas || !def) return;
     const pctx = canvas.getContext('2d');
@@ -4295,7 +4560,7 @@ RC.Renderer = (function () {
       bg.addColorStop(1, 'rgba(5,8,14,0)');
       ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
-      const c = heroIdleColors(heroId, raceId);
+      const c = heroIdleColors(heroId, raceId, cos);
       const t = performance.now() / 1000;
 
       // Wave envelope — a 5.2s cycle that is mostly REST. A hero waving continuously
@@ -4317,7 +4582,7 @@ RC.Renderer = (function () {
       ctx.save();
       ctx.translate(look * def.r * 0.10, 0);
       ctx.rotate(look * 0.07);
-      drawUnitSprite({ type: heroId, def: def, r: def.r }, c);
+      drawUnitSprite({ type: heroId, def: def, r: def.r, cos: cos }, c);
       drawMenuWave(def.r * 1.30, c, wave, t);   // same R the sprite body was drawn at
       ctx.restore();
       ctx.restore();
@@ -4326,5 +4591,5 @@ RC.Renderer = (function () {
     }
   }
 
-  return { init, draw, drawPortrait, drawRaceFace, drawPlanet, drawHeroIdle };
+  return { init, draw, drawPortrait, drawRaceFace, drawPlanet, drawHeroIdle, heroRig };
 })();

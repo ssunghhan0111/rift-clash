@@ -148,8 +148,8 @@ if (RC.Renderer && RC.Renderer.drawHeroIdle) {
   let threw = false;
   try {
     RC.Renderer.drawHeroIdle(cv2, 'nosuchhero', 'forge');
-    RC.Renderer.drawHeroIdle(cv2, 'warden', 'nosuchrace');
-    RC.Renderer.drawHeroIdle(null, 'warden', 'forge');
+    RC.Renderer.drawHeroIdle(cv2, 'rook', 'nosuchrace');
+    RC.Renderer.drawHeroIdle(null, 'rook', 'forge');
   } catch (e) { threw = true; console.log('  (threw: ' + e.message + ')'); }
   ok(!threw, 'unknown hero / unknown race / null canvas are all no-ops, not throws');
 

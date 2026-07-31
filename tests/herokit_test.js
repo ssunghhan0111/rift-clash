@@ -2,11 +2,11 @@
 // shared engine. This drives the real RC.Unit.cast on real heroes and asserts the
 // behaviour that makes each one a different ANSWER to the same problem:
 //
-//   Warden    'dome'     HOLD ON      — puts a guard pool on the thing being defended.
+//   Rook    'dome'     HOLD ON      — puts a guard pool on the thing being defended.
 //                                       Creates no units and deals no damage.
-//   Matriarch 'brood'    MORE BODIES  — hatches free, expiring fighters at the fight.
+//   Thorn 'brood'    MORE BODIES  — hatches free, expiring fighters at the fight.
 //                                       Grants no guard and deals no damage itself.
-//   Archon    'riftnova' MAKE SPACE   — damages and hurls enemies away from the OBJECTIVE
+//   Prism    'riftnova' MAKE SPACE   — damages and hurls enemies away from the OBJECTIVE
 //                                       (not away from the hero). Creates nothing.
 //
 // If a refactor ever collapsed them back into "three area-damage abilities with different
@@ -51,7 +51,7 @@ function crystal(g, x, y) {
 // ── Every hero has exactly one signature ───────────────────────────────────
 head('One signature per hero, and the old panel is gone');
 {
-  const defs = ['warden', 'matriarch', 'archon'].map(t => RC.UNITS[t]);
+  const defs = ['rook', 'thorn', 'prism'].map(t => RC.UNITS[t]);
   for (const d of defs) {
     ok(!!d.sig, d.name + ' has a signature ability');
     // ── The three-button kit ──
@@ -86,13 +86,13 @@ head('One signature per hero, and the old panel is gone');
   ok(casters.length === 0, 'no unit has a castable ability any more, found [' + casters.join(',') + ']');
 }
 
-// ── Warden — Bulwark: a guard pool on the objective ────────────────────────
-head('Warden — Bulwark (hold on)');
+// ── Rook — Bulwark: a guard pool on the objective ────────────────────────
+head('Rook — Bulwark (hold on)');
 {
   const g = makeGame();
   const c = crystal(g, 1000, 1000);
-  const h = hero(g, 'warden', 1100, 1000, 5);
-  ok(h.def.sig.id === 'dome', 'the Warden signature is the dome');
+  const h = hero(g, 'rook', 1100, 1000, 5);
+  ok(h.def.sig.id === 'dome', 'Rook signature is the dome');
   ok(!c.guard, 'the crystal starts unguarded');
   ok(h.cast(g, 'r') === true, 'the dome fires');
   ok(!!c.guard && c.guard.hp > 0, 'the crystal now has a guard pool of ' + Math.round((c.guard || {}).hp || 0));
@@ -110,14 +110,14 @@ head('Warden — Bulwark (hold on)');
   ok(c.hp < hp1, 'and once it is gone the crystal takes damage again');
 }
 
-// ── Matriarch — Hatch the Brood: free, expiring bodies ─────────────────────
-head('Matriarch — Hatch the Brood (more bodies)');
+// ── Thorn — Hatch the Brood: free, expiring bodies ─────────────────────
+head('Thorn — Hatch the Brood (more bodies)');
 {
   const g = makeGame();
   crystal(g, 1000, 1000);
-  const h = hero(g, 'matriarch', 1100, 1000, 5);
+  const h = hero(g, 'thorn', 1100, 1000, 5);
   for (let i = 0; i < 6; i++) enemy(g, 700 + i * 18, 1000);
-  ok(h.def.sig.id === 'brood', 'the Matriarch signature is the brood');
+  ok(h.def.sig.id === 'brood', 'Thorn signature is the brood');
   const mine0 = g.units.filter(u => u.owner === 1).length;
   ok(h.cast(g, 'r') === true, 'the brood hatches');
   const hatchlings = g.units.filter(u => u.owner === 1 && u.summoned);
@@ -133,17 +133,17 @@ head('Matriarch — Hatch the Brood (more bodies)');
   ok(dFoe < dHero, 'they hatch at the enemy clump, not under the hero');
 }
 
-// ── Archon — Rift Nova: damage + a shove away from the objective ───────────
-head('Archon — Rift Nova (make space)');
+// ── Prism — Rift Nova: damage + a shove away from the objective ───────────
+head('Prism — Rift Nova (make space)');
 {
   const g = makeGame();
   const c = crystal(g, 1000, 1000);
-  const h = hero(g, 'archon', 1000, 1120, 5);
+  const h = hero(g, 'prism', 1000, 1120, 5);
   // Enemies pressing the crystal from the far side of the hero.
   const es = [enemy(g, 880, 1000), enemy(g, 900, 1020), enemy(g, 915, 980), enemy(g, 890, 1040)];
   const hp0 = es.map(e => e.hp);
   const d0 = es.map(e => RC.dist(c.x, c.y, e.x, e.y));
-  ok(h.def.sig.id === 'riftnova', 'the Archon signature is the rift nova');
+  ok(h.def.sig.id === 'riftnova', 'Prism signature is the rift nova');
   ok(h.cast(g, 'r') === true, 'the nova fires');
   ok(es.every((e, i) => e.hp < hp0[i]), 'every enemy in the blast took damage');
   const pushed = es.filter((e, i) => RC.dist(c.x, c.y, e.x, e.y) > d0[i] + 1).length;
@@ -155,7 +155,7 @@ head('Archon — Rift Nova (make space)');
 head('The three signatures do not overlap');
 {
   const seen = {};
-  for (const type of ['warden', 'matriarch', 'archon']) {
+  for (const type of ['rook', 'thorn', 'prism']) {
     const g = makeGame();
     const c = crystal(g, 1000, 1000);
     const h = hero(g, type, 1080, 1000, 5);
@@ -171,9 +171,9 @@ head('The three signatures do not overlap');
   }
   console.log('    ' + Object.keys(seen).map(k =>
     k + '{guard:' + (seen[k].guard ? 'Y' : 'n') + ' spawned:' + seen[k].spawned + ' damaged:' + seen[k].damaged + '}').join('  '));
-  ok(seen.warden.guard && !seen.matriarch.guard && !seen.archon.guard, 'ONLY the Warden creates a guard');
-  ok(seen.matriarch.spawned > 0 && seen.warden.spawned === 0 && seen.archon.spawned === 0, 'ONLY the Matriarch creates units');
-  ok(seen.archon.damaged > 0 && seen.warden.damaged === 0 && seen.matriarch.damaged === 0, 'ONLY the Archon deals damage');
+  ok(seen.rook.guard && !seen.thorn.guard && !seen.prism.guard, 'ONLY Rook creates a guard');
+  ok(seen.thorn.spawned > 0 && seen.rook.spawned === 0 && seen.prism.spawned === 0, 'ONLY Thorn creates units');
+  ok(seen.prism.damaged > 0 && seen.rook.damaged === 0 && seen.thorn.damaged === 0, 'ONLY Prism deals damage');
 }
 
 // ── The charge economy ─────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ head('Charge — fills by fighting, faster than by waiting');
 {
   const DT = 1 / 30;
   const g1 = makeGame();
-  const h1 = hero(g1, 'warden', 1000, 1000, 1);
+  const h1 = hero(g1, 'rook', 1000, 1000, 1);
   h1.charge = 0;
   let idle = 0;
   while (h1.charge < 1 && idle < 300) { h1.update(DT, g1); idle += DT; }
@@ -190,14 +190,14 @@ head('Charge — fills by fighting, faster than by waiting');
 
   // Taking damage charges it too — the defensive hero must not be punished for defending.
   const g2 = makeGame();
-  const h2 = hero(g2, 'warden', 1000, 1000, 1);
+  const h2 = hero(g2, 'rook', 1000, 1000, 1);
   h2.charge = 0;
   g2.hurt(h2, 400, 2, null);
   ok(h2.charge > 0, 'taking a hit charges the signature (' + h2.charge.toFixed(3) + ')');
 
   // Dealing damage charges it fastest.
   const g3 = makeGame();
-  const h3 = hero(g3, 'warden', 1000, 1000, 1);
+  const h3 = hero(g3, 'rook', 1000, 1000, 1);
   h3.charge = 0;
   const foe = enemy(g3, 1020, 1000);
   foe.maxHp = foe.hp = 1e6;
@@ -210,7 +210,7 @@ head('Charge — fills by fighting, faster than by waiting');
   // Spending empties it, and the lockout stops a double-tap firing twice.
   const g4 = makeGame();
   crystal(g4, 1000, 1000);
-  const h4 = hero(g4, 'warden', 1050, 1000, 1);
+  const h4 = hero(g4, 'rook', 1050, 1000, 1);
   ok(h4.sigReady(), 'a full hero is ready');
   ok(h4.cast(g4, 'r') === true, 'it fires');
   ok(h4.charge === 0, 'and the charge is spent');
@@ -224,7 +224,7 @@ head('Charge — fills by fighting, faster than by waiting');
   // A downed hero has nothing to press.
   const g5 = makeGame();
   crystal(g5, 1000, 1000);
-  const h5 = hero(g5, 'warden', 1050, 1000, 1);
+  const h5 = hero(g5, 'rook', 1050, 1000, 1);
   h5.downed = true;
   ok(h5.sigReady() === false && h5.cast(g5, 'r') === false, 'a downed hero cannot cast');
 }
@@ -238,7 +238,7 @@ head('Q and E — energy plus a cooldown, and nothing to do with the charge mete
 {
   const g = makeGame();
   crystal(g, 1000, 1000);
-  const h = hero(g, 'warden', 1050, 1000, 1);
+  const h = hero(g, 'rook', 1050, 1000, 1);
   const q = h.def.skills[0], e = h.def.skills[1];
   for (let i = 0; i < 8; i++) enemy(g, 1000 + i * 12, 1010);   // something to hit
 
@@ -268,68 +268,81 @@ head('Q and E — energy plus a cooldown, and nothing to do with the charge mete
   ok((h.skillCd[q.id] || 0) === 0 && h.skillReady(q), 'a cooldown runs out by itself');
 
   // Level scaling reaches Q and E, not just the signature.
-  const lo = hero(makeGame(), 'warden', 0, 0, 1).effSkill(q);
-  const hi = hero(makeGame(), 'warden', 0, 0, 10).effSkill(q);
+  const lo = hero(makeGame(), 'rook', 0, 0, 1).effSkill(q);
+  const hi = hero(makeGame(), 'rook', 0, 0, 10).effSkill(q);
   ok(hi.dmg > lo.dmg, 'Q hits harder at level 10 than at level 1 (' + lo.dmg + ' -> ' + hi.dmg + ')');
 
   // A downed hero has no buttons at all, not just no ultimate.
   const gd = makeGame(); crystal(gd, 1000, 1000);
-  const hd = hero(gd, 'warden', 1050, 1000, 1);
+  const hd = hero(gd, 'rook', 1050, 1000, 1);
   hd.downed = true;
   ok(hd.def.skills.every(sk => hd.skillReady(sk) === false), 'a downed hero cannot press anything');
 }
 
 // ── Crystal Shockwave — the objective is the origin ────────────────────────
-// The Warden's E is Bulwark's twin and has to obey Bulwark's rule: it is measured from the
+// The Rook's E is Bulwark's twin and has to obey Bulwark's rule: it is measured from the
 // CRYSTAL, never from the hero. Shoving away from the hero scatters enemies wherever the
 // hero happens to be standing; shoving away from the objective always clears the thing you
 // are defending, which is the entire reason to press it.
-head('Warden — Crystal Shockwave (make space, measured from the crystal)');
+head('Rook — Hold the Line (the banner is aimed at where the player STANDS)');
 {
+  // Hold the Line replaced Crystal Shockwave, which was measured from the crystal and
+  // so answered the same question as Bulwark. The banner answers a different one, and
+  // these assertions are what keep the two buttons from collapsing back together:
+  // it buffs the ARMY, it is centred on the HERO, and it grants no guard.
   const g = makeGame();
   const c = crystal(g, 1000, 1000);
-  // The hero stands well off to one side. If the push came from the Warden, the enemy
-  // between it and the crystal would be shoved TOWARDS the crystal — the exact bug.
-  const h = hero(g, 'warden', 1400, 1000, 5);
+  const h = hero(g, 'rook', 1400, 1000, 5);
   h.energy = h.maxEnergy;
-  const foe = enemy(g, 1080, 1000);          // between the crystal and the hero
-  const d0 = Math.hypot(foe.x - c.x, foe.y - c.y);
-  const hp0 = foe.hp;
-  ok(h.cast(g, 'e') === true, 'the shockwave fires');
-  const d1 = Math.hypot(foe.x - c.x, foe.y - c.y);
-  ok(d1 > d0 + 100, 'the enemy was hurled AWAY from the crystal (' + Math.round(d0) + 'px -> ' + Math.round(d1) + 'px)');
-  ok(foe.hp < hp0, 'and took some damage on the way');
-  ok(foe.hp > hp0 * 0.5, 'but not much — this buys time, it does not clear the wave');
-  ok(foe.slow > 0, 'survivors are left reeling');
+  const mate = new RC.Unit('volt', 1420, 1000, 1);   // ally, standing with the hero
+  g.units.push(mate);
+  const foe = enemy(g, 1440, 1000);
+  const far = enemy(g, 1000, 1000);                  // way off by the crystal
+
+  ok(h.cast(g, 'e') === true, 'the banner plants');
+  ok((g.hazards || []).some(z => z.kind === 'banner'), 'and it leaves a hazard on the ground');
+  const z = g.hazards.find(zz => zz.kind === 'banner');
+  ok(Math.hypot(z.x - h.x, z.y - h.y) < 1, 'centred on the HERO, not on the crystal');
+
+  g._tickHazards(0.1);
+  ok(mate.auraArmor > 0 && mate.auraArmorT > 0, 'allies inside gain armour');
+  ok(foe.slow > 0, 'enemies inside are slowed');
+  ok(!far.slow, 'and an enemy outside the radius is untouched');
   ok(!c.guard, 'it grants no shield — that is Bulwark\'s job, and they must stay different');
 
-  // Nothing to shove means nothing spent. A panic button that eats its cooldown on an
-  // empty field is a panic button you learn not to trust.
+  // Non-stacking, and it comes for free: the banner writes the SAME auraArmor field the
+  // Shielder's aura does, so two sources give you the better one rather than the sum.
+  const before = mate.auraArmor;
+  const drop = new RC.Unit('shielder', 1420, 1010, 1);
+  g.units.push(drop);
+  g._tickHazards(0.1);
+  ok(mate.auraArmor === before, 'a second armour source does not stack — strongest wins');
+
+  // A field-buff button must fire on empty ground: it is not aimed at anyone, and a
+  // version that refused without a target could not be used to PREPARE for a push.
   const g2 = makeGame();
   crystal(g2, 1000, 1000);
-  const h2 = hero(g2, 'warden', 1050, 1000, 5);
+  const h2 = hero(g2, 'rook', 1050, 1000, 5);
   h2.energy = h2.maxEnergy;
-  ok(h2.cast(g2, 'e') === false, 'it refuses to fire with no enemy in range');
-  ok(h2.energy === h2.maxEnergy, 'and it cost nothing');
-  ok(!h2.skillCd[h2.def.skills[1].id], 'and started no cooldown');
+  ok(h2.cast(g2, 'e') === true, 'it plants on empty ground too');
+  ok(h2.energy < h2.maxEnergy, 'and it paid for it');
 
-  // Flyers are above the terrain, not above a pressure wave.
+  // It expires on its own, and the buff falls off with it.
   const g3 = makeGame();
-  const c3 = crystal(g3, 1000, 1000);
-  const h3 = hero(g3, 'warden', 1400, 1000, 5);
+  const h3 = hero(g3, 'rook', 1000, 1000, 5);
   h3.energy = h3.maxEnergy;
-  const air = new RC.Unit('hover', 1080, 1000, 2);
-  g3.units.push(air);
-  const a0 = Math.hypot(air.x - c3.x, air.y - c3.y);
+  const m3 = new RC.Unit('volt', 1010, 1000, 1); g3.units.push(m3);
   h3.cast(g3, 'e');
-  ok(Math.hypot(air.x - c3.x, air.y - c3.y) > a0 + 100, 'air units get thrown too');
+  const dur = RC.UNITS.rook.skills[1].dur;
+  for (let i = 0; i < Math.ceil(dur / 0.1) + 2; i++) g3._tickHazards(0.1);
+  ok(!(g3.hazards || []).some(zz => zz.kind === 'banner'), 'the banner expires after ' + dur + 's');
 }
 
 // ── Upgrades: two routes, never both ───────────────────────────────────────
 head('Upgrades — cards in Crystal Guard, levels everywhere else');
 {
   const g = makeGame();
-  const h = hero(g, 'archon', 1000, 1000, 1);
+  const h = hero(g, 'prism', 1000, 1000, 1);
   const ups = h.def.sig.ups;
   ok(!h.hasUp(ups[0].id), 'a level-1 hero has no upgrades');
   h.level = RC.HERO.upLevels[0];
@@ -340,14 +353,14 @@ head('Upgrades — cards in Crystal Guard, levels everywhere else');
 
   // Cards: Crystal Guard turns the level route OFF so nothing is earned twice.
   const g2 = makeGame();
-  const h2 = hero(g2, 'archon', 1000, 1000, 10);
+  const h2 = hero(g2, 'prism', 1000, 1000, 10);
   h2.useCardUpgrades();
   ok(!h2.hasUp(ups[0].id), 'with cards in play a level-10 hero starts with nothing');
   h2.grantUp(ups[1].id);
   ok(h2.hasUp(ups[1].id) && !h2.hasUp(ups[0].id), 'and gets exactly the one card it was given');
 
   // Every upgrade has to change the numbers, or it is a card that does nothing.
-  for (const type of ['warden', 'matriarch', 'archon']) {
+  for (const type of ['rook', 'thorn', 'prism']) {
     const base = hero(makeGame(), type, 0, 0, 5);
     base.useCardUpgrades();
     const b = base.effSig();
@@ -380,8 +393,11 @@ head('Crystal Guard — the button and the cards');
   const cards = K.heroCards(g, 1);
   ok(cards.length === 3, 'three hero cards, got ' + cards.length);
   ok(cards.every(c => c.hero), 'they are flagged as hero cards so the screen can style them');
-  const otherIds = RC.UNITS.warden.sig.ups.map(u => 'sig_' + u.id);
-  ok(!cards.some(c => otherIds.includes(c.id)), "a Gloop player is never offered the Warden's cards");
+  // The cards offered are THIS hero's, whichever race the player picked — that is the
+  // decoupling working. It used to assert the opposite (a Gloop player never sees Rook's
+  // cards) because the race chose the hero; now the player does.
+  const mine = h.def.sig.ups.map(u => 'sig_' + u.id);
+  ok(cards.every(c => mine.includes(c.id)), 'the cards are the deployed hero\'s own, not the race\'s');
 
   // Taking one grants the upgrade through the card route.
   const s = K.st(g);
