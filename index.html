@@ -473,6 +473,21 @@
     .herocard canvas { width: 38px; height: 38px; }
   }
   #ss-credit { color: var(--dim); font-size: 10.5px; letter-spacing: .08em; opacity: .65; }
+
+  /* "Watch the Intro" — the film, replayable forever. Sits in the footer with
+     the other things about *you* rather than up with the game modes, because it
+     is not a mode: it is the thing that already played once, kept where a
+     player can find it again without it competing with the Play button. */
+  #intro-btn {
+    background: linear-gradient(180deg, rgba(127,233,255,.10), rgba(127,233,255,.03));
+    border: 1px solid rgba(127,233,255,.34); color: var(--cyan);
+    border-radius: 999px; padding: 8px 20px; font-size: 12.5px; font-weight: 700;
+    cursor: pointer; font-family: var(--sans); letter-spacing: .04em; margin-bottom: 10px;
+    transition: all .18s ease;
+  }
+  #intro-btn:hover { background: var(--cyan); color: #082027; border-color: transparent;
+    box-shadow: 0 0 22px rgba(127,233,255,.35); }
+  #intro-btn.hidden { display: none; }
   .ss-h { color: var(--text); font-size: 13px; font-weight: 700; letter-spacing: .1em;
           align-self: center; margin: 14px 0 9px; text-transform: uppercase; }
 
@@ -1508,6 +1523,7 @@ Made for younger players. <b>No base building, no mining</b> — shards arrive o
   <div id="ss-footer">
   <div id="who-row">Playing as <span id="who-name">—</span><button id="who-edit">change</button>
     <button id="fs-btn2" title="Fullscreen">⛶ Fullscreen</button></div>
+  <button id="intro-btn" type="button" class="hidden">🎬 Watch the Intro</button>
   <div id="ss-credit">Made in Jayden Game Studio</div>
   <div id="ss-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <span>Online play is 13+</span></div>
   </div>
@@ -1771,6 +1787,10 @@ Made for younger players. <b>No base building, no mining</b> — shards arrive o
 <script src="renderer.js"></script>
 <script src="input.js"></script>
 <script src="ui.js"></script>
+<!-- The introduction film. three.js itself is NOT loaded here — intro.js pulls
+     vendor/three.min.js in on demand the first time the film is actually
+     watched, so a player who skips it never pays for it. -->
+<script src="intro.js"></script>
 <script src="kidsui.js"></script>
 <script src="main.js"></script>
 </body>

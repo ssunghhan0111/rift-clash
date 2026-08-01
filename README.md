@@ -26,6 +26,12 @@ Works in any modern browser and is touch-friendly for iPad and tablets.
 - **Fog of war** — per-player vision; enemy units and buildings are hidden in the dark.
 - **Modes & maps** — 1v1 and 2v2 across six planets, co-op Survival against endless waves, and a
   **Daily Challenge** that is the same seed and twist for everybody.
+- **An introduction film** — a wordless ~2:45 3D short that plays once, the first time a player
+  names themselves, and is replayable any time from the start screen. It opens on why the Rift
+  Crystal matters and what came through the tear, then gives each of the five heroes a chapter
+  seen **from inside their own eyes**: their base, their workers, the buildings that make an army,
+  the moment they point it at the enemy, and the ultimate they spend. No subtitles and no
+  narration — only a name card per hero — so it needs no reading and no translation.
 - **Online multiplayer** — an authoritative Node server runs the match for up to 4 players; empty
   seats are filled by AI. **A dropped player's seat is held for 90 seconds** and their client
   rejoins on its own — a refresh mid-match rejoins too.
@@ -116,6 +122,8 @@ Keys typed into a text box are never treated as game commands.
 | File | Responsibility |
 |---|---|
 | `index.html` | DOM shell, CSS, start screen, lobby, script includes |
+| `intro.js` | The introduction film — a ~2:45 real-time 3D short played once on first launch |
+| `vendor/three.min.js` | three.js r149, vendored and loaded lazily by `intro.js` only |
 | `config.js` | All balance numbers, colors, unit/building/race/upgrade definitions |
 | `maps.js` | Map and game-mode definitions |
 | `entities.js` | Unit / Building / resource nodes; combat, abilities, acid/regen, movement, gathering |

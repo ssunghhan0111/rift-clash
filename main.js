@@ -137,12 +137,52 @@ window.RC = window.RC || {};
       if (input) input.focus();
       return;
     }
+    // Naming yourself is the only moment in the whole product where a brand-new
+    // player is guaranteed to be present and not yet in a hurry, so it is where
+    // the film goes. Checked BEFORE saveName, or the name we just wrote makes
+    // every player look like a returning one.
+    const firstEver = !myName();
     saveName(clean);
     renderWho();
     if (nickEl) nickEl.classList.add('hidden');
     const after = nickAfter; nickAfter = null;
-    if (after) after();
+    if (firstEver) playIntro(after);
+    else if (after) after();
   }
+
+  // ── The introduction film ─────────────────────────────────────────────────
+  // Plays once, unprompted, the first time a player names themselves; after
+  // that it lives behind the footer button. Everything about it is best-effort:
+  // no WebGL, a missing intro.js, a failed three.js fetch or a thrown error all
+  // fall through to `after()` immediately, because a player who cannot watch a
+  // film must still be able to start a game.
+  function playIntro(after) {
+    const go = after || function () {};
+    try {
+      if (!RC.Intro || !RC.Intro.supported() || RC.Intro.playing) { go(); return; }
+      const p = RC.Intro.play({});
+      if (p && p.then) p.then(() => { syncIntroBtn(); go(); }, () => go());
+      else go();
+    } catch (e) { go(); }
+  }
+  function syncIntroBtn() {
+    const b = document.getElementById('intro-btn');
+    if (!b) return;
+    // Hidden rather than disabled where the film cannot run: an button that
+    // visibly does nothing when pressed is worse than one that was never there.
+    b.classList.toggle('hidden', !(RC.Intro && RC.Intro.supported()));
+    b.textContent = RC.Intro && RC.Intro.seen() ? '🎬 Watch the Intro Again' : '🎬 Watch the Intro';
+  }
+  (function initIntroBtn() {
+    const b = document.getElementById('intro-btn');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      if (RC.Intro && RC.Intro.playing) return;
+      b.blur();
+      playIntro(null);
+    });
+    syncIntroBtn();
+  })();
   (function initNickname() {
     const go = document.getElementById('nick-go');
     const input = document.getElementById('nick-input');
