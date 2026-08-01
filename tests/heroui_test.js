@@ -35,7 +35,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     { env: Object.assign({}, process.env, { PORT: String(PORT) }), cwd: SRC, stdio: 'ignore' });
   await sleep(1200);
   const browser = await pw.chromium.launch();
-  const page = await browser.newPage();
+  // A desktop-shaped viewport, so the start screen is in its two-column layout —
+  // which is where the wardrobe panel overflowed its column and put its own ✕ under
+  // the right-hand one. That click failing is what had been truncating this suite:
+  // every assertion after the wardrobe simply never ran, and the run still looked
+  // like a harness hiccup rather than the layout bug it was.
+  const page = await browser.newPage({ viewport: { width: 1680, height: 1200 } });
 
   // Missing icons/og-image in a partial checkout are not what this test is about.
   const errs = [];
@@ -102,6 +107,57 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   ok(worn === 'crown', 'clicking an owned item wears it (' + worn + ')');
   const others = await page.evaluate(() => RC.HEROES.filter(h => RC.Profile.cosmeticsOf(h).hat === 'crown'));
   ok(others.length === 1, 'and only that hero is wearing it — equipment is per hero');
+
+  console.log('\n=== the loadout ===');
+  // The Hero Bay's other drawer. loadout_test covers the rules exhaustively and
+  // headlessly; what only a browser can prove is that the panel renders, that a click
+  // reaches the profile, and that a locked option cannot be clicked into the loadout
+  // no matter how hard the pointer tries.
+  await page.reload({ waitUntil: 'load' });
+  await sleep(1200);
+  await page.locator('#loadout-toggle').click();
+  await sleep(300);
+  ok(await page.locator('.lo-opt').count() >= 9, 'the loadout panel opens with every option in it');
+  ok(await page.locator('.lo-opt.locked').count() > 0, 'and the locked ones are drawn, not hidden');
+  ok(await page.locator('.lo-opt.locked .lo-at').first().textContent().then(t => /Mastery/.test(t)),
+     'each locked option says which Mastery level opens it');
+  ok(await page.locator('.lo-opt.on').count() === 1 + 1 + 3, 'exactly one Q, one E and three upgrades are lit');
+
+  // A locked option is inert. Not "shows a message" — inert.
+  const beforeQ = await page.evaluate(() => RC.Profile.loadoutOf(RC.Profile.heroPick()).q);
+  await page.locator('.lo-opt.locked').first().click({ force: true });
+  await sleep(250);
+  ok(await page.evaluate(() => RC.Profile.loadoutOf(RC.Profile.heroPick()).q) === beforeQ,
+     'clicking a locked option changes nothing at all');
+
+  // Now earn it, and the same click sticks.
+  await page.evaluate(() => { const hs = RC.Profile.heroes(); hs[RC.Profile.heroPick()].mastery = 30; RC.Profile.saveHeroes(hs); });
+  await page.reload({ waitUntil: 'load' });
+  await sleep(1200);
+  await page.locator('#loadout-toggle').click();
+  await sleep(300);
+  ok(await page.locator('.lo-opt.locked').count() === 0, 'at Mastery 30 nothing is locked any more');
+  const secondQ = page.locator('.lo-slot').first().locator('.lo-opt').nth(1);
+  const wantQ = await secondQ.getAttribute('data-id');
+  await secondQ.click(); await sleep(250);
+  ok(await page.evaluate(() => RC.Profile.loadoutOf(RC.Profile.heroPick()).q) === wantQ,
+     'picking a Q variant writes it to the profile (' + wantQ + ')');
+
+  // …and it is the hero that actually deploys. This is the assertion the whole
+  // feature is for: what you chose in the Bay is what walks onto the map.
+  const flown = await page.evaluate(() => {
+    const g = window.GAME;
+    g.heroesEnabled = true;
+    g.setHeroPick({ 1: RC.Profile.heroPick() });
+    g.setHeroLoadout({ 1: RC.Profile.loadoutOf(RC.Profile.heroPick()) });
+    g.setup(RC.getMap('earth'), RC.MODES['1v1'], { 1: 'forge', 2: 'aether' }, 'normal');
+    const h = g.heroOf[1];
+    return h && h._lo ? h._lo.q : null;
+  });
+  ok(flown === wantQ, 'and the hero that spawns is carrying it (' + flown + ')');
+
+  ok(/Mastery|unlocked/.test(await page.locator('#hero-next').textContent()),
+     'the start screen names the next unlock rather than promising nothing');
 
   ok(errs.length === 0, 'no console errors through any of it' + (errs.length ? ': ' + errs.slice(0, 3).join(' | ') : ''));
 

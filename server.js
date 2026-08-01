@@ -999,7 +999,12 @@ function onMsg(c, m) {
     // The hero is picked separately from the race (see HERO_DESIGN.md §4). Passed through
     // RC.resolveHero rather than trusted: a client can send anything, and an unknown id
     // has to become the default here rather than reach the spawn site.
-    case 'hero': if (c.room) { c.hero = RC.resolveHero(m.hero); } break;
+    // The loadout rides along with the pick because they are one decision (see the
+    // client's heroMsg). Both the loadout and the claimed Mastery are stored RAW here
+    // and folded through RC.validLoadout at match start — validating on arrival would
+    // mean re-validating anyway whenever the mode decides whether the whole pool is
+    // open, and there is exactly one place that decision is made.
+    case 'hero': if (c.room) { c.hero = RC.resolveHero(m.hero); c.loadout = m.loadout || null; c.mastery = Math.max(1, Math.min(RC.MASTERY.maxLevel, (m.mastery | 0) || 1)); } break;
     // A guest arming/disarming the start. The host has no ready flag to set.
     case 'ready': {
       if (!c.room || c.room.lobby.started || isHost(c)) break;
@@ -1070,13 +1075,32 @@ function heroPickOf(seats) {
   return out;
 }
 
+// owner -> loadout, validated. A client can claim any Mastery it likes, so nothing here
+// trusts the wire: `free` opens the whole pool and ignores the claim entirely, and where
+// it doesn't, RC.validLoadout substitutes anything the claimed level doesn't cover.
+//
+// `free` is TRUE for public versus, on purpose. Locking options behind Mastery in a game
+// where you are matched against strangers means a new account plays a smaller game than
+// the person across from it — HERO_DESIGN §5. Everything is open online; Mastery is a
+// single-player and co-op progression. It is also the only setting under which the
+// claimed number cannot matter, which is a nice property for the mode where people have
+// a reason to lie.
+function loadoutPickOf(seats, free) {
+  const out = {};
+  (seats || []).forEach(s => {
+    if (!s || !s.hero) return;
+    out[s.owner] = RC.validLoadout(s.hero, free ? RC.MASTERY.maxLevel : (s.mastery || 1), s.loadout, !!free);
+  });
+  return out;
+}
+
 function startMatch(room) {
   if (room.lobby.gameMode === 'survival') return startSurvivalMatch(room);
   if (room.lobby.gameMode === 'kids') return startKidsMatch(room);
   const mode = RC.MODES[room.lobby.modeId];
   const seats = mode.players.map(p => ({ owner: p.owner, team: p.team }));
   const humans = room.clients.slice(0, seats.length);      // join order fills seats
-  const racePick = {}, heroPick = {};
+  const racePick = {}, heroPick = {}, loPick = {};
   room.ownerOf = new Map(); room.teamOf = {}; room.seats = new Map();
   seats.forEach((seat, i) => {
     const human = humans[i];
@@ -1086,6 +1110,7 @@ function startMatch(room) {
       room.ownerOf.set(human.socket, seat.owner);
       racePick[seat.owner] = human.race;
       heroPick[seat.owner] = human.hero;
+      loPick[seat.owner] = RC.validLoadout(human.hero, RC.MASTERY.maxLevel, human.loadout, true);
       room.seats.set(seat.owner, { token: seatToken(), name: human.name, race: human.race, clientId: human.id, goneAt: null });
     }
   });
@@ -1105,6 +1130,7 @@ function startMatch(room) {
   // Set BEFORE setup: setup() spawns the heroes. An AI seat has no entry here and falls
   // through to its personality's hero in Game.heroFor.
   room.game.setHeroPick(heroPick);
+  room.game.setHeroLoadout(loPick);
   room.game.setup(RC.getMap(room.lobby.mapId), customMode, racePick);
   room.lobby.started = true;
   room.cmdQueue = []; room.tickN = 0;
@@ -1145,7 +1171,7 @@ function startMatch(room) {
 // the run ends when the Rift Crystal falls, and everyone gets the same wave/score.
 function startSurvivalMatch(room) {
   const humans = room.clients.slice(0, SURVIVAL_CAP);
-  const seats = humans.map((h, i) => ({ owner: SURVIVAL_SEATS[i], race: h.race || 'forge', hero: h.hero, ai: false }));
+  const seats = humans.map((h, i) => ({ owner: SURVIVAL_SEATS[i], race: h.race || 'forge', hero: h.hero, loadout: h.loadout, mastery: h.mastery, ai: false }));
   // A solo host still gets one allied bot so the lane isn't hopeless; full rooms don't need it.
   if (seats.length === 1) seats.push({ owner: SURVIVAL_SEATS[1], race: seats[0].race, ai: true });
 
@@ -1160,6 +1186,7 @@ function startSurvivalMatch(room) {
   room.game = new RC.Game();
   room.game.heroesEnabled = true;                  // heroes are live online too — the snapshot carries their level, xp and cooldowns (see net_core `hr`)
   room.game.setHeroPick(heroPickOf(seats));
+  room.game.setHeroLoadout(loadoutPickOf(seats, false));
   room.game.setupSurvival({ difficulty: room.lobby.diff, players: seats });
   room.lobby.started = true;
   room.cmdQueue = []; room.tickN = 0;
@@ -1216,7 +1243,7 @@ function startSurvivalMatch(room) {
 //     board (see the end screen in ui.js), so there is nothing here to sign.
 function startKidsMatch(room) {
   const humans = room.clients.slice(0, KIDS_CAP);
-  const seats = humans.map((h, i) => ({ owner: KIDS_SEATS[i], race: h.race || 'forge', hero: h.hero, ai: false }));
+  const seats = humans.map((h, i) => ({ owner: KIDS_SEATS[i], race: h.race || 'forge', hero: h.hero, loadout: h.loadout, mastery: h.mastery, ai: false }));
 
   room.ownerOf = new Map(); room.teamOf = {}; room.seats = new Map();
   humans.forEach((h, i) => {
@@ -1229,6 +1256,7 @@ function startKidsMatch(room) {
   room.game = new RC.Game();
   room.game.heroesEnabled = true;
   room.game.setHeroPick(heroPickOf(seats));
+  room.game.setHeroLoadout(loadoutPickOf(seats, false));
   room.game.setupKids({ players: seats });
   room.lobby.started = true;
   room.cmdQueue = []; room.tickN = 0;

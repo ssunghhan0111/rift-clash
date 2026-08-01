@@ -70,6 +70,15 @@ RC.Kids = (function () {
     // says "do something" while there is still time to do it.
     CRYSTAL_HP: 4400,
     WAVE_HEAL: 0.03,        // crystal heals this fraction of max on every wave cleared
+    // ── The seal ──
+    // A keep whose wall goes all the way round the crystal, with no gap, is SEALED —
+    // and a sealed keep that survives the night is patched back to full and heals the
+    // crystal properly instead of by three percent. This is the only thing in the mode
+    // that pays for the SHAPE of what you built rather than the amount, and it is the
+    // reason a child arranging walls into a ring is doing something the game noticed.
+    // It cannot be bought: no number of walls in a heap seals anything.
+    SEAL_HEAL: 0.22,        // crystal heal on a night survived behind an unbroken ring
+    SEAL_REPAIR: 1.0,       // and every piece of the wall goes back to this much health
     COST_MUL: 0.55,         // kid prices, as a fraction of the normal card cost
     TIME_MUL: 0.35,         // kid build times, likewise — waiting is not the fun part
     QUEUE_MAX: 6,
@@ -606,10 +615,19 @@ RC.Kids = (function () {
     const h = g.heroOf && g.heroOf[o];
     return (h && !h.dead && h.def && h.def.sig) ? h : null;
   }
+  // The cards are the hero's ultimate upgrades, so once a hero BRINGS three of five
+  // the cards have to be those three — otherwise the Hero Bay would be a screen whose
+  // choices this mode quietly ignores.
   function heroCards(g, owner) {
     const h = heroOf(g, owner);
     if (!h) return [];
-    return (h.def.sig.ups || []).map(up => ({
+    const lo = g.loadoutFor ? g.loadoutFor(owner) : null;
+    const brought = (lo && Array.isArray(lo.ups) && lo.ups.length) ? lo.ups : null;
+    // Only the upgrades this hero actually BROUGHT are offered as cards. Without a
+    // loadout that is the fixed three, exactly as before; with one it is whichever
+    // three were chosen in the Hero Bay — otherwise the Bay would be a suggestion.
+    const pool = h.allUps().filter(u => !brought || brought.indexOf(u.id) >= 0);
+    return pool.map(up => ({
       id: 'sig_' + up.id, ic: up.ic, name: up.name,
       desc: up.kid || up.desc, max: 1, hero: true, up: up.id,
       apply: (gg, o) => { const hh = heroOf(gg, o); if (hh) { hh.useCardUpgrades(); hh.grantUp(up.id); } },
@@ -890,6 +908,10 @@ RC.Kids = (function () {
   function nightFalls(g) {
     const s = st(g);
     s.ready = {};
+    // Judged at BOTH ends of the night. Sealed at dusk and still sealed at dawn is
+    // "the ring held"; sealing it after the raid has already walked in through the
+    // gap is not the same achievement and does not pay the same.
+    s.sealedAt = !!(RC.Keep && RC.Keep.isSealed && RC.Keep.isSealed(g));
     banner(g, '🌙', 'NIGHT ' + (s.wave + 1), 'Here they come!', '#8fb6ff', 2.2);
     startWave(g);
     // AFTER startWave, not before: the gate reads the phase to decide whether it is
@@ -955,7 +977,18 @@ RC.Kids = (function () {
     // Between-wave crystal repair. A kid who had a bad wave is not carrying that
     // damage for the rest of the run.
     const c = g.crystal;
-    if (c && !c.dead) c.hp = Math.min(c.maxHp, c.hp + c.maxHp * CFG.WAVE_HEAL);
+    const held = !!s.sealedAt && !!(RC.Keep.isSealed && RC.Keep.isSealed(g));
+    s.held = held;
+    if (c && !c.dead) c.hp = Math.min(c.maxHp, c.hp + c.maxHp * (held ? CFG.SEAL_HEAL : CFG.WAVE_HEAL));
+    // The ring held, so the ring gets put back. Every standing piece goes to full —
+    // NOT the ones that were knocked down, which stay knocked down: the reward is for
+    // a wall that survived, and free resurrection would make the wall itself pointless.
+    if (held) {
+      for (const b of (g.buildings || [])) {
+        if (b.dead || !RC.Keep.isPiece(b) || !b.done) continue;
+        b.hp = Math.max(b.hp, b.maxHp * CFG.SEAL_REPAIR);
+      }
+    }
 
     // Save the keep the moment a night is survived, never mid-raid: a snapshot
     // taken while the walls are coming down would record the rubble instead of
@@ -963,7 +996,10 @@ RC.Kids = (function () {
     // tomorrow.
     if (RC.Keep && RC.Keep.capture) RC.Keep.capture(g);
 
-    banner(g, '🎉', 'NIGHT ' + s.wave + ' SURVIVED!', 'The keep held — pick your reward', '#ffd24a', CFG.CELEB);
+    banner(g, '🎉', 'NIGHT ' + s.wave + ' SURVIVED!',
+           held ? 'The ring held! Your walls are as good as new — pick your reward'
+                : 'The keep held — pick your reward',
+           '#ffd24a', CFG.CELEB);
     party(g);
     if (RC.Audio) RC.Audio.play('win');
     g.shake(0.12);
@@ -1173,6 +1209,11 @@ RC.Kids = (function () {
         readyCount: defenders(g).filter(o => s.ready[o]).length,
         need: defenders(g).length,
         night: RC.Keep.nightAmt(g),
+        // Is the wall all the way round? One yes/no, because a wall with a gap in it
+        // is not a wall — see RC.Keep.enclosure. `was` is what it was at dusk, which is
+        // what the dawn reward is actually judged on.
+        sealed: !!(RC.Keep.isSealed && RC.Keep.isSealed(g)),
+        wasSealed: !!s.sealedAt,
         cracks: s.cracks || 0,
         name: (g._keepSave && g._keepSave.name) || 'My Keep',
       },
@@ -1199,7 +1240,7 @@ RC.Kids = (function () {
     }
     return { w: s.wave, ph: s.phase, tm: s.timer, ln: s.lanes, co: !!s.coop,
              dt: s.dayT || 0, rd: s.ready || {}, ck: s.cracks || 0, dw: s.dawnT || 0,
-             pv: s.preview, bn: s.banner, pl };
+             sa: !!s.sealedAt, pv: s.preview, bn: s.banner, pl };
   }
   // Which sound a freshly arrived banner should make. The server has no RC.Audio, so the
   // cues that fire beside banner() offline are simply absent online; deriving them from
@@ -1212,6 +1253,7 @@ RC.Kids = (function () {
     const wasBanner = s.banner && s.banner.title;
     s.wave = n.w; s.phase = n.ph; s.timer = n.tm;
     s.dayT = n.dt || 0; s.ready = n.rd || {}; s.cracks = n.ck || 0; s.dawnT = n.dw || 0;
+    s.sealedAt = !!n.sa;
     s.lanes = n.ln || 1; s.coop = !!n.co; s.preview = n.pv || null; s.banner = n.bn || null;
     s.pl = s.pl || {};
     for (const o in (n.pl || {})) {
@@ -1259,7 +1301,7 @@ RC.Kids = (function () {
       id: sig.id, ic: sig.ic, name: sig.name, kid: sig.kid,
       charge: Math.max(0, Math.min(1, h.charge || 0)),
       ready: h.sigReady(), downed: !!h.downed, level: h.level,
-      ups: (sig.ups || []).filter(u => h.hasUp(u.id)).map(u => u.ic),
+      ups: h.allUps().filter(u => h.hasUp(u.id)).map(u => u.ic),
       skills: (h.def.skills || []).filter(sk => !sk.ult).map(sk => ({
         key: sk.key, ic: sk.ic, name: sk.name, kid: sk.kid,
         ready: h.skillReady(sk),

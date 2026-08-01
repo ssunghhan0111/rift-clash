@@ -302,6 +302,125 @@ RC.Keep = (function () {
     return 1;
   }
 
+  // ── The seal ───────────────────────────────────────────────────────────────
+  //
+  // Does the wall actually go all the way round?
+  //
+  // This is the one thing a castle-building game has to be able to answer, and
+  // until now the game could not. Every wall was worth the same whether it was
+  // part of a ring or a lonely stub in a field, so the SHAPE of the keep — the
+  // part a child is actually thinking about while they build — meant nothing.
+  // A pile of forty walls in a heap and a neat ring of forty walls played
+  // identically, which is a strange thing for a building game to say.
+  //
+  // A flood fill from the crystal answers it exactly. If the fill can reach open
+  // ground beyond the build ring, there is a way in and the keep is open; if it
+  // is boxed in, it is sealed. There is no scoring, no "70% enclosed" — a wall
+  // with a gap in it is not a wall, and the honest answer is yes or no.
+  //
+  // A GATE COUNTS AS SEALED, unless the player has propped it open themselves.
+  // A door is not a hole; that is the whole idea of a door, and a game that told
+  // a child their gate ruined their castle would be teaching them not to build
+  // one. Forcing it open at night is a choice, and then it does count.
+  // WHAT COUNTS AS THE WALL. Deliberately not "keep pieces" — anything a unit
+  // cannot walk through is part of your perimeter, and this mirrors the rule the
+  // PATHFINDER uses (pathfind.js: standing, not passable, not an unfinished site)
+  // so that "sealed" means the same thing to the game as it does to the player.
+  // Your Fighter Hall plugging the east side of the ring really is a closed ring;
+  // telling a child otherwise, while nothing can get in, would be a lie they can
+  // see through.
+  //
+  // Two exceptions, both about not lying the other way:
+  //  · An unfinished piece is a hologram, so it seals nothing.
+  //  · A GATE counts as sealed unless the player has propped it open themselves.
+  //    A door is not a hole — that is the whole idea of a door, and a game that
+  //    told a child their gate ruined their castle would teach them not to build one.
+  const solidPart = b => {
+    if (!b || b.dead || !b.done) return false;
+    if (b.def && b.def.gate) return b.gateForced !== true;
+    return !b.passable;
+  };
+  // How far out the fill is allowed to look. One cell past the build ring, so
+  // "escaped" genuinely means escaped: nothing can be built out there to plug it.
+  function sealRadius() { return Math.ceil(RING / GRID) + 2; }
+
+  // Every cell something solid stands in. A keep piece is exactly one cell; the
+  // Fighter Hall, the towers and the map's own boulders are bigger, so the footprint
+  // is walked.
+  //
+  // ANY overlap counts, and that threshold is chosen to match `canPlace`, not to
+  // approximate physics. The rule this has to keep is: a cell the player CANNOT put
+  // a wall in must never be a cell the game then calls a gap. Anything else is a keep
+  // that reads as broken with no way to fix it — which is precisely what happened
+  // here first time round, on the cells beside the Fighter Hall, and it is the
+  // cruellest possible version of this feature: a child hunting a hole that is not
+  // there. The 1px inset is only so a piece sitting exactly on its own cell claims
+  // that cell and not its neighbours.
+  //
+  // The crystal is excluded on purpose. It sits in the middle of every keep, it is
+  // the thing being protected rather than part of the protection, and counting it
+  // could only ever make a leaky keep read as sealed.
+  function solidSet(g) {
+    const out = new Set();
+    const M = 1;
+    const box = (x, y, w, h) => {
+      const x0 = cellX(x - w / 2 + M), x1 = cellX(x + w / 2 - M);
+      const y0 = cellY(y - h / 2 + M), y1 = cellY(y + h / 2 - M);
+      for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) out.add(keyOf(cx, cy));
+    };
+    for (const b of (g.buildings || [])) {
+      if (b === g.crystal || !solidPart(b)) continue;
+      box(b.x, b.y, b.w, b.h);
+    }
+    // Terrain the pathfinder blocks on. A boulder in the wall line is a wall — you
+    // cannot build there and nothing can walk through it, so it is part of the ring.
+    for (const o of (g.obstacles || [])) box(o.x, o.y, o.w, o.h);
+    return out;
+  }
+
+  // { sealed, area, yard } — yard is the Set of enclosed cell keys, which the
+  // renderer tints and the Build Day bar counts. Cached against a signature of every
+  // standing building, because this runs every frame on the client and 1300-odd
+  // cells per frame for nothing is rude.
+  function enclosure(g) {
+    if (!g.crystal) return { sealed: false, area: 0, yard: new Set() };
+    let sig = 0;
+    for (const b of (g.buildings || [])) {
+      if (b.dead) continue;
+      sig = (sig * 31 + b.id + (b.done ? 7 : 0) + (b.passable ? 3 : 0) + (b.gateForced === true ? 5 : 0)) | 0;
+    }
+    const c = g._keepSeal;
+    if (c && c.sig === sig) return c.val;
+
+    const solid = solidSet(g);
+    const ox = cellX(g.crystal.x), oy = cellY(g.crystal.y);
+    const R = sealRadius();
+    const yard = new Set();
+    const q = [[ox, oy]];
+    yard.add(keyOf(ox, oy));
+    let sealed = true;
+    while (q.length) {
+      const [cx, cy] = q.pop();
+      // Reached the edge of the world we care about: there is a way out.
+      if (Math.abs(cx - ox) > R || Math.abs(cy - oy) > R) { sealed = false; break; }
+      const nb = [[cx, cy - 1], [cx + 1, cy], [cx, cy + 1], [cx - 1, cy]];
+      for (const [nx, ny] of nb) {
+        const k = keyOf(nx, ny);
+        if (yard.has(k)) continue;
+        if (solid.has(k)) continue;                  // the wall stops the flood
+        yard.add(k);
+        q.push([nx, ny]);
+      }
+    }
+    // A broken ring floods the whole box, and that is not a yard — do not hand the
+    // renderer thirteen hundred cells to tint when the answer is "you are not
+    // enclosed". Only a sealed keep has an inside.
+    const val = { sealed: sealed, area: sealed ? yard.size : 0, yard: sealed ? yard : new Set() };
+    g._keepSeal = { sig: sig, val: val };
+    return val;
+  }
+  const isSealed = g => enclosure(g).sealed;
+
   // ── The save file ──────────────────────────────────────────────────────────
   //
   // Cells are stored RELATIVE TO THE CRYSTAL, not in world coordinates, so a keep
@@ -632,6 +751,7 @@ RC.Keep = (function () {
     load: load, store: store, blank: blank, rename: rename,
     capture: capture, restore: restore, rebuild: rebuild,
     why: why, ring: ring, inRing: inRing, place: place, plan: plan,
+    enclosure: enclosure, isSealed: isSealed, sealRadius: sealRadius, solidSet: solidSet,
     nextSite: nextSite, tickBuilders: tickBuilders,
     DEMO: DEMO, DEMO_REFUND: DEMO_REFUND,
     priceOf: priceOf, demoTime: demoTime, removeAt: removeAt, unmarkAll: unmarkAll,

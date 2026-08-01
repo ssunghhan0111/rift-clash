@@ -425,6 +425,24 @@ window.RC = window.RC || {};
     setHeroPick(map) {
       this._heroPick = Object.assign(this._heroPick || {}, map || {});
     }
+    // What each seat BROUGHT. Same shape and the same road as the pick above: main.js
+    // hands in the local player's, the server hands in every seat's, and both have
+    // already run it through RC.validLoadout. A seat with nothing here gets the default,
+    // which is exactly the hero everyone had before loadouts existed.
+    setHeroLoadout(map) {
+      this._heroLo = Object.assign(this._heroLo || {}, map || {});
+    }
+    loadoutFor(owner) {
+      const lo = this._heroLo && this._heroLo[owner];
+      return lo || RC.defaultLoadout(this.heroFor(owner));
+    }
+    // Every hero on the map is born through here, so there is one place that remembers
+    // to hand a hero what it brought.
+    spawnHero(owner, x, y) {
+      const h = new RC.Unit(this.heroFor(owner), x, y, owner);
+      if (h.setLoadout) h.setLoadout(this.loadoutFor(owner));
+      return h;
+    }
 
     // ── Ground hazards ────────────────────────────────────────────────────
     // A patch of ground that keeps doing something for a few seconds after whoever made
@@ -720,7 +738,7 @@ window.RC = window.RC || {};
         // 영웅 (오프라인 전용) — 종족이 아니라 소유자의 선택에서 온다
         if (this.heroesEnabled) {
           const hx = s.x + (s.x < center.x ? 95 : -95);
-          const h = new RC.Unit(this.heroFor(p.owner), hx, s.y, p.owner);
+          const h = this.spawnHero(p.owner, hx, s.y);
           this.units.push(h);
           this.heroOf[p.owner] = h;
         }
@@ -778,7 +796,7 @@ window.RC = window.RC || {};
           if (nn) u.gatherFrom(nn);
         }
         if (this.heroesEnabled) {
-          const h = new RC.Unit(this.heroFor(p.owner), base.x + 95, base.y, p.owner);
+          const h = this.spawnHero(p.owner, base.x + 95, base.y);
           this.units.push(h);
           this.heroOf[p.owner] = h;
         }
@@ -869,7 +887,7 @@ window.RC = window.RC || {};
         this.kidsBases[p.owner] = b;
         p.spawn = { x: b.x, y: b.y };
         if (this.heroesEnabled) {
-          const h = new RC.Unit(this.heroFor(p.owner), b.x - 90, b.y + 60, p.owner);
+          const h = this.spawnHero(p.owner, b.x - 90, b.y + 60);
           this.units.push(h);
           this.heroOf[p.owner] = h;
         }

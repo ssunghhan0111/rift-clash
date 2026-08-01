@@ -159,6 +159,7 @@ RC.Renderer = (function () {
     drawTerrain(g, VW, VH);
     drawZones(g);                     // 전술 지형 (고지/숲/늪/분출구)
     drawClouds(g, VW, VH);            // 흘러가는 구름 그림자 (지면 위, 유닛 아래)
+    drawKeepYard(g);                  // the ground inside a sealed wall
     (g.obstacles || []).forEach(o => drawObstacle(o));
     g.nodes.forEach(n => drawNode(n));
     g.buildings.forEach(b => drawBuilding(g, b));
@@ -4141,6 +4142,53 @@ RC.Renderer = (function () {
   // a warm hand-drawn map into a spreadsheet; a grid that appears the moment you
   // pick up a wall and vanishes when you put it down is a tool rather than décor,
   // and it is what makes "one line" something you can see before you commit to it.
+  // ── The yard ───────────────────────────────────────────────────────────────
+  //
+  // The ground inside a sealed keep, drawn as ground and not as an overlay: it sits
+  // under the buildings and the units, so it reads as a floor somebody laid rather
+  // than as a status light somebody switched on.
+  //
+  // It appears ONLY when the ring is actually unbroken (RC.Keep.enclosure), which is
+  // what makes it worth having. There is no partial state and no percentage — you lay
+  // the last wall and the whole inside of your castle turns into a courtyard, in one
+  // moment, which is the reward. A child who has one gap left will go and find it.
+  function drawKeepYard(g) {
+    if (!g.kids || !RC.Keep || !RC.Keep.enclosure) return;
+    const e = RC.Keep.enclosure(g);
+    if (!e.sealed || !e.yard.size) return;
+    const G = RC.Keep.GRID;
+    const z = camZoom(g);
+    const cam = g.camera, VW = cv.width / z, VH = cv.height / z;
+    const t = performance.now() / 1000;
+    ctx.save();
+    // Warm and very faint. This is a hint that the floor is yours, not a highlight.
+    ctx.fillStyle = 'rgba(255, 226, 168, 0.14)';
+    for (const k of e.yard) {
+      const p = k.split(',');
+      const x = (+p[0]) * G, y = (+p[1]) * G;
+      if (x + G < cam.x - 40 || x > cam.x + VW + 40 || y + G < cam.y - 40 || y > cam.y + VH + 40) continue;
+      ctx.fillRect(x, y, G, G);
+    }
+    // The boundary: every yard edge that has no yard beyond it, which traces the
+    // inside face of the wall exactly. Drawn as one path so the glow is a single
+    // continuous line around the castle rather than 200 separate outlines.
+    ctx.beginPath();
+    for (const k of e.yard) {
+      const p = k.split(',');
+      const cx = +p[0], cy = +p[1];
+      const x = cx * G, y = cy * G;
+      if (x + G < cam.x - 60 || x > cam.x + VW + 60 || y + G < cam.y - 60 || y > cam.y + VH + 60) continue;
+      if (!e.yard.has(cx + ',' + (cy - 1))) { ctx.moveTo(x, y); ctx.lineTo(x + G, y); }
+      if (!e.yard.has(cx + ',' + (cy + 1))) { ctx.moveTo(x, y + G); ctx.lineTo(x + G, y + G); }
+      if (!e.yard.has((cx - 1) + ',' + cy)) { ctx.moveTo(x, y); ctx.lineTo(x, y + G); }
+      if (!e.yard.has((cx + 1) + ',' + cy)) { ctx.moveTo(x + G, y); ctx.lineTo(x + G, y + G); }
+    }
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255, 216, 142, ' + (0.46 + 0.14 * Math.sin(t * 1.6)).toFixed(3) + ')';
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawKeepGrid(g, input) {
     if (!RC.Keep || !RC.Input || !RC.Input.snapMode || !RC.Input.snapMode()) return;
     const G = RC.Keep.GRID;

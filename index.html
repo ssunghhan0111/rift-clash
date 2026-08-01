@@ -436,8 +436,60 @@
     border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.04);
   }
   #wardrobe-toggle:hover { border-color: rgba(255,255,255,.34); }
+  #loadout-toggle {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer; color: var(--text);
+    border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.04);
+  }
+  #loadout-toggle:hover { border-color: rgba(255,255,255,.34); }
+  /* The one line that answers "why should I play again". It names the very next thing
+     Mastery will hand this hero and the level it arrives at, so the number on the bar
+     above always points at something real. Empty (and hidden) when a hero is maxed. */
+  #hero-next {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); margin-top: 6px; min-height: 12px;
+  }
+  #hero-next b { color: #ffd15c; font-weight: 600; }
+  #hero-next.done b { color: var(--accent, #6fb3ff); }
+  #loadout-panel {
+    width: 100%; max-width: min(560px, 92vw); margin: 8px auto 0; padding: 10px 12px 12px;
+    border: 1px solid rgba(255,255,255,.10); border-radius: 10px; background: rgba(8,12,20,.72);
+  }
+  #loadout-panel.hidden { display: none; }
+  #loadout-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 4px;
+  }
+  #loadout-close { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 13px; }
+  #loadout-note { font-size: 10.5px; color: var(--dim); opacity: .8; margin-bottom: 8px; line-height: 1.45; }
+  .lo-slot { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+  .lo-key {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--dim); width: 62px; flex: none; padding-top: 6px;
+  }
+  .lo-opts { display: flex; flex-wrap: wrap; gap: 5px; }
+  .lo-opt {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 1px; cursor: pointer;
+    padding: 4px 9px; border-radius: 6px; color: var(--text); text-align: left;
+    border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03);
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  }
+  .lo-opt:hover { border-color: rgba(255,255,255,.30); }
+  .lo-opt.on { border-color: var(--accent, #6fb3ff); background: rgba(111,179,255,.12); }
+  /* Locked options stay visible and greyed rather than hidden. A reward you cannot see
+     is not a reward — the point of the panel is that you know what is coming. */
+  .lo-opt.locked { opacity: .48; cursor: default; }
+  .lo-opt.locked:hover { border-color: rgba(255,255,255,.10); }
+  .lo-nm { font-size: 10px; }
+  .lo-kid { font-size: 8.5px; color: var(--dim); }
+  .lo-at { font-size: 8.5px; color: #ffd15c; }
+  /* Column-relative, not viewport-relative. A flat 560px is WIDER than the left column
+     the panel lives in (460px), so the panel overflowed underneath the right-hand column
+     and its ✕ became genuinely unclickable — found by heroui_test, which had been dying
+     on exactly that click and silently skipping everything after it. */
   #wardrobe-panel {
-    width: min(560px, 92vw); margin: 8px auto 0; padding: 10px 12px 12px;
+    width: 100%; max-width: min(560px, 92vw); margin: 8px auto 0; padding: 10px 12px 12px;
     border: 1px solid rgba(255,255,255,.10); border-radius: 10px; background: rgba(8,12,20,.72);
   }
   #wardrobe-panel.hidden { display: none; }
@@ -1424,12 +1476,24 @@
       <div id="hero-row"></div>
       <div id="hero-tools">
         <span id="star-count">★ 0</span>
+        <button id="loadout-toggle">Loadout</button>
         <button id="wardrobe-toggle">Wardrobe</button>
       </div>
+      <div id="hero-next"></div>
     </div>
     <!-- Stats, kit and trade-offs for whichever hero is selected. Filled by
          main.js `renderHeroOverview`, which re-runs on every portrait click. -->
     <div id="hero-overview"></div>
+  </div>
+
+  <!-- What this hero takes into the match. Mastery unlocks OPTIONS here — never numbers;
+       see HERO_DESIGN.md §2, "breadth persists, budget doesn't". Every hero brings the
+       same count of everything at Mastery 1 as at Mastery 30, so a fresh account and a
+       veteran one deploy exactly as strong. Filled by main.js `renderLoadout`. -->
+  <div id="loadout-panel" class="hidden">
+    <div id="loadout-head">Loadout <button id="loadout-close">✕</button></div>
+    <div id="loadout-note"></div>
+    <div id="loadout"></div>
   </div>
 
   <!-- The Star shop. Inventory is shared across the account, equipment is per hero. -->

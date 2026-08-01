@@ -21,6 +21,13 @@ Works in any modern browser and is touch-friendly for iPad and tablets.
     and combat units **warp in at any forward Warp Conduit** instead of walking from base.
 - **Heroes** — one per faction, gaining XP and levels through a match, with an ultimate that
   unlocks at level 6. Live in offline and online play alike.
+- **The Hero Bay** — your hero keeps a **Mastery** level across every match it plays, and Mastery
+  buys **choices, never numbers**. Each hero has alternate Q and E skills and a wider set of
+  ultimate upgrades to pick from; you still bring one Q, one E and three upgrades whether you are
+  Mastery 1 or Mastery 30, and a fresh account deploys exactly as strong as a veteran one. Locked
+  options are shown greyed with the level they arrive at, so the "next unlock" line on the start
+  screen always points at something real. Public online matches open the whole pool to everybody,
+  so nobody is out-levelled by a stranger.
 - **7 shared upgrades** researched mid-game (reinforced rounds, alloy plating, overdrive, and more).
 - **Tactical terrain** — high ground, forest cover, marsh, hollows and rift vents change a fight.
 - **Fog of war** — per-player vision; enemy units and buildings are hidden in the dark.

@@ -648,12 +648,52 @@ window.RC = window.RC || {};
     // Outside Crystal Guard there are no reward cards to pick upgrades from, so the three
     // unlock at levels instead. Same three upgrades either way; only the route differs,
     // and this is the single place that knows that.
+    // ── The loadout ───────────────────────────────────────────────────────
+    // Handed in at spawn, exactly the way the hero PICK is (game.setHeroLoadout), and
+    // for the same reason: a Unit must never be able to read the profile. What arrives
+    // here is a validated list of choices — never a Mastery level — so there is still
+    // no path from how much someone has played to a number in the simulation. That is
+    // the rule HERO_DESIGN §2 rests on, and it is enforced by this door being the only
+    // one: search entities.js for "mastery" and you will find nothing.
+    setLoadout(lo) {
+      this._lo = lo && typeof lo === 'object' ? lo : null;
+      return this;
+    }
+    // The chosen variant of a Q or E, or null for the base skill. Deliberately merged
+    // WITHOUT `id`: _applyAbility dispatches on ab.id, so a variant that renamed itself
+    // would stop being the ability it is a variant of.
+    _variant(sk) {
+      if (!this._lo || !sk || !sk.slot || sk.ult) return null;
+      const want = this._lo[sk.slot];
+      if (!want || want === 'base') return null;
+      const byHero = (RC.LOADOUT && RC.LOADOUT.vars && RC.LOADOUT.vars[this.type]) || null;
+      const list = (byHero && byHero[sk.slot]) || [];
+      return list.find(v => v.id === want) || null;
+    }
+
+    // Every upgrade this hero could ever hold: the three it has always had, plus the
+    // ones the Mastery pool adds. Anything that asks "which upgrades does this hero
+    // have" must read THIS and not def.sig.ups — the HUD, the tooltip row and the
+    // effSig merge all did the latter, which is how a brought Mastery upgrade came to
+    // be held, invisible, and inert all at once.
+    allUps() {
+      const base = (this.def.sig && this.def.sig.ups) || [];
+      const m = (RC.LOADOUT && RC.LOADOUT.ups && RC.LOADOUT.ups[this.type]) || [];
+      return m.length ? base.concat(m) : base;
+    }
     hasUp(id) {
       const sig = this.def.sig;
       if (!sig || !sig.ups) return false;
       if (this.sigUp && this.sigUp[id]) return true;
       if (this._cardUps) return false;              // Crystal Guard: cards are the only route
-      const i = sig.ups.findIndex(u => u.id === id);
+      // With a loadout, the upgrades a hero is entitled to are the ones it BROUGHT, and
+      // they arrive on the same schedule the fixed three always did. Without one, the
+      // old behaviour is exactly preserved — which is what makes this safe for every
+      // save, every bot and every mode that never learned about loadouts.
+      const order = (this._lo && Array.isArray(this._lo.ups) && this._lo.ups.length)
+        ? this._lo.ups
+        : sig.ups.map(u => u.id);
+      const i = order.indexOf(id);
       if (i < 0) return false;
       const lv = (RC.HERO.upLevels || [])[i];
       return lv != null && this.level >= lv;
@@ -669,13 +709,19 @@ window.RC = window.RC || {};
     effSkill(sk) {
       if (!sk) return null;
       if (sk.ult) return this.effSig();
-      const a = Object.assign({}, sk);
+      // The variant lands first, so the level scaling below reads the variant's own
+      // per-level numbers rather than the base skill's — a Deep Quake that grew like a
+      // Ground Slam would be a different ability from the one on the card.
+      const v = this._variant(sk);
+      const base = v ? Object.assign({}, sk, v, { id: sk.id, slot: sk.slot, key: sk.key,
+                                                  cost: sk.cost, cd: sk.cd, ult: sk.ult }) : sk;
+      const a = Object.assign({}, base);
       const lv = this.level - 1;
-      if (sk.dmgPerLevel)    a.dmg    = (sk.dmg || 0) + sk.dmgPerLevel * lv;
-      if (sk.shieldPerLevel) a.shield = (sk.shield || 0) + sk.shieldPerLevel * lv;
-      if (sk.healPerLevel)   a.heal   = (sk.heal || 0) + sk.healPerLevel * lv;
-      if (sk.armorPerLevel)  a.armor  = (sk.armor || 0) + sk.armorPerLevel * lv;
-      if (sk.ampPerLevel)    a.amp    = (sk.amp || 0) + sk.ampPerLevel * lv;
+      if (base.dmgPerLevel)    a.dmg    = (base.dmg || 0) + base.dmgPerLevel * lv;
+      if (base.shieldPerLevel) a.shield = (base.shield || 0) + base.shieldPerLevel * lv;
+      if (base.healPerLevel)   a.heal   = (base.heal || 0) + base.healPerLevel * lv;
+      if (base.armorPerLevel)  a.armor  = (base.armor || 0) + base.armorPerLevel * lv;
+      if (base.ampPerLevel)    a.amp    = (base.amp || 0) + base.ampPerLevel * lv;
       return a;
     }
 
@@ -694,7 +740,11 @@ window.RC = window.RC || {};
       // merge never has to know WHICH upgrade it holds. Add one to config.js with a new
       // field name and it lands here without touching this code.
       a.held = {};
-      for (const up of (sig.ups || [])) {
+      // Base ups AND whatever the Mastery pool adds for this hero. Iterating only
+      // sig.ups was a real bug while it lasted: hasUp() would happily say yes to a
+      // brought Mastery upgrade that this loop never visited, so the upgrade was
+      // held, shown as held, and did nothing at all.
+      for (const up of this.allUps()) {
         if (!this.hasUp(up.id)) continue;
         a.held[up.id] = true;
         if (up.durAdd)    a.dur    = (a.dur || 0) + up.durAdd;
@@ -711,6 +761,15 @@ window.RC = window.RC || {};
         if (up.hatchDmg)  a.hatchDmg = up.hatchDmg;
         if (up.exitDmg)   { a.exitDmg = up.exitDmg; a.exitSlow = up.exitSlow || 0; }
         if (up.hasteMul)  a.hasteMul = up.hasteMul;
+        // Six fields added with the Mastery pool. Every one of them multiplies or adds
+        // to a number the hero's own ultimate ALREADY declares in its base def, which
+        // is why not one ability implementation needed touching for any of them.
+        if (up.shieldMul) a.shield = (a.shield || 0) * up.shieldMul;   // Bulwark
+        if (up.lifeMul)   a.life   = (a.life || 0) * up.lifeMul;       // Hatch the Brood
+        if (up.pushMul)   a.push   = (a.push || 0) * up.pushMul;       // Rift Nova
+        if (up.dpsMul)    a.dps    = (a.dps || 0) * up.dpsMul;         // Firestorm
+        if (up.drAdd)     a.dr     = Math.min(0.8, (a.dr || 0) + up.drAdd);   // Sanctuary
+        if (up.hpsMul)    a.hps    = (a.hps || 0) * up.hpsMul;         // Sanctuary
       }
       return a;
     }

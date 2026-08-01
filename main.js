@@ -259,6 +259,7 @@ window.RC = window.RC || {};
         const pct = rec.mastery >= RC.MASTERY.maxLevel ? 100 : Math.round(100 * rec.xp / need);
         bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
       }
+      renderHeroNext();
     }
   }
 
@@ -349,13 +350,15 @@ window.RC = window.RC || {};
         + '<div class="hc-m">M' + ((recs[id] && recs[id].mastery) || 1) + '</div>';
       card.addEventListener('click', () => {
         if (RC.Profile) RC.Profile.setHeroPick(id);
-        if (RC.NetClient && RC.NetClient.connected) RC.NetClient.send({ t: 'hero', hero: id });
+        if (RC.NetClient && RC.NetClient.connected) RC.NetClient.send(heroMsg());
         row.querySelectorAll('.herocard').forEach(c => c.classList.remove('sel'));
         card.classList.add('sel');
         heroPlateId = null;                 // force the plate to re-render on the next frame
         drawMenuHero();
         renderHeroOverview();
         buildWardrobe();
+        renderLoadout();
+        renderHeroNext();
         if (RC.Audio) RC.Audio.play('click');
       });
       row.appendChild(card);
@@ -363,6 +366,20 @@ window.RC = window.RC || {};
     });
     drawHeroCards();
     renderHeroOverview(true);
+    renderHeroNext();
+  }
+  // What the lobby is told: which hero, and what it is bringing. One message, because
+  // the two are one decision and a seat that had a hero without a loadout (or the other
+  // way round) would be a state the server has to guess about.
+  function heroMsg() {
+    const id = heroPick();
+    const m = { t: 'hero', hero: id };
+    if (RC.Profile) {
+      const rec = RC.Profile.heroes()[id];
+      m.loadout = RC.Profile.loadoutOf(id);
+      m.mastery = rec ? rec.mastery : 1;      // claimed; the server folds it down anyway
+    }
+    return m;
   }
   function drawHeroCards() {
     if (!RC.Renderer || !RC.Renderer.drawHeroIdle) return;
@@ -436,6 +453,98 @@ window.RC = window.RC || {};
       const p = document.getElementById('wardrobe-panel'); if (p) p.classList.add('hidden');
     }); }
 
+  // ── Loadout ────────────────────────────────────────────────────────────────
+  // What this hero takes into the match. Mastery unlocks OPTIONS here and never
+  // numbers — HERO_DESIGN.md §2, "breadth persists, budget doesn't" — so every hero
+  // brings one Q, one E and exactly RC.LOADOUT.upSlots upgrades at Mastery 1 and at
+  // Mastery 30 alike. A veteran has more ways to build; they do not have a bigger one.
+  //
+  // Locked entries are drawn greyed with the level they arrive at rather than hidden.
+  // A reward you cannot see is not a reward, and the whole reason this panel exists is
+  // to make the Mastery bar above it point at something real.
+  //
+  // The panel writes straight through to the profile on every click, because there is
+  // no Save button: the loadout is a preference, not a transaction, and a child who
+  // changes a slot and presses Play must get the thing they just chose.
+  function renderLoadout() {
+    const box = document.getElementById('loadout');
+    if (!box || !RC.Profile || !RC.loadoutPool) return;
+    const hid = heroPick();
+    const rec = RC.Profile.heroes()[hid];
+    const m = rec ? rec.mastery : 1;
+    const pool = RC.loadoutPool(hid, m, false);
+    const lo = RC.Profile.loadoutOf(hid);
+
+    const note = document.getElementById('loadout-note');
+    if (note) {
+      note.innerHTML = 'Mastery gives you more <b>choices</b> — never bigger numbers. '
+        + 'Every hero brings one Q, one E and ' + pool.upSlots
+        + ' ultimate upgrades at Mastery 1 and at Mastery '
+        + (RC.MASTERY ? RC.MASTERY.maxLevel : 30) + ' alike.';
+    }
+
+    const opt = (o, on, kind) => {
+      const cls = 'lo-opt' + (on ? ' on' : '') + (o.open ? '' : ' locked');
+      const tail = o.open
+        ? '<span class="lo-kid">' + esc(o.kid || o.desc || '') + '</span>'
+        : '<span class="lo-at">🔒 Mastery ' + (o.at || 0) + '</span>';
+      return '<button class="' + cls + '" data-kind="' + kind + '" data-id="' + esc(o.id) + '"'
+           + (o.open ? '' : ' disabled') + '>'
+           + '<span class="lo-nm">' + esc(o.ic || '•') + ' ' + esc(o.name || o.id) + '</span>'
+           + tail + '</button>';
+    };
+    const row = (key, label, list, isOn, kind) =>
+      '<div class="lo-slot"><div class="lo-key">' + esc(label) + '</div><div class="lo-opts">'
+      + list.map(o => opt(o, isOn(o), kind)).join('') + '</div></div>';
+
+    box.innerHTML =
+        row('q', 'Q skill', pool.q, o => o.id === lo.q, 'q')
+      + row('e', 'E skill', pool.e, o => o.id === lo.e, 'e')
+      + row('ups', 'Ultimate · bring ' + pool.upSlots, pool.ups, o => lo.ups.indexOf(o.id) >= 0, 'ups')
+      + '<div id="loadout-hint" style="font-size:10px;color:var(--dim);opacity:.75;margin-top:2px;">'
+      + 'You always bring exactly ' + pool.upSlots + ' upgrades. Picking another swaps out the one you chose longest ago.'
+      + '</div>';
+
+    box.querySelectorAll('.lo-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const kind = btn.dataset.kind, id = btn.dataset.id;
+        const o = pool[kind].find(x => x.id === id);
+        if (!o || !o.open) return;
+        // Clicking an upgrade you already bring is a no-op rather than a removal: the
+        // count is fixed, so "unselect" has no meaning and dropping to two would only
+        // be silently topped back up by validLoadout on the next read.
+        if (kind === 'ups' && lo.ups.indexOf(id) >= 0) return;
+        RC.Profile.setSlot(hid, kind, id);
+        renderLoadout();
+        renderHeroOverview(true);
+        if (RC.Audio) RC.Audio.play('click');
+      });
+    });
+  }
+  // The one line that answers "why come back". It names the very next thing this hero
+  // unlocks and the level it lands at, so the Mastery bar is never pointing at nothing.
+  function renderHeroNext() {
+    const el = document.getElementById('hero-next');
+    if (!el || !RC.nextUnlock || !RC.Profile) return;
+    const hid = heroPick();
+    const rec = RC.Profile.heroes()[hid];
+    const m = rec ? rec.mastery : 1;
+    const n = RC.nextUnlock(hid, m);
+    if (!n) { el.className = 'done'; el.innerHTML = '★ Everything unlocked'; return; }
+    const what = n.what === 'look' ? 'new look' : n.what + ' option';
+    el.className = '';
+    el.innerHTML = 'Next ' + esc(what) + ' at Mastery <b>' + n.at + '</b> — ' + esc(n.name || '');
+  }
+  { const t = document.getElementById('loadout-toggle');
+    if (t) t.addEventListener('click', () => {
+      const p = document.getElementById('loadout-panel');
+      if (p) { p.classList.toggle('hidden'); if (!p.classList.contains('hidden')) renderLoadout(); }
+    }); }
+  { const c = document.getElementById('loadout-close');
+    if (c) c.addEventListener('click', () => {
+      const p = document.getElementById('loadout-panel'); if (p) p.classList.add('hidden');
+    }); }
+
   // Hand the local player's pick to the match, and dress the hero once it exists.
   //
   // Called from every offline mode start. The pick has to be set BEFORE setup/reset,
@@ -444,7 +553,15 @@ window.RC = window.RC || {};
   function applyHeroPick() {
     if (!game) return;
     const id = heroPick();
-    if (game.setHeroPick) game.setHeroPick({ [game.playerOwner || 1]: id });
+    const own = game.playerOwner || 1;
+    if (game.setHeroPick) game.setHeroPick({ [own]: id });
+    // The loadout has to arrive with the pick, not after it: both are read by
+    // spawnHero, and a hero that spawned before its loadout landed would play the
+    // whole match on the default. Read through the profile so it is validated against
+    // this hero's real Mastery rather than trusted from storage.
+    if (game.setHeroLoadout && RC.Profile && RC.Profile.loadoutOf) {
+      game.setHeroLoadout({ [own]: RC.Profile.loadoutOf(id) });
+    }
     return id;
   }
   function dressHero() {
@@ -2085,7 +2202,7 @@ window.RC = window.RC || {};
     // The hero is picked on the start screen, not in the lobby, so it is sent once on
     // connect (and again whenever the player changes it below). The server validates it
     // through RC.resolveHero — a client can send anything.
-    N.send({ t: 'hero', hero: heroPick() });
+    N.send(heroMsg());
     // Coming back to a match beats everything else this socket could be doing.
     if (resuming && resumeInfo) {
       showReconnect('Reconnecting to your match…');

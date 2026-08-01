@@ -362,5 +362,192 @@ head('=== 6 · Versus is untouched ===');
   ok(g.canPlace('rampart', x + 52, y, 1), 'while 52 apart is fine, exactly as before');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 7 · THE SHAPE OF IT MATTERS
+// ---------------------------------------------------------------------------
+// Until this, forty walls in a heap and forty walls in a ring played identically,
+// which is a peculiar thing for a building game to say. The seal is the one rule
+// that pays for the ARRANGEMENT rather than the amount, so these assertions are
+// mostly about the ways a ring can be not-quite-a-ring.
+head('=== 7 · the shape of it matters ===');
+
+// Build a closed square of wall of half-width `r` cells around the crystal, finished.
+// Returns the list of cells so a test can knock one out.
+function ringWall(g, r, type) {
+  const G = RC.Keep.GRID;
+  const ox = RC.Keep.cellX(g.crystal.x), oy = RC.Keep.cellY(g.crystal.y);
+  const cells = [];
+  for (let i = -r; i <= r; i++) {
+    cells.push({ cx: ox + i, cy: oy - r }, { cx: ox + i, cy: oy + r });
+    if (i > -r && i < r) cells.push({ cx: ox - r, cy: oy + i }, { cx: ox + r, cy: oy + i });
+  }
+  for (const c of cells) {
+    const x = RC.Keep.centerX(c.cx), y = RC.Keep.centerY(c.cy);
+    const b = new RC.Building(type || 'rampart', x, y, RC.Keep.bank(g), true);
+    b.hp = b.maxHp;
+    g.buildings.push(b);
+    c.b = b;
+  }
+  g._keepIx = null; g._keepSeal = null;
+  if (RC.Path && RC.Path.invalidate) RC.Path.invalidate(g);
+  cells.mid = cells.find(c => c.cy === oy - r && c.cx === ox);      // middle of the north wall
+  cells.corner = cells.find(c => c.cy === oy - r && c.cx === ox - r);
+  return cells;
+}
+const reseal = g => { g._keepIx = null; g._keepSeal = null; };
+
+{
+  clearStore();
+  const g = run();
+  ok(!RC.Keep.isSealed(g), 'a bare crystal with no wall at all is not sealed');
+
+  // A big pile of wall that is not a ring buys nothing. This is the assertion that
+  // stops the seal being a wall-count in disguise.
+  const G = RC.Keep.GRID;
+  for (let i = 0; i < 30; i++) {
+    const b = new RC.Building('rampart', RC.Keep.centerX(RC.Keep.cellX(g.crystal.x) + (i % 6) - 8),
+                              RC.Keep.centerY(RC.Keep.cellY(g.crystal.y) + Math.floor(i / 6) - 2),
+                              RC.Keep.bank(g), true);
+    b.hp = b.maxHp; g.buildings.push(b);
+  }
+  reseal(g);
+  ok(RC.Keep.pieceCount(g) >= 30 && !RC.Keep.isSealed(g),
+     'and thirty walls in a heap are still not sealed — it is the shape, not the count');
+}
+
+{
+  clearStore();
+  const g = run();
+  const cells = ringWall(g, 4);
+  ok(RC.Keep.isSealed(g), 'a closed ring around the crystal IS sealed');
+  const e = RC.Keep.enclosure(g);
+  ok(e.area > 0 && e.area < 200, 'and it reports a yard of the right rough size (' + e.area + ' cells)');
+  ok(e.yard.has(RC.Keep.cellX(g.crystal.x) + ',' + RC.Keep.cellY(g.crystal.y)),
+     'the crystal is inside its own yard');
+
+  // One wall out of a ring of thirty-two and the whole thing is open. Deliberately
+  // absolute: a wall with a gap in it is not a wall.
+  cells.mid.b.dead = true;
+  reseal(g);
+  ok(!RC.Keep.isSealed(g), 'knock ONE piece out of the middle of a wall and it is open again');
+  ok(RC.Keep.enclosure(g).area === 0, 'and an open keep has no yard at all to draw');
+  cells.mid.b.dead = false;
+  reseal(g);
+  ok(RC.Keep.isSealed(g), 'put it back and it seals again');
+
+  // A CORNER is different, and deliberately so. Two walls meeting at a right angle
+  // leave no gap between them — the cells touch along a point, not a span — so a
+  // missing corner block is not a doorway and nothing can walk through it. The fill
+  // is 4-connected for exactly this reason, and it agrees with what a unit can
+  // physically do. A child who leaves the corner off has still built a closed castle.
+  cells.corner.b.dead = true;
+  reseal(g);
+  ok(RC.Keep.isSealed(g), 'a missing CORNER is still sealed — nothing can walk through a right angle');
+  cells.corner.b.dead = false;
+  reseal(g);
+
+  // Unfinished pieces are holograms. A ring you have only PLANNED is not a ring,
+  // which is also what stops the seal flickering on the moment a drag is committed.
+  cells.mid.b.buildProgress = 0.5; cells.mid.b.done = false;
+  reseal(g);
+  ok(!RC.Keep.isSealed(g), 'a piece still going up does not seal anything');
+  cells.mid.b.buildProgress = 1; cells.mid.b.done = true;
+  reseal(g);
+  ok(RC.Keep.isSealed(g), 'and it does the moment the builder finishes');
+}
+
+{
+  clearStore();
+  const g = run();
+  const cells = ringWall(g, 4);
+  // A gate is a door, not a hole. A game that told a child their gate ruined their
+  // castle would be teaching them not to build one.
+  const spot = cells.mid;
+  spot.b.dead = true;
+  const gate = new RC.Building('keepgate', RC.Keep.centerX(spot.cx), RC.Keep.centerY(spot.cy), RC.Keep.bank(g), true);
+  gate.hp = gate.maxHp;
+  g.buildings.push(gate);
+  reseal(g);
+  ok(RC.Keep.isSealed(g), 'a gate in the wall still counts as sealed, even standing open on Build Day');
+
+  // …unless you prop it open yourself, which is a choice and does count.
+  RC.Keep.toggleGate(g, gate);
+  gate.gateForced = true;
+  reseal(g);
+  ok(!RC.Keep.isSealed(g), 'propping it open by hand is a hole, because you chose it');
+  gate.gateForced = null;
+  reseal(g);
+  ok(RC.Keep.isSealed(g), 'and letting it behave like a gate again re-seals the keep');
+}
+
+{
+  // Anything solid is part of your wall, not just the pieces you bought from the
+  // build menu. The pathfinder blocks on every standing building, so a ring closed
+  // by your Fighter Hall really is closed and the game has to agree — otherwise the
+  // one case a child will hit constantly (a big building sitting in the wall line)
+  // is the case the feature gets wrong.
+  clearStore();
+  const g = run();
+  const cells = ringWall(g, 4);
+  const gap = cells.mid;
+  gap.b.dead = true;
+  reseal(g);
+  ok(!RC.Keep.isSealed(g), 'a gap in the north wall is open');
+  const hall = new RC.Building('factory', RC.Keep.centerX(gap.cx), RC.Keep.centerY(gap.cy), 1, true);
+  hall.hp = hall.maxHp;
+  g.buildings.push(hall);
+  reseal(g);
+  ok(RC.Keep.isSealed(g), 'and a real building standing in the gap closes it — nothing can walk through a factory');
+  ok(RC.Keep.solidSet(g).size > RC.Keep.pieceCount(g),
+     'because the seal reads every standing building, not only keep pieces');
+}
+
+{
+  // The reward. Survive a night behind an unbroken ring and the wall is repaired for
+  // free and the crystal heals properly; do it behind a broken one and it does not.
+  const runNight = seal => {
+    clearStore();
+    const g = run();
+    const cells = ringWall(g, 4);
+    if (!seal) { cells.mid.b.dead = true; }
+    reseal(g);
+    // Scuff the wall and the crystal so there is something to repair.
+    for (const c of cells) if (!c.b.dead) c.b.hp = c.b.maxHp * 0.3;
+    g.crystal.hp = g.crystal.maxHp * 0.5;
+    RC.Kids.setReady(g, 1, true);
+    for (let i = 0; i < 140 && RC.Kids.hud(g, 1).phase === 'build'; i++) g.update(0.1);
+    const wasSealed = RC.Kids.hud(g, 1).day.wasSealed;
+    // Sweep the raid away rather than fighting it — this test is about the dawn,
+    // not about whether the walls can survive wave one.
+    for (let i = 0; i < 900; i++) {
+      for (const u of g.units) if (u.owner === 2) u.dead = true;
+      g.update(0.1);
+      if (RC.Kids.hud(g, 1).phase === 'celebrate') break;
+    }
+    return { g: g, cells: cells, wasSealed: wasSealed, hp: g.crystal.hp / g.crystal.maxHp,
+             wall: Math.min.apply(null, cells.filter(c => !c.b.dead).map(c => c.b.hp / c.b.maxHp)),
+             phase: RC.Kids.hud(g, 1).phase };
+  };
+
+  const held = runNight(true);
+  ok(held.wasSealed, 'the ring is judged at DUSK, and a sealed keep is recorded as such');
+  ok(held.phase === 'celebrate', 'the night is survived');
+  ok(held.wall >= 0.99, 'every wall that survived behind an unbroken ring is repaired to full');
+  ok(held.hp > 0.6, 'and the crystal heals properly (' + Math.round(held.hp * 100) + '%)');
+
+  const open = runNight(false);
+  ok(!open.wasSealed, 'a keep with a gap in it is recorded as open');
+  ok(open.wall < 0.5, 'and its walls stay scuffed — no free repair');
+  ok(open.hp < 0.6, 'with only the small crystal heal (' + Math.round(open.hp * 100) + '%)');
+
+  // The bar has to say which of the two you are in, while you can still do something
+  // about it. This is the whole feedback loop.
+  clearStore();
+  const g2 = run();
+  ok(RC.Kids.hud(g2, 1).day.sealed === false, 'the Build Day bar reports an open keep');
+  ringWall(g2, 3);
+  ok(RC.Kids.hud(g2, 1).day.sealed === true, 'and reports a sealed one the moment the ring closes');
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

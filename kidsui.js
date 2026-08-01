@@ -68,6 +68,13 @@ RC.KidsUI = (function () {
                       box-shadow:0 6px 0 #2c6b3a, 0 10px 26px rgba(0,0,0,.45); }
 #kid-dayclock { color:#ffb0b0; font-size:12px; font-weight:700; display:none; }
 #kid-dayclock.on { display:block; }
+/* The seal chip. Two states and no in-between, because RC.Keep.enclosure answers
+   yes or no — a wall with a gap in it is not a wall, and "68% enclosed" would be a
+   number a child could chase instead of a shape they can see. */
+#kid-seal { font-size:12.5px; font-weight:800; letter-spacing:.03em; padding:3px 9px;
+            border-radius:999px; white-space:nowrap; }
+#kid-seal.yes { color:#0f2a17; background:linear-gradient(180deg,#a8f0b4,#5fc178); }
+#kid-seal.no  { color:#ffd9a8; background:rgba(255,180,90,.14); border:1px solid rgba(255,180,90,.34); }
 
 /* Top strip — crystal health, wave name, timer. The only three numbers in the mode. */
 #kid-top { position:absolute; top:10px; left:50%; transform:translateX(-50%);
@@ -370,6 +377,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       <div id="kid-day">
         <div id="kid-dayname" title="Tap your Signpost to rename the keep">My Keep</div>
         <button id="kid-daybtn" type="button">🌙 Start the night</button>
+        <div id="kid-seal"></div>
         <div id="kid-dayclock"></div>
       </div>
       <div id="kid-placing">Tap where you want it!</div>
@@ -402,6 +410,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       dayName: root.querySelector('#kid-dayname'),
       dayBtn: root.querySelector('#kid-daybtn'),
       dayClock: root.querySelector('#kid-dayclock'),
+      seal: root.querySelector('#kid-seal'),
       chp: root.querySelector('#kid-chp'),
       cfill: root.querySelector('#kid-cfill'),
       wave: root.querySelector('#kid-wave'),
@@ -608,6 +617,18 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       els.dayBtn.classList.remove('waiting');
     }
     els.dayBtn.disabled = !d.canStart;
+    // Does the wall go all the way round? The single most useful thing this bar can
+    // say while someone is building, and the thing the game had no way of telling
+    // them before. Phrased as an invitation when it is open rather than a fault —
+    // "not closed yet" is a job to do; "your castle is broken" is a telling-off.
+    if (els.seal) {
+      els.seal.className = d.sealed ? 'yes' : 'no';
+      els.seal.textContent = d.sealed ? '🛡 Sealed — the wall goes all the way round'
+                                      : '🚪 Not closed yet — leave no gaps!';
+      els.seal.title = d.sealed
+        ? 'Survive the night with the ring unbroken and every wall is repaired for free, and the crystal heals properly.'
+        : 'Ring the crystal completely — a gate counts as closed, a gap does not.';
+    }
     // Two things can want this line. The backstop clock is shown only once it is close
     // enough to matter — showing it from the first second would put back the timer this
     // phase exists to remove — and before that, the fact that the shards have stopped

@@ -34,6 +34,9 @@ RC.Profile = (function () {
     return {
       mastery: 1, xp: 0, matches: 0, wins: 0,
       cosmetics: { hat: 'none', suit: 'none', shoes: 'none', palette: 'none' },
+      // What this hero brings. Absent means "the default", which is exactly the hero
+      // everyone had before loadouts existed — see RC.defaultLoadout.
+      loadout: null,
     };
   }
   function heroes() {
@@ -47,6 +50,7 @@ RC.Profile = (function () {
         matches: h.matches | 0,
         wins: h.wins | 0,
         cosmetics: Object.assign(b.cosmetics, h.cosmetics || {}),
+        loadout: h.loadout || null,
       };
     }
     return out;
@@ -108,7 +112,21 @@ RC.Profile = (function () {
     if (!id || id === 'none') return true;
     const item = RC.cosmetic(slot, id);
     if (!item || item.stars === 0) return true;
-    return wallet().owned.indexOf(slot + '.' + id) >= 0;
+    if (wallet().owned.indexOf(slot + '.' + id) >= 0) return true;
+    // Mastery gives some things outright, so a player who never spends a Star still
+    // watches their hero change. Checked against the HIGHEST Mastery on the account
+    // rather than per hero: the inventory has always been shared, and an item that
+    // appeared and disappeared as you switched heroes would read as a bug.
+    return giftedIds().indexOf(slot + '.' + id) >= 0;
+  }
+  function topMastery() {
+    const hs = heroes();
+    let top = 1;
+    for (const id of RC.HEROES) top = Math.max(top, hs[id].mastery | 0);
+    return top;
+  }
+  function giftedIds() {
+    return RC.masteryGifts(topMastery()).map(g => g.slot + '.' + g.id);
   }
 
   // Buy an item into the shared inventory. Returns { ok, reason, stars }.
@@ -150,6 +168,40 @@ RC.Profile = (function () {
   // Filtered on READ rather than repaired on load, so retiring an item temporarily is
   // not the same as confiscating it: put it back in the shop and the hero is wearing it
   // again, exactly as the player left it.
+  // ── The loadout ───────────────────────────────────────────────────────────
+  //
+  // Always read through RC.validLoadout, never raw. A stored loadout can outlive the
+  // Mastery that earned it (nothing ever takes Mastery away, but a build can retire an
+  // option), and it can outlive the option itself — so what comes back out is always
+  // something this hero may legally bring right now, substituted rather than refused.
+  function loadoutOf(heroId) {
+    const id = RC.resolveHero(heroId);
+    const rec = heroes()[id];
+    return RC.validLoadout(id, rec.mastery, rec.loadout);
+  }
+  function setLoadout(heroId, lo) {
+    const id = RC.resolveHero(heroId);
+    const hs = heroes();
+    hs[id].loadout = RC.validLoadout(id, hs[id].mastery, lo);
+    saveHeroes(hs);
+    return hs[id].loadout;
+  }
+  // One slot at a time, which is how the Hero Bay actually changes it.
+  function setSlot(heroId, slot, id) {
+    const cur = loadoutOf(heroId);
+    if (slot === 'q' || slot === 'e') cur[slot] = id;
+    else {
+      // An upgrade socket: toggle it in or out, keeping at most upSlots.
+      const i = cur.ups.indexOf(id);
+      if (i >= 0) cur.ups.splice(i, 1);
+      else {
+        cur.ups.push(id);
+        while (cur.ups.length > RC.LOADOUT.upSlots) cur.ups.shift();
+      }
+    }
+    return setLoadout(heroId, cur);
+  }
+
   function cosmeticsOf(heroId) {
     const cos = heroes()[RC.resolveHero(heroId)].cosmetics;
     const out = {};
@@ -353,6 +405,7 @@ RC.Profile = (function () {
     get, save, reset, recordMatchEnd, dailyBest,
     // Heroes
     heroes, saveHeroes, heroPick, setHeroPick, masteryToNext, addMasteryXp,
+    loadoutOf, setLoadout, setSlot, topMastery, giftedIds,
     // Stars & cosmetics
     wallet, saveWallet, owns, buy, equip, cosmeticsOf, starPayout,
   };

@@ -1002,6 +1002,266 @@ RC.MASTERY = {
   matchXp: 55, winBonus: 45, wavePer: 7,
 };
 
+// ── What Mastery actually unlocks ────────────────────────────────────────────
+//
+// Until now Mastery was a number that grew and gated nothing, while the start screen
+// said "next unlock at 14" — a promise the game was making and not keeping, which is
+// worse than not making it. This is the drawer behind that number, and it obeys the
+// one rule the whole design rests on (HERO_DESIGN §2):
+//
+//   BREADTH PERSISTS. BUDGET DOES NOT.
+//
+// Every entry below is a SIDEGRADE on the same energy cost and the same cooldown, or a
+// different third of an ultimate. A Mastery-30 player and a Mastery-1 player still
+// bring one Q, one E and three ultimate upgrades into every match; the veteran simply
+// chooses them from a wider drawer. That is what lets the two queue against each other
+// with no bracket, which matters enormously while the population is small.
+//
+// Two deliberate departures from HERO_DESIGN §10, both for the same reason:
+//
+//  · The doc says widen `sig.ups` to six or seven and BRING TWO. Bringing two where a
+//    hero previously had three is a quiet ~33% cut to every ultimate in every mode —
+//    a power change, which §2 forbids Mastery from making. So it is five per hero and
+//    you bring three: the count in a match is exactly what it was, the choice is real
+//    (ten builds per hero), and no tuned number moves for a player who never opens the
+//    Bay.
+//  · Skill variants change only fields the base skill already declares, so no ability
+//    in entities.js needed a line of new code for any of them. A variant that needed
+//    new behaviour would be a new ability wearing a sidegrade's clothes.
+//
+// `at` is the Mastery level the option arrives at. Anything with at:0 is a default and
+// is always available — a player who never opens the Hero Bay gets exactly the hero
+// they have today.
+RC.LOADOUT = {
+  // How many ultimate upgrades a hero brings. Equal to what every hero had before this
+  // existed, which is the whole point.
+  upSlots: 3,
+
+  // ── Q and E variants ──────────────────────────────────────────────────────
+  // Read each pair as one trade: reach against area, burst against duration, a small
+  // strong circle against a wide gentle one. Same cost, same cooldown, same budget.
+  vars: {
+    rook: {
+      q: [
+        { id: 'vault', at: 3, ic: '🦘', name: 'Long Vault', kid: 'Jumps MUCH further, hits a bit softer.',
+          desc: 'Twice the leap, a tighter landing and a shorter hold. For getting to the fight rather than for winning it.',
+          dist: 330, radius: 112, dmg: 40, dmgPerLevel: 4, freeze: 0.8 },
+        { id: 'quake', at: 11, ic: '🌋', name: 'Deep Quake', kid: 'Barely moves — but SMASHES everything around you.',
+          desc: 'Hardly a leap at all. Everything within a much wider ring is hit harder and held longer.',
+          dist: 60, radius: 215, dmg: 72, dmgPerLevel: 6, freeze: 1.45 },
+      ],
+      e: [
+        { id: 'standard', at: 6, ic: '🛡️', name: 'Iron Standard', kid: 'A smaller flag, but WAY more armour.',
+          desc: 'A tighter field that makes the few inside it very hard to kill.',
+          radius: 138, armor: 5.5, armorPerLevel: 0.35, slowDur: 0.35 },
+        { id: 'tarpit', at: 16, ic: '🕳️', name: 'Tar Standard', kid: 'A huge flag that makes bad guys REALLY slow.',
+          desc: 'Covers far more ground and wades everything in it, at the cost of most of the armour.',
+          radius: 265, dur: 7, armor: 1.5, armorPerLevel: 0.12, slowDur: 1.5 },
+      ],
+    },
+    thorn: {
+      q: [
+        // The doc's own example: trade the puddle for an instant hit.
+        { id: 'fang', at: 3, ic: '🦷', name: 'Fang Strike', kid: 'One big bite instead of a slow poison.',
+          desc: 'Close, fast and heavy. Almost all of the damage lands now instead of over six seconds.',
+          radius: 112, dmg: 82, dmgPerLevel: 7, venom: { dmg: 4, dur: 3, max: 2 } },
+        { id: 'fog', at: 11, ic: '☁️', name: 'Venom Fog', kid: 'A HUGE cloud that poisons for ages.',
+          desc: 'Barely stings on contact and coats a very wide area in venom that outlasts the fight.',
+          radius: 250, dmg: 15, dmgPerLevel: 2, venom: { dmg: 12, dur: 9, max: 6 } },
+      ],
+      e: [
+        { id: 'gorge', at: 6, ic: '🍖', name: 'Gorge', kid: 'Eats less but heals you LOADS more.',
+          desc: 'A smaller bite that feeds far better. The sustain option.',
+          radius: 122, dmg: 28, dmgPerLevel: 3, heal: 92, healCap: 3, slowDur: 0.8 },
+        { id: 'rend', at: 16, ic: '🩸', name: 'Rend', kid: 'Hurts a LOT more, heals a lot less.',
+          desc: 'Reaches further and cuts much deeper, but barely feeds.',
+          radius: 205, dmg: 70, dmgPerLevel: 6, heal: 20, healCap: 5, slowDur: 1.8 },
+      ],
+    },
+    prism: {
+      q: [
+        { id: 'step', at: 3, ic: '👣', name: 'Short Step', kid: 'A little hop, but a MUCH bigger bubble.',
+          desc: 'Half the distance for double the shield. For fighting where you stand rather than leaving.',
+          dist: 130, shield: 250, shieldPerLevel: 30 },
+        { id: 'fold', at: 11, ic: '🌌', name: 'Long Fold', kid: 'Zaps WAY further away.',
+          desc: 'Half the map away, with almost none of the shield. The escape button.',
+          dist: 430, shield: 50, shieldPerLevel: 7 },
+      ],
+      e: [
+        { id: 'cage', at: 6, ic: '🔒', name: 'Deep Cage', kid: 'Freezes fewer bad guys, but for AGES.',
+          desc: 'A tight lattice that holds whatever is inside it far longer.',
+          radius: 122, dmg: 22, dmgPerLevel: 2, freeze: 3.1 },
+        // No `slowDur` here, and that omission is load-bearing: Static Prison does not
+        // slow, so a variant of it must not either. A variant may move a number the
+        // base skill already declares; the moment it introduces a new one it is a
+        // different ability wearing the same key, and nobody on the other side of the
+        // fight can read it. loadout_test §5 pins this.
+        { id: 'net', at: 16, ic: '🕸️', name: 'Static Net', kid: 'Catches a HUGE crowd, but the freeze is short.',
+          desc: 'Thrown over a much wider knot for a lot more damage. Half the hold, over three times the ground.',
+          radius: 270, dmg: 42, dmgPerLevel: 4, freeze: 0.9 },
+      ],
+    },
+    ember: {
+      q: [
+        { id: 'wall', at: 3, ic: '🧱', name: 'Cinder Wall', kid: 'A short FAT wall of fire.',
+          desc: 'Half the length and twice the width, burning hotter and longer. A blockade rather than a line.',
+          len: 155, width: 132, dmg: 24, dmgPerLevel: 2, hazDps: 12, hazDur: 6 },
+        { id: 'lance', at: 11, ic: '🗡️', name: 'Cinder Lance', kid: 'A really LONG thin line of fire.',
+          desc: 'Reaches most of the way across a lane, thin enough to walk around, hot enough on contact to matter.',
+          len: 470, width: 34, dmg: 48, dmgPerLevel: 5, hazDps: 5, hazDur: 3 },
+      ],
+      e: [
+        { id: 'spotlight', at: 6, ic: '🔦', name: 'Spotlight', kid: 'Paints ONE bad guy — but WAY harder.',
+          desc: 'A tight beam. Almost double the damage bonus, on almost nothing.',
+          radius: 108, amp: 0.46, ampPerLevel: 0.015 },
+        { id: 'floodlight', at: 16, ic: '💡', name: 'Floodlight', kid: 'Paints the WHOLE crowd, just a little.',
+          desc: 'Covers a huge area for longer, at a much gentler bonus. For big waves rather than big enemies.',
+          radius: 305, dur: 8, amp: 0.14, ampPerLevel: 0.006 },
+      ],
+    },
+    vale: {
+      q: [
+        { id: 'surge', at: 3, ic: '💗', name: 'Mend Surge', kid: 'Heals way more, but only right next to you.',
+          desc: 'A small circle and more than double the heal. For saving one thing that is about to die.',
+          radius: 120, heal: 135, healPerLevel: 17 },
+        { id: 'wash', at: 11, ic: '🌊', name: 'Mend Wash', kid: 'Heals EVERYONE a little bit.',
+          desc: 'Reaches the whole army and the whole wall, gently.',
+          radius: 310, heal: 32, healPerLevel: 4 },
+      ],
+      e: [
+        { id: 'sprint', at: 6, ic: '⚡', name: 'Sprint', kid: 'A short, MASSIVE speed boost.',
+          desc: 'Three seconds of very nearly double speed, over a smaller group. Still breaks every hold.',
+          radius: 140, dur: 3, speedMul: 1.75 },
+        { id: 'tailwind', at: 16, ic: '🍃', name: 'Tailwind', kid: 'Everyone runs a bit faster for a long time.',
+          desc: 'Half again the reach and nearly double the duration, at a much gentler push.',
+          radius: 305, dur: 7.5, speedMul: 1.16 },
+      ],
+    },
+  },
+
+  // ── The two extra ultimate upgrades per hero ──────────────────────────────
+  // Appended to the three each hero already had, so the pool is five and you bring
+  // three. Every one of them moves a field the hero's own ultimate already declares,
+  // which is why entities.js needed six merge lines and no new ability code at all.
+  ups: {
+    rook: [
+      { id: 'deep',  at: 9,  ic: '🪨', name: 'Deep Dome', kid: 'The bubble is MUCH stronger.',
+        desc: 'Seventy percent more shield on the crystal.', shieldMul: 1.7 },
+      { id: 'great', at: 20, ic: '⭕', name: 'Great Dome', kid: 'The bubble is MUCH bigger.',
+        desc: 'Nearly half again the radius, so it covers the walls around the crystal too.', radiusMul: 1.45 },
+    ],
+    thorn: [
+      { id: 'endure', at: 9,  ic: '⏳', name: 'Long Brood', kid: 'The babies stick around way longer.',
+        desc: 'Hatchlings last close to twice as long — long enough to see two waves.', lifeMul: 1.9 },
+      { id: 'spread', at: 20, ic: '🌐', name: 'Wide Hatch', kid: 'The babies come out ALL OVER.',
+        desc: 'They hatch across a far wider stretch of ground instead of in one knot.', radiusMul: 1.8 },
+    ],
+    prism: [
+      { id: 'hurl',  at: 9,  ic: '🎯', name: 'Hurl', kid: 'Throws bad guys MUCH further away.',
+        desc: 'More than double the knockback — it clears the crystal instead of nudging.', pushMul: 2.2 },
+      { id: 'focus', at: 20, ic: '💥', name: 'Focus', kid: 'The blast hits a lot harder.',
+        desc: 'Sixty percent more damage. Stacks with Wider Nova for a build that simply deletes a wave.', dmgMul: 1.6 },
+    ],
+    ember: [
+      { id: 'whitehot', at: 9,  ic: '🔆', name: 'White Hot', kid: 'The fire burns a LOT hotter.',
+        desc: 'Sixty percent more damage every second, over the same ground.', dpsMul: 1.6 },
+      { id: 'ashfall',  at: 20, ic: '🌫️', name: 'Ashfall', kid: 'The fire spreads out much wider.',
+        desc: 'A third more ground again. Stacks with Wildfire into a fire that covers a whole lane.', radiusMul: 1.33 },
+    ],
+    vale: [
+      { id: 'haven',     at: 9,  ic: '🏠', name: 'Haven', kid: 'Everyone inside takes way less damage.',
+        desc: 'Twenty points more damage reduction inside the circle.', drAdd: 0.2 },
+      { id: 'wellspring', at: 20, ic: '⛲', name: 'Wellspring', kid: 'It heals TWICE as fast.',
+        desc: 'Double the healing every second for everything standing in it.', hpsMul: 2 },
+    ],
+  },
+
+  // ── Cosmetics Mastery grants outright ─────────────────────────────────────
+  // The gaps between the mechanical unlocks, so there is always a next thing at most a
+  // level or two away. Granted rather than sold, so a player who never spends a Star
+  // still watches their hero change — HERO_DESIGN §2, "cosmetic unlocks".
+  gifts: [
+    { at: 2,  slot: 'palette', id: 'ash' },
+    { at: 5,  slot: 'hat',     id: 'cap' },
+    { at: 8,  slot: 'shoes',   id: 'tread' },
+    { at: 13, slot: 'suit',    id: 'sash' },
+    { at: 18, slot: 'hat',     id: 'horns' },
+    { at: 24, slot: 'shoes',   id: 'greave' },
+    { at: 30, slot: 'hat',     id: 'crown' },
+  ],
+};
+
+// Everything a hero may bring, at a given Mastery. `free` is public versus, where the
+// whole pool is open to everybody — the League answer, boring on purpose, and the thing
+// that removes the matchmaking constraint entirely (HERO_DESIGN §5).
+RC.loadoutPool = function (heroId, mastery, free) {
+  const h = RC.resolveHero(heroId);
+  const def = RC.UNITS[h] || {};
+  const L = RC.LOADOUT;
+  const open = o => free || (o.at || 0) <= (mastery | 0);
+  const base = (sk, label) => Object.assign({ id: 'base', at: 0, ic: sk.ic, name: sk.name,
+                                              kid: sk.kid, desc: sk.desc, base: true }, {});
+  const vars = (L.vars[h] || {});
+  const q = [base(def.q || {})].concat((vars.q || []).map(v => Object.assign({}, v)));
+  const e = [base(def.e || {})].concat((vars.e || []).map(v => Object.assign({}, v)));
+  const ups = ((def.sig && def.sig.ups) || []).map(u => Object.assign({ at: 0 }, u))
+    .concat((L.ups[h] || []).map(u => Object.assign({}, u)));
+  const mark = list => list.map(o => Object.assign({}, o, { open: open(o) }));
+  return { q: mark(q), e: mark(e), ups: mark(ups), upSlots: L.upSlots };
+};
+
+// The default loadout: base Q, base E, the three upgrades every hero has always had.
+// A player who never opens the Hero Bay must get exactly the hero they had before any
+// of this existed, and this is the function that guarantees it.
+RC.defaultLoadout = function (heroId) {
+  const def = RC.UNITS[RC.resolveHero(heroId)] || {};
+  return { q: 'base', e: 'base', ups: ((def.sig && def.sig.ups) || []).slice(0, RC.LOADOUT.upSlots).map(u => u.id) };
+};
+
+// Fold a claimed loadout down to one the claimed Mastery actually permits, substituting
+// rather than rejecting. Runs on the SERVER as well as the client, because a client can
+// send anything — HERO_DESIGN §9, "client-side locking is explanation, never
+// enforcement". Substitution rather than refusal because a lobby that kicks you for a
+// stale save is worse than one that quietly hands you the default.
+RC.validLoadout = function (heroId, mastery, lo, free) {
+  const pool = RC.loadoutPool(heroId, mastery, free);
+  const pick = (list, want) => {
+    const hit = list.find(o => o.id === want && o.open);
+    return hit ? hit.id : 'base';
+  };
+  const out = { q: pick(pool.q, lo && lo.q), e: pick(pool.e, lo && lo.e), ups: [] };
+  const wanted = (lo && Array.isArray(lo.ups)) ? lo.ups : [];
+  for (const id of wanted) {
+    if (out.ups.length >= pool.upSlots) break;
+    if (out.ups.indexOf(id) >= 0) continue;
+    if (pool.ups.some(u => u.id === id && u.open)) out.ups.push(id);
+  }
+  // Top up from whatever is open, in pool order, so a hero is never short an upgrade
+  // it is entitled to just because the save was written by an older build.
+  for (const u of pool.ups) {
+    if (out.ups.length >= pool.upSlots) break;
+    if (u.open && out.ups.indexOf(u.id) < 0) out.ups.push(u.id);
+  }
+  return out;
+};
+
+// Which cosmetics this Mastery has been given outright.
+RC.masteryGifts = function (mastery) {
+  return RC.LOADOUT.gifts.filter(g => g.at <= (mastery | 0));
+};
+// The next thing waiting, for the "next unlock at 14" line the start screen already
+// shows. Returns null at the ceiling rather than a fake promise.
+RC.nextUnlock = function (heroId, mastery) {
+  const pool = RC.loadoutPool(heroId, 99, true);
+  const all = []
+    .concat(pool.q.map(o => Object.assign({ what: 'Q' }, o)))
+    .concat(pool.e.map(o => Object.assign({ what: 'E' }, o)))
+    .concat(pool.ups.map(o => Object.assign({ what: 'R' }, o)))
+    .concat(RC.LOADOUT.gifts.map(g => ({ what: 'look', at: g.at, name: RC.cosmetic ? (RC.cosmetic(g.slot, g.id) || {}).name : g.id })));
+  const next = all.filter(o => (o.at || 0) > (mastery | 0)).sort((a, b) => a.at - b.at)[0];
+  return next || null;
+};
+
 // ── Stars — the cosmetic currency ────────────────────────────────────────────
 // Paid at the end of every match, spent only on how a hero LOOKS. Stars must never buy
 // power; the moment they do, every balance guarantee above is void.

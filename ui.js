@@ -613,7 +613,7 @@ RC.UI = (function () {
     }
 
     // Held upgrades, as one quiet row. Which three you have is the run's story.
-    const held = (sig.ups || []).filter(u => h.hasUp(u.id));
+    const held = (h.allUps ? h.allUps() : (sig.ups || [])).filter(u => h.hasUp(u.id));
     if (held.length) {
       const r = document.createElement('div');
       r.className = 'cmd off';

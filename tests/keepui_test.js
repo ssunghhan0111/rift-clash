@@ -268,6 +268,46 @@ const ok = (c, m) => { if (c) { pass++; console.log('  \u2713 ' + m); } else { f
   ok(mask.runs >= 6, mask.runs + ' wall pieces know they are mid-run and draw joined');
   ok(mask.walls > 14, 'the keep is ' + mask.walls + ' wall pieces — far past the old 14-slot ceiling');
 
+  // The seal. This rectangle is closed, so the game should say so out loud and the
+  // yard inside it should be a yard. Worth asserting in a real browser rather than
+  // only headlessly, because the chip and the floor are the entire feedback loop:
+  // enclosure() being right helps nobody if the player is never told.
+  const seal = await page.evaluate(() => {
+    const e = RC.Keep.enclosure(RC.game);
+    const chip = document.getElementById('kid-seal');
+    return { sealed: e.sealed, area: e.area, cls: chip && chip.className, txt: (chip && chip.textContent) || '' };
+  });
+  ok(seal.sealed, 'a closed rectangle of wall reads as sealed');
+  ok(seal.area > 20, 'and has a yard inside it (' + seal.area + ' cells)');
+  ok(seal.cls === 'yes' && /Sealed/.test(seal.txt), 'the Build Day bar says so: "' + seal.txt.trim() + '"');
+
+  // Take one piece out of the middle of the north wall and the chip has to flip —
+  // while the player can still do something about it, which is the point of showing
+  // it during Build Day rather than at dawn.
+  const broken = await page.evaluate(() => {
+    const g = RC.game, c = g.crystal, G = RC.Keep.GRID;
+    const s = RC.Keep.snap(c.x, c.y - G * 3);
+    const b = g.buildings.find(q => Math.abs(q.x - s.x) < 2 && Math.abs(q.y - s.y) < 2 && !q.dead);
+    if (b) b.dead = true;
+    g._keepIx = null; g._keepSeal = null;
+    RC.Kids.hud(g, g.playerOwner);
+    return RC.Keep.enclosure(g).sealed;
+  });
+  await sleep(300);
+  ok(!broken, 'pulling one wall out of the middle opens it again');
+  ok(await page.evaluate(() => document.getElementById('kid-seal').className) === 'no',
+     'and the chip flips to "not closed yet" without a reload');
+  await page.evaluate(() => {
+    const g = RC.game, c = g.crystal, G = RC.Keep.GRID;
+    const s = RC.Keep.snap(c.x, c.y - G * 3);
+    const b = new RC.Building('rampart', s.x, s.y, RC.Keep.bank(g), true);
+    b.hp = b.maxHp; g.buildings.push(b);
+    g._keepIx = null; g._keepSeal = null;
+  });
+  await sleep(300);
+  ok(await page.evaluate(() => RC.Keep.enclosure(RC.game).sealed), 'putting it back seals it once more');
+  await page.screenshot({ path: '/tmp/keep-sealed.png' });
+
   console.log('\n=== night falls ===');
   // The button stays disabled for the first few seconds of sim time so a stray tap
   // cannot skip the day — wait for it rather than assuming wall time matches.

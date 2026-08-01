@@ -1,0 +1,154 @@
+The Hero Bay, and a keep whose SHAPE means something
+
+Two features, and one bug found by each of them.
+
+═══════════════════════════════════════════════════════════════════════════
+1 · MASTERY NOW UNLOCKS SOMETHING
+═══════════════════════════════════════════════════════════════════════════
+
+The start screen has been saying "Mastery 12 · next unlock at 14" for months.
+There was nothing at 14. `RC.MASTERY` gated nothing at all — config.js said so
+out loud in a comment — so the game was making a promise every single session
+and quietly not keeping it, which is worse than never having made it.
+
+It keeps it now. Each hero has alternate Q and E skills and a wider set of
+ultimate upgrades, unlocked by Mastery and chosen in a Loadout drawer beside
+the Wardrobe. The rule the whole thing obeys is HERO_DESIGN §2:
+
+    BREADTH PERSISTS. BUDGET DOESN'T.
+
+A Mastery 30 player and a Mastery 1 player both bring one Q, one E and three
+ultimate upgrades into every match. The veteran picks from a wider drawer. That
+is the entire difference, and it is what lets the two queue against each other
+with no bracket — which matters enormously while the population is small. In
+public online matches the whole pool is open to everybody anyway, so a new
+account is never out-levelled by a stranger; Mastery is a solo and co-op
+progression.
+
+**Two deliberate departures from HERO_DESIGN §10.** The doc says widen `sig.ups`
+to six or seven and BRING TWO. Bringing two where a hero previously had three is
+a quiet ~33% cut to every ultimate in every mode — a power change, which §2
+forbids Mastery from making — so it is five per hero and bring three. And a
+skill variant may only move a number its base skill ALREADY declares. Static Net
+originally slowed; Static Prison does not slow, so a variant of it must not
+either, or it is a different ability wearing the same key and nobody on the other
+side of the fight can read it. That one was caught by its own test.
+
+**The default is byte-for-byte today's hero.** A player who never opens the Bay
+gets base Q, base E and the three upgrades that hero has always had, and a unit
+with the default loadout is indistinguishable from one that has never heard of
+loadouts — asserted field by field, at three match levels, for all five heroes.
+That is what makes this safe for every save, every bot, and every mode.
+
+Locked options are drawn greyed with the level they arrive at rather than hidden,
+because a reward you cannot see is not a reward. And the start screen now names
+the next one — "Next Q option at Mastery 3 — Long Vault" — so the bar above it is
+finally pointing at something real.
+
+**The bug this found.** `effSig` looped over `def.sig.ups` only. `hasUp()` would
+happily say yes to a brought Mastery upgrade that the loop never visited, so Deep
+Dome was held, displayed as held, and did nothing whatsoever. Three separate
+places had the same shape of mistake — the merge, the Crystal Defense HUD row and
+the tooltip — so there is now one `Unit.allUps()` and all three read it.
+
+═══════════════════════════════════════════════════════════════════════════
+3 · THE SHAPE OF THE KEEP
+═══════════════════════════════════════════════════════════════════════════
+
+Forty walls in a heap and forty walls in a ring played identically. That is a
+strange thing for a building game to say, and it meant the part a child is
+actually thinking about while they build — the shape — was the one part the game
+had no opinion about.
+
+A flood fill from the crystal answers it exactly: if the fill can reach open
+ground beyond the build ring there is a way in, and if it cannot, the keep is
+SEALED. No percentage and no partial state — a wall with a gap in it is not a
+wall. You lay the last piece and the whole inside of your castle turns into a
+courtyard in one moment. That moment is the feature.
+
+  · The Build Day bar says which of the two you are in, WHILE you can still do
+    something about it: "🛡 Sealed — the wall goes all the way round", or
+    "🚪 Not closed yet — leave no gaps!". Phrased as a job rather than a fault.
+  · Survive a night behind an unbroken ring and every wall that survived is
+    repaired to full and the crystal heals properly (22% rather than 3%). Walls
+    that were knocked DOWN stay down — the reward is for a wall that held, and
+    free resurrection would make the wall itself pointless.
+  · Judged at both ends of the night. Sealing it after the raid has already
+    walked in through the gap is not the same achievement.
+
+Three rulings, each of which is the difference between this being a nice idea and
+being a thing a six-year-old can actually use:
+
+  **A gate counts as sealed.** A door is not a hole; that is the whole idea of a
+  door. A game that told a child their gate ruined their castle would be teaching
+  them not to build one. Propping it open by hand at night is a choice, and then
+  it does count.
+
+  **A missing corner is still sealed.** Two walls meeting at a right angle leave
+  no gap between them — the fill is 4-connected for exactly this reason, and it
+  agrees with what a unit can physically do.
+
+  **Anything solid is part of your wall.** Not just pieces bought from the build
+  menu: the Fighter Hall, the towers, the map's own boulders. This one is not a
+  nicety, it is the bug the browser test found. The rule now matches `canPlace`
+  precisely, so a cell you CANNOT put a wall in can never be a cell the game then
+  calls a gap. Without that, the cells beside your own Fighter Hall read as a hole
+  with no way to fix it — a child hunting a gap that does not exist, which is the
+  cruellest possible version of this feature.
+
+**Measured**, six runs per profile, reporting the night the crystal first cracks:
+
+    profile           without the seal    with it
+    normal (60s day)  8 14 13 12 12 11    13 13 11 9 9 >8     mean 11.7 → 12.8
+    turtle (150s)     >9 11 10 11 13 14   >10 10 11 14 12 13  mean 13.5 → 13.7
+
+About one night easier for a player who actually rings their crystal, and nothing
+for one who does not — which is the shape the reward should have. It is well
+inside the run-to-run spread, so it does not undo the wave-curve work.
+
+═══════════════════════════════════════════════════════════════════════════
+
+**And a layout bug, found by a test that had been failing silently.**
+`#wardrobe-panel` was a flat 560px inside a 460px column, so it overflowed under
+the right-hand column and its own ✕ became genuinely unclickable. heroui_test had
+been dying on that click for as long as the two-column start screen has existed —
+every assertion after the wardrobe simply never ran, and the run looked like a
+harness hiccup rather than the layout bug it was. Both panels are now
+column-relative, and the suite goes from 10 assertions to 24.
+
+Files
+  config.js     RC.LOADOUT (variants, Mastery upgrades, cosmetic gifts) and
+                loadoutPool / defaultLoadout / validLoadout / nextUnlock
+  entities.js   Unit.setLoadout, allUps, the variant merge in effSkill, and six
+                new upgrade fields in effSig — every one of which multiplies a
+                number the hero's own ultimate already declares
+  game.js       setHeroLoadout / loadoutFor / spawnHero, used by all three spawns
+  profile.js    per-hero loadout storage, read back through validLoadout
+  main.js       the Loadout drawer, the next-unlock line, heroMsg
+  server.js     loadoutPickOf — every seat's claim folded through validLoadout,
+                free pool in public versus
+  index.html    the panel, and the width fix
+  kids.js       the seal: judged at dusk, paid at dawn; SEAL_HEAL / SEAL_REPAIR
+  keep.js       enclosure / isSealed / solidSet — the flood fill
+  kidsui.js     the seal chip on the Build Day bar
+  renderer.js   drawKeepYard — the courtyard floor and its boundary
+  ui.js         the held-upgrade row reads allUps
+  README.md, package.json
+
+Tests
+  loadout_test  NEW, 43 assertions, organised around the rules rather than the
+                code: the count never moves, the numbers never move (every stat,
+                every hero, three levels), the default is today's hero, locked
+                picks substitute rather than refuse, a variant may only move
+                fields its base declares, and what you brought is what you hold.
+                Plus a grep that no CODE in entities.js can reach the profile.
+  keep_test     107 (was 81). §7 is the seal — a heap is not a ring, one piece out
+                of the middle opens it, a corner does not, a gate does not, an
+                unfinished piece seals nothing, a real building in the gap does,
+                and the dawn reward pays only when the ring actually held.
+  heroui_test   24 (was 10, and truncating). The panel renders, a locked option is
+                inert rather than merely discouraged, an earned one sticks, and
+                the hero that spawns is carrying it.
+  keepui_test   46 (was 40). The chip flips live as a wall comes out and goes back.
+  All existing suites unchanged: kidstest 190, kidsuitest 146, kidscoop 26,
+  roster 118, herokit 130, passive 98, wavecheck 791, simtest 70.
