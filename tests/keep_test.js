@@ -146,7 +146,8 @@ head('=== 3 · you draw, the builders build ===');
   first.buildProgress = 1;
   RC.Keep.tickBuilders(g, [w]);
   ok(w.site && w.site !== first, 'and moved to the next one the moment it was done');
-  ok(RC.Kids.CFG.BUILDERS >= 2, 'there is a crew, not a lone builder');
+  ok(RC.Kids.CFG.BUILDERS === 1, 'one builder per player — it is a character, not a resource');
+  ok(RC.Kids.CFG.WORKER_RESPAWN === 20, 'and it walks back out 20s after being killed');
 
   // Decorations skip the queue entirely — dressing the keep should never wait
   // behind the wall that actually has to be up before dark.
@@ -155,6 +156,85 @@ head('=== 3 · you draw, the builders build ===');
   const ban = g.buildings.find(b => b.type === 'banner' && !b.dead);
   ok(ban && ban.done, 'a banner goes up instantly');
   ok(RC.Keep.joinMask(g, ban) === 0, 'and never joins itself into the wall line');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+head('=== 3b · taking it down again ===');
+{
+  clearStore();
+  const g = run();
+  const G = RC.Keep.GRID;
+  const cells = drag(g, 'rampart', g.crystal.x - 300, g.crystal.y - 200,
+                     g.crystal.x - 300 + G * 4, g.crystal.y - 200);
+  const purse0 = RC.Keep.shards(g);
+
+  // CANCELLING is instant and pays back in full. Nothing has been built, so there is
+  // nothing to take down — and undo has to be free or it does not get used.
+  const site = RC.Keep.at(g, RC.Keep.cellX(cells[4].x), RC.Keep.cellY(cells[4].y));
+  ok(!!site && !site.done, 'the last piece of the row is still a site');
+  RC.Kids.remove(g, cells[4].x, cells[4].y, 1);
+  ok(site.dead, 'the remove tool cancels an unfinished piece on the spot');
+  ok(RC.Keep.shards(g) === purse0 + 25, 'and refunds the full 25 it cost');
+  // ...at the KID price. game.cancelBuild pays back def.cost, which for a Rampart is
+  // the Versus 40 against the 25 actually charged — a coin press, and one that was
+  // reachable through the builder's give-up path before the remove tool existed.
+  ok(RC.BUILDINGS.rampart.cost !== 25, 'the Versus price really is different (' + RC.BUILDINGS.rampart.cost + ')');
+  ok(RC.Keep.priceOf(g, 'rampart') === 25, 'and priceOf knows which one to pay back');
+
+  // A whole dragged row cancels in one gesture, the same way it was laid.
+  const left = cells.slice(0, 4).map(c => ({ x: c.x, y: c.y }));
+  RC.Kids.remove(g, left[0].x, left[0].y, 1, left);
+  ok(g.buildings.filter(b => b.type === 'rampart' && !b.dead).length === 0,
+     'and a drag cancels the whole row it laid');
+
+  // DEMOLISHING something already standing is a JOB, not an undo.
+  const p = RC.Keep.snap(g.crystal.x - 300, g.crystal.y + 200);
+  RC.Kids.build(g, 'rampart', p.x, p.y, 1, [p]);
+  const wall = RC.Keep.at(g, RC.Keep.cellX(p.x), RC.Keep.cellY(p.y));
+  wall.buildProgress = 1; wall.hp = wall.maxHp;
+  const before = RC.Keep.shards(g);
+  RC.Kids.remove(g, p.x, p.y, 1);
+  ok(!wall.dead, 'marking a FINISHED piece does not make it vanish');
+  ok(wall.demo === true, 'it is condemned, and waiting for a builder');
+  ok(RC.Keep.shards(g) === before, 'nothing is refunded until it is actually down');
+  ok(RC.Keep.demoCount(g) === 1, 'the HUD can count what the wrecking crew owes');
+
+  // Tapping it again spares it — changing your mind must be as easy as making it up.
+  RC.Kids.remove(g, p.x, p.y, 1);
+  ok(!wall.demo, 'tapping a marked piece again spares it');
+  RC.Kids.remove(g, p.x, p.y, 1);
+
+  // The builder walks over, and it takes time.
+  const w2 = RC.Kids.workersOf(g, 1)[0];
+  w2.x = wall.x + 400; w2.y = wall.y;               // start it far away
+  RC.Keep.tickBuilders(g, [w2], 0.1);
+  ok(w2.demoJob === wall, 'the builder takes the demolition job unprompted');
+  ok(!wall.demoT, 'and nothing comes down while it is still walking');
+  w2.x = wall.x + wall.w / 2 + w2.r + 4; w2.y = wall.y;   // arrived
+  const need = RC.Keep.demoTime(g, 'rampart');
+  ok(need >= 1.5, 'a rampart takes ' + need.toFixed(1) + 's to knock down');
+  for (let i = 0; i < Math.ceil(need / 0.1) - 2; i++) RC.Keep.tickBuilders(g, [w2], 0.1);
+  ok(!wall.dead && wall.demoT > 0, 'it comes down over time, not instantly (' + wall.demoT.toFixed(1) + 's in)');
+  for (let i = 0; i < 6; i++) RC.Keep.tickBuilders(g, [w2], 0.1);
+  ok(wall.dead, 'and then it is gone');
+  ok(RC.Keep.shards(g) === before + Math.round(25 * RC.Keep.DEMO_REFUND),
+     'paying back half — remodelling is affordable, churn is not');
+
+  // A steel wall takes longer to pull down than a log fence, for the same reason it
+  // took longer to put up. Derived, so a price change can never leave them disagreeing.
+  ok(RC.Keep.demoTime(g, 'steelwall') > RC.Keep.demoTime(g, 'logwall'),
+     'a steel wall outlasts a log fence on the way down too');
+
+  // An unreachable job gives up rather than pinning the builder to it forever.
+  const q = RC.Keep.snap(g.crystal.x + 300, g.crystal.y + 200);
+  RC.Kids.build(g, 'rampart', q.x, q.y, 1, [q]);
+  const stuck = RC.Keep.at(g, RC.Keep.cellX(q.x), RC.Keep.cellY(q.y));
+  stuck.buildProgress = 1; stuck.hp = stuck.maxHp;
+  RC.Kids.remove(g, q.x, q.y, 1);
+  const w3 = RC.Kids.workersOf(g, 1)[0];
+  w3.x = q.x + 900; w3.y = q.y + 900;
+  for (let i = 0; i < 300; i++) { RC.Keep.tickBuilders(g, [w3], 0.1); w3.x = q.x + 900; w3.y = q.y + 900; }
+  ok(!stuck.demo && !w3.demoJob, 'a job it can never reach is abandoned rather than held forever');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

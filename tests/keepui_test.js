@@ -143,8 +143,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  \u2713 ' + m); } else { f
   ok(after.placing === 'logwall', 'the tool stays armed so the next wall is one gesture away');
 
   console.log('\n=== it builds itself ===');
-  ok((await page.evaluate(() => RC.Kids.workersOf(RC.game, RC.game.playerOwner).length)) === 2,
-     'there is a crew of two, not one lone builder');
+  ok((await page.evaluate(() => RC.Kids.workersOf(RC.game, RC.game.playerOwner).length)) === 1,
+     'one builder, not a crew');
   let prog = { done: 0, started: 0 };
   for (let i = 0; i < 40 && prog.done < 1; i++) {
     await sleep(700);
@@ -169,7 +169,57 @@ const ok = (c, m) => { if (c) { pass++; console.log('  \u2713 ' + m); } else { f
   ok(chain.had, 'a builder had a piece assigned');
   ok(chain.moved, 'and when it finished, walked to the next one on its own (state ' + chain.state + ')');
 
-  console.log('\n=== a castle, joined ===');
+  console.log('\n=== undo, and take down ===');
+  // The remove tool is armed and dragged exactly like a wall, which is the point: one
+  // gesture to learn, used in both directions.
+  await page.evaluate(() => { RC.game.placing = RC.Keep.DEMO; });
+  await sleep(400);
+  ok(/Remove/.test(await page.textContent('#kid-placing')), 'arming Remove says so');
+  ok(await page.evaluate(() => RC.Input.snapMode()), 'and it snaps to the same grid');
+
+  // Drag it back along the row that is still going up: everything unfinished is undone.
+  const un = await page.evaluate(() => ({ purse: RC.Keep.shards(RC.game),
+    sites: RC.game.buildings.filter(b => b.type === 'logwall' && !b.dead && !b.done).length }));
+  await page.mouse.move(geom.a.x, geom.a.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) {
+    await page.mouse.move(geom.a.x + (geom.b.x - geom.a.x) * i / 8, geom.a.y + (geom.b.y - geom.a.y) * i / 8);
+    await sleep(30);
+  }
+  await page.mouse.up();
+  await sleep(700);
+  const undone = await page.evaluate(() => ({
+    sites: RC.game.buildings.filter(b => b.type === 'logwall' && !b.dead && !b.done).length,
+    done: RC.game.buildings.filter(b => b.type === 'logwall' && !b.dead && b.done).length,
+    marked: RC.Keep.demoCount(RC.game),
+    purse: RC.Keep.shards(RC.game),
+    placing: RC.game.placing,
+  }));
+  ok(undone.sites === 0, 'one drag undid every unfinished piece of the row (' + un.sites + ' -> 0)');
+  ok(undone.purse > un.purse, 'and the shards came back (' + Math.round(un.purse) + ' -> ' + Math.round(undone.purse) + ')');
+  ok(undone.marked === undone.done,
+     'while the ' + undone.done + ' already standing were CONDEMNED, not vanished');
+  ok(undone.placing === '__remove', 'the tool stays in hand');
+
+  // And a condemned wall really does come down, on a builder's own time.
+  if (undone.done) {
+    const gone = await page.evaluate(async () => {
+      const g = RC.game;
+      const b = g.buildings.find(x => x.demo && !x.dead);
+      const w = RC.Kids.workersOf(g, g.playerOwner)[0];
+      const t0 = b.demoT || 0;
+      for (let i = 0; i < 90; i++) {
+        await new Promise(r => setTimeout(r, 120));
+        if (b.dead) return { dead: true, ticked: true };
+      }
+      return { dead: b.dead, ticked: (b.demoT || 0) > t0, job: w.demoJob === b };
+    });
+    ok(gone.dead || gone.ticked || gone.job,
+       'a builder went to it and started knocking it down' + JSON.stringify(gone));
+  }
+  await page.evaluate(() => { RC.game.placing = null; RC.Keep.unmarkAll(RC.game); });
+
+  console.log('\n=== a castle, joined ==='); 
   // Lay a rectangle by hand so the join art has corners to draw.
   await page.evaluate(async () => {
     const g = RC.game, G = RC.Keep.GRID, c = g.crystal;

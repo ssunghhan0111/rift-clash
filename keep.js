@@ -472,6 +472,89 @@ RC.Keep = (function () {
     return n;
   }
 
+  // ── Taking it down again ───────────────────────────────────────────────────
+  //
+  // Building without unbuilding is not building, it is committing. Every child who
+  // has made anything out of blocks has put a piece in the wrong place within the
+  // first minute, and a castle you can only add to is one where the first mistake is
+  // permanent — which is exactly the thing that stops someone building at all.
+  //
+  // The two halves are deliberately NOT the same action, because they are not the
+  // same thing:
+  //
+  //  · Cancelling something still going up is instant and pays back in full. It is a
+  //    hologram; nothing has been built, so there is nothing to take down and nothing
+  //    to lose. This is undo, and undo must be free or it does not get used.
+  //
+  //  · Demolishing something already standing is a JOB. A builder has to walk over
+  //    and knock it down, and that takes about as long as putting it up did. That
+  //    cost is what makes the wall you already built feel like a real object rather
+  //    than a UI element — and it is what stops "move the whole castle two cells
+  //    left" from being free. Half the shards come back, so remodelling is affordable
+  //    and thoughtless churn is not.
+  const DEMO = '__remove';           // the pseudo-type the remove tool arms
+  const DEMO_REFUND = 0.5;           // half back for something that actually got built
+  const DEMO_GIVEUP = 25;            // seconds before an unreachable job is abandoned
+
+  function priceOf(g, type) {
+    const race = (g && g.raceOf) ? g.raceOf(g.playerOwner || bank(g)) : 'forge';
+    const it = itemOf(race, type) || itemOf('forge', type);
+    return it ? it.cost : ((RC.BUILDINGS[type] || {}).cost || 0);
+  }
+  function demoTime(g, type) {
+    const race = (g && g.raceOf) ? g.raceOf(g.playerOwner || bank(g)) : 'forge';
+    const it = itemOf(race, type) || itemOf('forge', type);
+    // A log fence comes down faster than a steel wall, for the same reason it went up
+    // faster. Deriving it from the build time rather than typing a second number
+    // means a price change can never leave the two disagreeing.
+    return Math.max(1.5, (it ? it.time : 4) * 0.9);
+  }
+
+  // Cancelling an unfinished site. Note the refund is the KID price rather than
+  // `def.cost`: game.cancelBuild pays back the Versus number, which for a Rampart is
+  // 40 against the 25 that was actually charged — a coin-press, and one that was
+  // already reachable through the builder's own give-up path before any of this.
+  function cancelSite(g, b) {
+    if (!b || b.dead || b.done) return false;
+    purse(g).shard += priceOf(g, b.type);
+    b.dead = true;
+    if (g.selection) g.selection = g.selection.filter(e => e !== b);
+    g._keepIx = null;
+    if (RC.Path && RC.Path.invalidate) RC.Path.invalidate(g);
+    return true;
+  }
+  function finishDemo(g, b) {
+    if (!b || b.dead) return false;
+    purse(g).shard += Math.round(priceOf(g, b.type) * DEMO_REFUND);
+    b.dead = true;
+    if (g.selection) g.selection = g.selection.filter(e => e !== b);
+    g._keepIx = null;
+    if (RC.Path && RC.Path.invalidate) RC.Path.invalidate(g);
+    g.fx.push({ abil: 'nova', ax: b.x, ay: b.y, t: 0.35, radius: 34, owner: b.owner });
+    if (RC.Audio) RC.Audio.play('explode');
+    return true;
+  }
+
+  // One cell of the remove gesture. Returns what happened, so the caller can say it.
+  function removeAt(g, x, y) {
+    const b = at(g, cellX(x), cellY(y));
+    if (!b || b.dead) return null;
+    if (!b.done) { return cancelSite(g, b) ? 'cancelled' : null; }
+    // Tapping a marked piece again unmarks it — changing your mind has to be as easy
+    // as making it up, or the tool is a trap rather than an undo.
+    if (b.demo) { b.demo = false; b.demoT = 0; b.demoWait = 0; return 'spared'; }
+    b.demo = true; b.demoT = 0; b.demoWait = 0;
+    return 'marked';
+  }
+  function unmarkAll(g) {
+    for (const b of (g.buildings || [])) if (b.demo) { b.demo = false; b.demoT = 0; }
+  }
+  function demoCount(g) {
+    let n = 0;
+    for (const b of (g.buildings || [])) if (!b.dead && b.demo) n++;
+    return n;
+  }
+
   // ── The builders ───────────────────────────────────────────────────────────
   //
   // The rule this replaces was "one building at a time, per player", which existed
@@ -479,21 +562,60 @@ RC.Keep = (function () {
   // The fix is not to forbid the plan — it is to make builders finish what they
   // start and then walk to the next thing on their own. A child draws the castle;
   // the builders build it. That is the loop the mode was missing.
+  // A job is either a piece that is not up yet or a piece that has been marked to
+  // come down. Nearest first, and no priority between the two kinds: a builder that
+  // preferred one would walk past the thing it is standing next to, which reads as
+  // the builder being broken rather than as the builder having an opinion.
   function nextSite(g, u) {
     let best = null, bd = Infinity;
     for (const b of (g.buildings || [])) {
-      if (b.dead || b.done || !isPiece(b)) continue;
+      if (b.dead || !isPiece(b)) continue;
+      if (b.done && !b.demo) continue;
       const d = RC.dist(u.x, u.y, b.x, b.y);
       if (d < bd) { bd = d; best = b; }
     }
     return best;
   }
-  function tickBuilders(g, workers) {
+  const atWork = (u, b) => RC.dist(u.x, u.y, b.x, b.y) <= b.w / 2 + u.r + 16;
+
+  function tickBuilders(g, workers, dt) {
+    dt = dt || 0;
     for (const u of workers) {
       if (!u || u.dead) continue;
-      if (u.state === 'build' && u.site && !u.site.dead && !u.site.done) continue;
+
+      // Already putting something up: leave it alone.
+      if (u.state === 'build' && u.site && !u.site.dead && !u.site.done) { u.demoJob = null; continue; }
+
+      // Already knocking something down.
+      if (u.demoJob && (u.demoJob.dead || !u.demoJob.demo)) u.demoJob = null;
+      if (u.demoJob) {
+        const b = u.demoJob;
+        if (atWork(u, b)) {
+          b.demoWait = 0;
+          b.demoT = (b.demoT || 0) + dt;
+          if (b.demoT >= demoTime(g, b.type)) { finishDemo(g, b); u.demoJob = null; }
+        } else {
+          // Walk to the EDGE, not the centre: the centre of a finished wall is inside
+          // a solid building and inside the nav grid, so a builder aimed at it grinds
+          // against the thing it came to demolish.
+          b.demoWait = (b.demoWait || 0) + dt;
+          if (b.demoWait > DEMO_GIVEUP) {
+            b.demo = false; b.demoT = 0; u.demoJob = null;
+            if (g.notify) g.notify('Cannot get to that one to take it down');
+          } else if (u.state !== 'move') {
+            const dx = u.x - b.x, dy = u.y - b.y;
+            const len = Math.max(1, Math.hypot(dx, dy));
+            const off = b.w / 2 + u.r + 6;
+            u.moveTo(b.x + dx / len * off, b.y + dy / len * off);
+          }
+        }
+        continue;
+      }
+
       const s = nextSite(g, u);
-      if (s) u.buildAt(s);
+      if (!s) continue;
+      if (!s.done) u.buildAt(s);
+      else { u.demoJob = s; u.state = 'idle'; }      // picked up on the next tick
     }
   }
 
@@ -511,5 +633,8 @@ RC.Keep = (function () {
     capture: capture, restore: restore, rebuild: rebuild,
     why: why, ring: ring, inRing: inRing, place: place, plan: plan,
     nextSite: nextSite, tickBuilders: tickBuilders,
+    DEMO: DEMO, DEMO_REFUND: DEMO_REFUND,
+    priceOf: priceOf, demoTime: demoTime, removeAt: removeAt, unmarkAll: unmarkAll,
+    demoCount: demoCount, cancelSite: cancelSite, finishDemo: finishDemo,
   };
 })();

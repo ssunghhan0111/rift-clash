@@ -4038,7 +4038,58 @@ RC.Renderer = (function () {
   // Every cell is coloured independently, because the interesting case is the row
   // that is fine for nine blocks and runs into a rock on the tenth: greying that one
   // cell teaches the rule, where refusing the whole line teaches nothing.
+  // The remove tool's own preview. It cannot reuse the build ghost, because the
+  // question it is answering is the opposite one: not "does this cell fit something"
+  // but "what is IN this cell, and what will happen to it". So it highlights the
+  // pieces the gesture would touch and says which of the two things it would do —
+  // an empty cell simply does not light up.
+  function drawRemoveGhost(g, input) {
+    const cells = (RC.Input && RC.Input.planCells) ? RC.Input.planCells()
+                                                  : [RC.Keep.snap(input.world.x, input.world.y)];
+    const t = performance.now() / 1000;
+    let hit = 0, back = 0, standing = 0;
+    ctx.save();
+    for (const c of cells) {
+      const b = RC.Keep.at(g, RC.Keep.cellX(c.x), RC.Keep.cellY(c.y));
+      if (!b || b.dead) continue;
+      hit++;
+      const price = RC.Keep.priceOf(g, b.type);
+      back += b.done ? Math.round(price * RC.Keep.DEMO_REFUND) : price;
+      if (b.done) standing++;
+      const hw = b.w / 2 + 3, pulse = 0.55 + 0.25 * Math.sin(t * 6);
+      ctx.globalAlpha = pulse * 0.5;
+      ctx.fillStyle = C.hpBad;
+      ctx.fillRect(b.x - hw, b.y - hw, hw * 2, hw * 2);
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = '#ffd0d6'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(b.x - hw * 0.55, b.y - hw * 0.55); ctx.lineTo(b.x + hw * 0.55, b.y + hw * 0.55);
+      ctx.moveTo(b.x + hw * 0.55, b.y - hw * 0.55); ctx.lineTo(b.x - hw * 0.55, b.y + hw * 0.55);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    if (hit) {
+      const a = cells[0], z = cells[cells.length - 1];
+      const mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2 - 40;
+      // Two different words on purpose. "Undo" is free and instant; "take down" is a
+      // job somebody has to walk to and do, and a child deciding between them should
+      // be told which one they are about to buy.
+      const label = standing ? ('⛏ take down ' + hit + '  ·  +' + back + '💎')
+                             : ('↩ undo ' + hit + '  ·  +' + back + '💎 back');
+      ctx.font = 'bold 15px system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const w = ctx.measureText(label).width + 18;
+      ctx.fillStyle = 'rgba(8,14,22,.85)';
+      rrect(mx - w / 2, my - 12, w, 24, 8); ctx.fill();
+      ctx.fillStyle = '#ffc2ca';
+      ctx.fillText(label, mx, my);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
+    ctx.restore();
+  }
+
   function drawGhost(g, input) {
+    if (RC.Keep && g.placing === RC.Keep.DEMO) { drawRemoveGhost(g, input); return; }
     const d = RC.BUILDINGS[g.placing];
     const snap = RC.Input && RC.Input.snapMode && RC.Input.snapMode();
     const cells = snap && RC.Input.planCells ? RC.Input.planCells()
@@ -4155,6 +4206,18 @@ RC.Renderer = (function () {
     if (!RC.Keep || !g.kids) return;
     const t = performance.now() / 1000;
     ctx.save();
+    // Decorations do not join, so drawKeepTrim's main loop skips them — but they can
+    // still be marked, and a condemned flowerbox has to say so like everything else.
+    for (const b of g.buildings) {
+      if (b.dead || !b.demo || !b.def.decor || fogged(g, b)) continue;
+      ctx.globalAlpha = 0.55 + 0.25 * Math.sin(t * 6);
+      ctx.strokeStyle = '#ff6b7d'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(b.x - 12, b.y - 12); ctx.lineTo(b.x + 12, b.y + 12);
+      ctx.moveTo(b.x + 12, b.y - 12); ctx.lineTo(b.x - 12, b.y + 12);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     for (const b of g.buildings) {
       if (b.dead || !b.done || !RC.Keep.joins(b) || fogged(g, b)) continue;
       const m = RC.Keep.joinMask(g, b);
@@ -4187,6 +4250,28 @@ RC.Renderer = (function () {
         ctx.strokeStyle = ink; ctx.lineWidth = 2.4;
         ctx.beginPath(); ctx.arc(b.x, b.y, hw * 0.62, 0, Math.PI * 2); ctx.stroke();
       }
+      // Condemned. A piece with a builder on the way has to look different from a
+      // piece that is fine, or a child marks something, wanders off, and comes back
+      // to a castle with a hole in it they have no memory of asking for. The ring
+      // fills as the demolition does, so the wait is legible rather than mysterious.
+      if (b.demo) {
+        const need = RC.Keep.demoTime(g, b.type);
+        const k = Math.max(0, Math.min(1, (b.demoT || 0) / need));
+        ctx.globalAlpha = 0.55 + 0.25 * Math.sin(t * 6);
+        ctx.strokeStyle = '#ff6b7d'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(b.x - hw * 0.5, b.y - hh * 0.5); ctx.lineTo(b.x + hw * 0.5, b.y + hh * 0.5);
+        ctx.moveTo(b.x + hw * 0.5, b.y - hh * 0.5); ctx.lineTo(b.x - hw * 0.5, b.y + hh * 0.5);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        if (k > 0) {
+          ctx.strokeStyle = '#ffd0d6'; ctx.lineWidth = 3.4;
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, hw + 5, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+
       // An open gate should read as a doorway from across the map.
       if (b.def.gate && RC.Keep.gateOpen(g, b)) {
         ctx.globalAlpha = 0.45 + 0.2 * Math.sin(t * 2);

@@ -1216,7 +1216,14 @@ window.RC = window.RC || {};
     // 건설 중인(미완성) 건물을 취소 — 전액 환불 후 제거
     cancelBuild(building) {
       if (!building || building.dead || building.done) return false;
-      this.res[building.owner].shard += building.def.cost;
+      // Crystal Defense charges KID prices, so refunding `def.cost` pays back the
+      // Versus number — 40 for a Rampart that cost 25. That is a coin press, and it
+      // was already reachable before the remove tool existed, through the builder's
+      // own "I cannot get there" give-up path.
+      const back = (this.kids && RC.Keep && RC.Keep.isPiece(building))
+        ? RC.Keep.priceOf(this, building.type)
+        : building.def.cost;
+      this.res[building.owner].shard += back;
       building.dead = true;
       this.selection = this.selection.filter(e => e !== building);
       return true;

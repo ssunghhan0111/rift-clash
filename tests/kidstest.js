@@ -80,7 +80,46 @@ ok(K.waveSize(1) === 2, 'wave 1 is exactly 2 enemies');
 // opening was a formality. They now start at their printed stats and climb from wave 3.
 ok(K.hpMul(1) >= 1 && K.hpMul(3) === K.hpMul(1), 'enemies start at full printed stats, flat for the first three waves');
 ok(K.hpMul(8) > K.hpMul(3), 'and get tougher after that');
-ok(K.hpMul(20) < RC.Survival.diffOf({ survivalDiff: 'medium' }).hpBase * 2.5, 'late-wave HP stays modest');
+// The bound used to be a magic 2.5x, which said nothing about anything. The
+// invariant that actually matters is the same one the wave-size check above tests:
+// Crystal Defense is the GENTLER of the two modes at every wave, on both dials. So
+// the comparison is against Survival medium's own health curve, which is what it was
+// reaching for. (Medium: 1 + 0.135 per wave past 3.)
+{
+  const sd = RC.Survival.diffOf({ survivalDiff: 'medium' });
+  const survHp = w => sd.hpBase * (1 + sd.hpGrow * Math.max(0, w - sd.hpFree));
+  let gentlerHp = true;
+  for (let w = 3; w <= 30; w++) if (K.hpMul(w) > survHp(w)) gentlerHp = false;
+  ok(gentlerHp, 'enemy health stays under Survival medium at every wave (w20: ' +
+     K.hpMul(20).toFixed(2) + ' vs ' + survHp(20).toFixed(2) + ')');
+}
+
+// A raid answers the keep it is attacking: a castle that has been growing for twenty
+// nights should not meet the same wave a bare crystal does. Capped and sub-linear, so
+// a wall is always worth more than the raid it adds.
+{
+  const gk = new RC.Game(RC.MAPS[0], RC.MODES['1v1']);
+  gk.setupKids({ race: 'forge' });
+  ok(K.keepMul(gk) === 1, 'a bare crystal draws the plain wave');
+  const G = RC.Keep.GRID, c = gk.crystal;
+  gk.res[RC.Keep.bank(gk)].shard = 99999;
+  for (let i = 0; i < 24; i++) {
+    const p = RC.Keep.snap(c.x - G * 8 + (i % 12) * G, c.y - G * 6 + Math.floor(i / 12) * G);
+    K.build(gk, 'logwall', p.x, p.y, 1, [p]);
+  }
+  gk.buildings.forEach(b => { if (RC.Keep.isPiece(b)) { b.buildProgress = 1; b.hp = b.maxHp; } });
+  const withWalls = K.keepMul(gk);
+  ok(withWalls > 1, 'a keep with walls up draws a bigger one (' + withWalls.toFixed(2) + 'x)');
+  ok(withWalls < 1.5, 'but never more than half again — building must not be a trap');
+  // Decorations are not a provocation. A child should never learn that putting up a
+  // flag made the night harder.
+  const before = K.keepMul(gk);
+  for (let i = 0; i < 8; i++) {
+    const p = RC.Keep.snap(c.x + G * 6, c.y - G * 4 + i * G);
+    K.build(gk, 'banner', p.x, p.y, 1, [p]);
+  }
+  ok(K.keepMul(gk) === before, 'and decorations do not count toward it at all');
+}
 
 // Air arrives late enough to be a lesson, not an ambush.
 const air = K.ROSTER.find(e => e.air);
@@ -423,16 +462,33 @@ head('NO RTS — the simplifications hold');
   // building stops being the build time and becomes the walk between pieces — one
   // builder spends most of a Build Day on its feet.
   const workers = gk.units.filter(u => u.def.worker);
-  ok(workers.length === K.CFG.BUILDERS, 'a crew of ' + K.CFG.BUILDERS + ' builders, got ' + workers.length);
-  ok(workers.every(w => w.free === true), 'the builders cost no supply — tools, not army slots');
+  ok(workers.length === K.CFG.BUILDERS, 'exactly ' + K.CFG.BUILDERS + ' builder, got ' + workers.length);
+  ok(workers.every(w => w.free === true), 'and it costs no supply — a tool, not an army slot');
   ok(gk.nodes.length === 0, 'and there is nothing for it to mine, so it cannot be mismanaged');
   ok(gk.supply(1).max === K.CFG.POP, 'population is a flat cap, not a supply-building game');
   // Income arrives on its own, with nothing to click.
+  // Income follows the DANGER now: full rate while a raid is happening, a trickle by
+  // day that stops after DAY_PAID seconds. A flat trickle was right when the gap
+  // between waves was four seconds and became a printing press the moment Build Day
+  // lost its clock — a measured run finished night twelve holding eighty thousand.
   const before = gk.res[1].shard;
+  for (let i = 0; i < 30; i++) gk.update(DT);          // one second of Build Day
+  ok(gk.res[1].shard > before, 'shards still come in automatically');
+  ok(Math.abs((gk.res[1].shard - before) - K.CFG.DAY_INCOME) < K.CFG.DAY_INCOME * 0.3,
+     'about DAY_INCOME per second while building');
+  // ...and it stops, so waiting is free but not profitable.
+  const sk = K.st(gk);
+  sk.dayT = K.CFG.DAY_PAID + 1;
+  const idle = gk.res[1].shard;
+  for (let i = 0; i < 60; i++) gk.update(DT);
+  ok(Math.abs(gk.res[1].shard - idle) < 0.01, 'and dries up once the day has paid out');
+  // During a raid it is the full rate — the raid is what pays for the castle.
+  sk.phase = 'fighting';
+  const fight = gk.res[1].shard;
   for (let i = 0; i < 30; i++) gk.update(DT);
-  ok(gk.res[1].shard > before, 'shards come in automatically');
-  ok(Math.abs((gk.res[1].shard - before) - K.CFG.INCOME) < K.CFG.INCOME * 0.25,
-     'income is about INCOME per second');
+  ok(Math.abs((gk.res[1].shard - fight) - K.CFG.INCOME) < K.CFG.INCOME * 0.25,
+     'and the full INCOME per second while the raid is on');
+  sk.phase = 'build'; sk.dayT = 0;
   // Only the two starter buildings exist: the crystal and the one base. (A returning
   // player's saved keep is restored on top of this — see keep_test — but a run with
   // no save starts bare.)
@@ -473,7 +529,9 @@ head('NO RTS — the simplifications hold');
 // that cap how much army can exist at once (POP) and how fast it can be bought (INCOME).
 head('THE OPENING HAS TEETH');
 {
-  ok(K.CFG.INCOME <= 8, 'income is no longer a flood (' + K.CFG.INCOME + '/s)');
+  ok(K.CFG.INCOME <= 10 && K.CFG.DAY_INCOME <= 4,
+     'income is no longer a flood (' + K.CFG.INCOME + '/s fighting, ' + K.CFG.DAY_INCOME + '/s building)');
+  ok(K.CFG.DAY_PAID <= 120, 'and an untimed Build Day cannot be farmed past ' + K.CFG.DAY_PAID + 's');
   ok(K.CFG.POP <= 24, 'the army cannot snowball to invulnerability (cap ' + K.CFG.POP + ')');
   ok(K.CFG.WAVE_HEAL <= 0.04, 'chip damage is not erased between waves (' + Math.round(K.CFG.WAVE_HEAL * 100) + '% heal)');
   // A tower has to be a real alternative to a fighter, or nobody will ever build one.

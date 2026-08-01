@@ -38,6 +38,15 @@ RC.KidsUI = (function () {
            font-family:inherit; display:none; }
 #kids-ui.on { display:block; }
 
+/* The remove tool. Red, and set apart from the things you pay for, because the one
+   button on this shelf that takes something away should never be mistaken for one
+   that adds something. */
+.kid-bb.kid-rm { border-color:rgba(255,120,140,.5); background:rgba(60,18,26,.72);
+                 margin-left:10px; }
+.kid-bb.kid-rm .cost { color:#ffb0bc; }
+.kid-bb.kid-rm.on { border-color:#ff8a9c; box-shadow:0 0 0 3px rgba(255,120,140,.35); }
+#kid-placing.rm { background:rgba(70,16,26,.9); border-color:rgba(255,120,140,.55); }
+
 /* ── Build Day ────────────────────────────────────────────────────────────
    Top-centre, under the chips, because it is the most important thing on the
    screen while it is there and irrelevant the rest of the time. Warm colours on
@@ -599,10 +608,14 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       els.dayBtn.classList.remove('waiting');
     }
     els.dayBtn.disabled = !d.canStart;
-    // The backstop clock is shown only once it is close enough to matter. Showing it
-    // from the first second would put back the timer this phase exists to remove.
-    els.dayClock.classList.toggle('on', d.remain < 60);
-    els.dayClock.textContent = d.remain < 60 ? 'night falls in ' + Math.ceil(d.remain) + 's' : '';
+    // Two things can want this line. The backstop clock is shown only once it is close
+    // enough to matter — showing it from the first second would put back the timer this
+    // phase exists to remove — and before that, the fact that the shards have stopped
+    // coming in. Building longer is free; it just is not paid.
+    const late = d.remain < 60;
+    els.dayClock.classList.toggle('on', late || !d.paying);
+    els.dayClock.textContent = late ? 'night falls in ' + Math.ceil(d.remain) + 's'
+                             : !d.paying ? 'no more shards until the raid — take your time' : '';
   }
 
   function renderBuild(h) {
@@ -628,6 +641,23 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
         });
         els.build.appendChild(n);
       });
+      // The remove tool, on the same shelf as the things it removes and armed the same
+      // way. It is a tool rather than a mode switch: you pick it up, use it, and put
+      // it down, exactly like picking up a wall — which is one idea to learn instead
+      // of two. It shows shards coming BACK rather than a price, because that is the
+      // only button here that gives you money.
+      {
+        const n = document.createElement('div');
+        n.className = 'kid-bb kid-rm';
+        n.dataset.t = RC.Keep.DEMO;
+        n.title = 'Tap something to undo it, or drag along a row. Already built? The builder walks over and takes it down.';
+        n.innerHTML = '<div class="ic">⛏️</div><div class="role">Remove</div><div class="cost">↩ refund</div>';
+        n.addEventListener('pointerdown', ev => {
+          ev.preventDefault();
+          g.placing = (g.placing === RC.Keep.DEMO) ? null : RC.Keep.DEMO;
+        });
+        els.build.appendChild(n);
+      }
       const slots = document.createElement('div');
       slots.id = 'kid-slots';
       els.build.appendChild(slots);
@@ -640,7 +670,10 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     const nodes = els.build.querySelectorAll('.kid-bb');
     for (let i = 0; i < nodes.length; i++) {
       const it = b.items[i];
-      if (!it) continue;
+      if (!it) {                                     // the remove tool sits past the list
+        nodes[i].classList.toggle('on', g.placing === RC.Keep.DEMO);
+        continue;
+      }
       const capped = it.group === 'tower' && b.used >= b.cap;
       nodes[i].classList.toggle('poor', h.shard < it.cost || capped);
       nodes[i].classList.toggle('on', g.placing === it.t);
@@ -655,7 +688,12 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     }
     const armed = !!g.placing;
     els.placing.classList.toggle('on', armed);
-    if (armed) {
+    els.placing.classList.toggle('rm', g.placing === RC.Keep.DEMO);
+    if (g.placing === RC.Keep.DEMO) {
+      els.placing.textContent = b.marked
+        ? '⛏️ Remove — ' + b.marked + ' waiting for the builder. Tap one again to spare it.'
+        : '⛏️ Remove — tap to undo, or DRAG along a row';
+    } else if (armed) {
       const it = b.items.find(i => i.t === g.placing);
       // The instruction changed with the mechanic, and it has to: a child told to
       // "tap to place it" will tap, and never discover the gesture the whole mode

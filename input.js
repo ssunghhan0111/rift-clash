@@ -423,7 +423,12 @@ RC.Input = (function () {
   // Crystal-Defense-only `kbuild` command. Versus would have silently stopped being
   // able to build walls at all. The grid is a mode's feature, not a building's.
   function snapMode() {
-    return !!(g.kids && g.placing && RC.Keep && (RC.BUILDINGS[g.placing] || {}).snap);
+    if (!g.kids || !g.placing || !RC.Keep) return false;
+    // The remove tool is a gesture over the same grid, so it snaps and drags exactly
+    // like a wall does — which is the point: taking a row down should cost the same
+    // one movement that putting it up did.
+    if (g.placing === RC.Keep.DEMO) return true;
+    return !!(RC.BUILDINGS[g.placing] || {}).snap;
   }
   // The cells the current gesture would fill. Shared by the renderer, so the ghost
   // and the command can never disagree about what is about to be built.
@@ -440,8 +445,12 @@ RC.Input = (function () {
     const shift = state.planShift;
     state.planFrom = null; state.planShift = false;
     if (!type || !cells || !cells.length) return;
-    RC.cmd(g, { t: 'kbuild', bt: type, x: cells[0].x, y: cells[0].y,
-                cells: cells.map(c => ({ x: c.x, y: c.y })) });
+    const list = cells.map(c => ({ x: c.x, y: c.y }));
+    if (RC.Keep && type === RC.Keep.DEMO) {
+      RC.cmd(g, { t: 'kdemo', x: list[0].x, y: list[0].y, cells: list });
+      return;                                   // stays armed; kids.remove does the sound
+    }
+    RC.cmd(g, { t: 'kbuild', bt: type, x: list[0].x, y: list[0].y, cells: list });
     if (RC.Audio) RC.Audio.play('build');
     // Keeping the tool armed after a placement is the difference between building a
     // castle and pressing a button eighty times. On a tablet there is no Shift, and

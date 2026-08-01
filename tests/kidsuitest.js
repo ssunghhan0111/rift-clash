@@ -457,9 +457,11 @@ head('FROM THE MENU BUTTON');
   ok(!!dd.getElementById('kid-build'), 'the build bar is on screen');
   // The catalogue moved to keep.js when Crystal Guard became the keep — walls, the
   // gate, the race's tower and the decorations. RC.KID_BUILD is still in config.js
-  // for anything asking the old question, but the panel is built from the new list.
-  ok(dd.querySelectorAll('#kid-build .kid-bb').length === RC.Keep.MENU.length,
-     'with a button per buildable, got ' + dd.querySelectorAll('#kid-build .kid-bb').length);
+  // for anything asking the old question, but the panel is built from the new list,
+  // plus the remove tool on the end (which is not a buildable and so is not in it).
+  ok(dd.querySelectorAll('#kid-build .kid-bb').length === RC.Keep.MENU.length + 1,
+     'with a button per buildable plus Remove, got ' + dd.querySelectorAll('#kid-build .kid-bb').length);
+  ok(!!dd.querySelector('#kid-build .kid-rm'), 'and the remove tool is one of them');
   // Tapping one arms placement; tapping it again puts it back.
   {
     const bb = dd.querySelector('#kid-build .kid-bb');

@@ -43,10 +43,20 @@ RC.Kids = (function () {
     PREP: 22,               // seconds before wave 1 — long enough to buy a first squad
     GAP: 4,                 // seconds after the reward card is picked before the next wave
     SPAWN_STEP: 0.30,       // seconds between individual spawns (slower than Survival — easier to read)
-    // Income was 15/s, which handed a kid more shards than they could spend and made the
-    // first ten waves a formality: everything was affordable, so nothing was a choice.
-    // Halved. Now a tower costs a fighter, and that is the decision the mode was missing.
-    INCOME: 7.5,            // shards per second, before card upgrades
+    // Income used to be a flat trickle, which was right when the between-wave gap was
+    // four seconds and wrong the moment Build Day became untimed: a player who took
+    // five minutes over their castle was paid 2,250 shards for the wait, and a measured
+    // run finished night twelve holding EIGHTY THOUSAND. Everything was affordable, so
+    // nothing was a choice — the exact failure the old 15/s halving was written to fix,
+    // reintroduced a hundredfold by a phase that removed the clock.
+    //
+    // So the shards follow the danger. You earn at the full rate while a raid is
+    // actually happening, and a slow trickle by day that stops after DAY_PAID seconds.
+    // Build for as long as you like — the day is still untimed, and taking longer is
+    // still free — it just does not pay. The raid pays for the castle.
+    INCOME: 9,              // shards per second DURING A RAID, before card upgrades
+    DAY_INCOME: 2.6,        // ...and while building, for a while
+    DAY_PAID: 90,           // seconds of Build Day that earn anything at all
     START_SHARD: 140,       // one fighter and a wall, or two fighters — a choice from second one
     // Was 40, which let the army SNOWBALL: fighters survive waves and accumulate, so by
     // wave 8 thirty defenders met a wave of nine and the outcome stopped being in doubt.
@@ -78,13 +88,13 @@ RC.Kids = (function () {
     DAY_MAX: 300,           // seconds before night falls whether anyone is ready or not
     DAY_MIN: 6,             // ...and the earliest it may end, so a stray tap cannot skip it
     DAWN: 2.2,              // seconds the sky takes to come back up after a night
-    // Two builders per player, not one. With a whole dragged row in flight the cost
-    // of building stopped being the build TIME and became the walk between pieces —
-    // one builder laying a twelve-block wall spends most of a Build Day on its feet.
-    // Two halves that, and `advanceBuild` already speeds up when they work the same
-    // piece, so a crew is worth more than the sum of its walking.
-    BUILDERS: 2,
-    WORKER_RESPAWN: 8,      // seconds before a lost builder walks back out, free
+    // ONE builder per player. It is the only thing on the map that is only ever
+    // yours, and one of it is what makes losing it matter — a crew of two is a
+    // resource, a single builder is a character. The cost is that a long wall takes
+    // real time to go up, which Build Day is untimed precisely to absorb: the walk
+    // is something to watch rather than something to wait through.
+    BUILDERS: 1,
+    WORKER_RESPAWN: 20,     // seconds before a lost builder walks back out, free
   };
 
   // ── Attack lanes ──────────────────────────────────────────────────────────
@@ -226,6 +236,33 @@ RC.Kids = (function () {
       return false;
     }
     if (mine && RC.Audio) RC.Audio.play('build');
+    return true;
+  }
+
+  // Cancel what is going up, mark what is already up. One gesture, two meanings,
+  // because from where a child is standing they are the same intention — "not that
+  // one" — and splitting them across two buttons would make them learn a distinction
+  // the game is making for its own reasons rather than for theirs.
+  function remove(g, x, y, owner, cells) {
+    const mine = owner == null || owner === g.playerOwner;
+    const list = ((cells && cells.length) ? cells : [{ x: x, y: y }])
+      .slice(0, 40)
+      .map(c => RC.Keep.snap(+c.x || 0, +c.y || 0));
+    let cancelled = 0, marked = 0, spared = 0;
+    for (const c of list) {
+      const r = RC.Keep.removeAt(g, c.x, c.y);
+      if (r === 'cancelled') cancelled++;
+      else if (r === 'marked') marked++;
+      else if (r === 'spared') spared++;
+    }
+    if (!cancelled && !marked && !spared) return false;
+    if (mine) {
+      if (RC.Audio) RC.Audio.play('build');
+      // Only the demolition needs explaining — a cancel is its own feedback,
+      // because the thing vanishes as you touch it.
+      if (marked) g.notify(marked === 1 ? 'Marked for the wrecking crew'
+                                        : marked + ' pieces marked — the builder is on the way');
+    }
     return true;
   }
 
@@ -405,8 +442,20 @@ RC.Kids = (function () {
   // Still gentler than Survival medium at every wave (kidstest asserts it), but no longer
   // a formality: wave 3 is a handful rather than four stragglers, and by wave 8 there are
   // enough bodies that some of them get through if nobody is watching.
+  // The curve was too gentle, and the untimed Build Day made it gentler still — a
+  // player arrives at every night with more of everything than the night asks for.
+  // The exponent is what changed: the first three waves are untouched, because the
+  // on-ramp is the one part of this mode that was right, and the climb steepens from
+  // there. Every value stays under Survival medium at the same wave — kidstest holds
+  // that line, and it should: this is the gentler of the two modes by design, not the
+  // trivial one.
+  //
+  //   wave    4   6   8  10  12  15  20  25  30
+  //   was     5   7   9  11  14  17  22  27  30
+  //   now     6   8  11  14  17  21  29  37  45
+  //   surv    6   8  11  15  18  23  32  41  50
   function waveSize(w) {
-    return Math.max(2, Math.min(30, Math.round(2 + 1.05 * Math.max(0, w - 1))));
+    return Math.max(2, Math.min(48, Math.round(2 + 1.05 * Math.pow(Math.max(0, w - 1), 1.10))));
   }
 
   // Enemy health. Flat for the first five waves so the opening is a genuine
@@ -416,7 +465,29 @@ RC.Kids = (function () {
   // and a passive player sat at 100% crystal health through wave 12 — the "too easy at the
   // beginning" the mode was reported for. They now start near their real stats and climb
   // sooner, so a wave that is ignored actually costs something.
-  function hpMul(w) { return 1.0 * (1 + 0.08 * Math.max(0, w - 3)); }
+  function hpMul(w) { return 1.0 * (1 + 0.105 * Math.max(0, w - 3)); }
+
+  // ── The raid answers the keep ──────────────────────────────────────────────
+  //
+  // A castle that has been growing for twenty nights meets the same wave a bare
+  // crystal does, which is the other half of why the mode goes soft: the reward for
+  // building was that the fight stopped happening. So a bigger keep draws a bigger
+  // raid — capped, and deliberately sub-linear, so a wall is always worth more than
+  // the raid it adds and building is never a trap.
+  //
+  // Structure only. A banner, a torch and a flowerbox are not a provocation, and a
+  // child should never learn that decorating their castle made the night harder.
+  const KEEP_SCALE = 260, KEEP_SCALE_MAX = 0.40;
+  function keepMul(g) {
+    if (!g || !RC.Keep) return 1;
+    let n = 0;
+    for (const b of (g.buildings || [])) {
+      if (b.dead || !RC.Keep.isPiece(b) || !b.done) continue;
+      if (b.def.decor) continue;
+      n += b.def.keepTower ? 3 : 1;                   // a tower is worth three walls
+    }
+    return 1 + Math.min(KEEP_SCALE_MAX, n / KEEP_SCALE);
+  }
 
   function weightAt(e, w) {
     if (w < e.at) return 0;
@@ -457,9 +528,9 @@ RC.Kids = (function () {
     return f.id === 'normal' ? ('Wave ' + w) : (f.name + ' — Wave ' + w);
   }
 
-  function compose(w) {
+  function compose(w, g) {
     const f = flavourFor(w);
-    let count = Math.max(1, Math.round(waveSize(w) * (f.sizeMul || 1)));
+    let count = Math.max(1, Math.round(waveSize(w) * (f.sizeMul || 1) * keepMul(g)));
 
     // Runner Rush is one type only — that is what makes it read as a rush.
     if (f.only) {
@@ -699,7 +770,7 @@ RC.Kids = (function () {
     const s = st(g);
     s.wave++;
     g.survivalWave = s.wave;              // the HUD wave counter and end screen read this
-    s.queue = compose(s.wave);
+    s.queue = compose(s.wave, g);
     s.spawnT = 0;
     s.phase = 'spawning';
     s.freshUnlock = null;
@@ -932,7 +1003,10 @@ RC.Kids = (function () {
     const keepBank = RC.Keep.bank(g);
     let mul = 0;
     for (const o of defenders(g)) mul += (per(g, o).incomeMul || 1);
-    if (g.res[keepBank]) g.res[keepBank].shard += CFG.INCOME * mul * dt;
+    const rate = s.phase === 'build'
+      ? ((s.dayT || 0) < CFG.DAY_PAID ? CFG.DAY_INCOME : 0)
+      : CFG.INCOME;
+    if (g.res[keepBank]) g.res[keepBank].shard += rate * mul * dt;
 
     const crew = [];
     for (const o of defenders(g)) {
@@ -949,7 +1023,7 @@ RC.Kids = (function () {
     // Every builder on the map works the same plan, nearest piece first. This is what
     // pays for dropping the one-at-a-time rule: you draw a whole wall and both
     // builders walk it and put it up, without anyone deciding which bit is theirs.
-    RC.Keep.tickBuilders(g, crew);
+    RC.Keep.tickBuilders(g, crew, dt);
     RC.Keep.syncGates(g);
 
     if (s.banner) { s.banner.t -= dt; if (s.banner.t <= 0) s.banner = null; }
@@ -1082,6 +1156,8 @@ RC.Kids = (function () {
         ringAt: g.crystal ? { x: g.crystal.x, y: g.crystal.y } : null,
         worker: !!workerOf(g, owner),
         pieces: RC.Keep.pieceCount(g), max: RC.Keep.PIECE_MAX,
+        removing: g.placing === RC.Keep.DEMO,
+        marked: RC.Keep.demoCount(g),
       },
       // Build Day, the ready vote, and the name over the gate.
       day: {
@@ -1089,6 +1165,10 @@ RC.Kids = (function () {
         remain: s.phase === 'build' ? Math.max(0, s.timer) : 0,
         elapsed: s.dayT || 0,
         canStart: (s.dayT || 0) >= CFG.DAY_MIN,
+        // Shards stop after DAY_PAID. Said out loud, because a number that quietly
+        // stops moving is the kind of thing a child notices, cannot explain, and
+        // concludes is broken.
+        paying: (s.dayT || 0) < CFG.DAY_PAID,
         ready: !!s.ready[owner],
         readyCount: defenders(g).filter(o => s.ready[o]).length,
         need: defenders(g).length,
@@ -1194,9 +1274,9 @@ RC.Kids = (function () {
     CFG, CARDS, KITS, ROSTER, UNLOCK_WAVES, FLAVOURS, LANE_AT,
     heroCards, sigHud,
     buildRing, inBuildRing, buildCap, buildUsed, canBuild, build, kitBuild,
-    workerOf, workersOf, spawnWorker,
+    workerOf, workersOf, spawnWorker, remove,
     netState, applyNetState,
-    kitOf, costOf, timeOf, roster, waveSize, hpMul, weightAt, compose,
+    kitOf, costOf, timeOf, roster, waveSize, hpMul, weightAt, compose, keepMul,
     flavourFor, waveLabel, offer, choose, autoPick, buy, freeSquad,
     laneCount, lanesOf, openLanes, laneName, defenders, per, baseOf, buildingNow,
     allReady, setReady, dayBreaks, nightFalls, crack, stopForToday,

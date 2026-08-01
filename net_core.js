@@ -103,6 +103,10 @@ window.RC = window.RC || {};
       // The ready vote. Unanimous and authoritative: one client cannot start the
       // night on the other's behalf, and cannot un-ready once night has fallen.
       case 'kready': { if (game.kids && RC.Kids) RC.Kids.setReady(game, owner, c.on); break; }
+      // Cancel / demolish. Same shape as kbuild — a whole dragged row in one message —
+      // and authoritative for the same reason: the refund is money, so the server
+      // decides what a piece was worth and whether it was ever finished.
+      case 'kdemo': { if (game.kids && RC.Kids) RC.Kids.remove(game, c.x, c.y, owner, c.cells); break; }
       // Opening and shutting the gate by hand. Ownership is not checked because the
       // keep belongs to everyone defending it — that is the whole point of it.
       case 'kgate': {

@@ -32,7 +32,10 @@ Works in any modern browser and is touch-friendly for iPad and tablets.
   whatever outline you actually built. Between raids it is **Build Day** — nothing attacks,
   there is no clock, and night falls when the players press Ready. Up to three of you share
   **one keep and one pile of shards**: anyone can build anywhere, anyone can repair anything,
-  and the builders work the plan on their own. **Your keep is saved**, and when the crystal
+  and your builder works the plan on its own. Nothing is
+  permanent — the **Remove** tool undoes anything still going up for a full refund, and
+  marks anything already standing for demolition, which your builder walks over and knocks
+  down for half the shards back. **Your keep is saved**, and when the crystal
   falls it cracks rather than ending the run — the castle is patched up, not lost.
 - **An introduction film** — a wordless ~2:45 3D short that plays once, the first time a player
   names themselves, and is replayable any time from the start screen. It opens on why the Rift
