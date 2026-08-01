@@ -31,6 +31,9 @@ require('../maps.js');
 require('../pathfind.js');
 require('../entities.js');
 require('../ai.js');
+// keep.js is part of the game core now — game.js asks it who owns the keep the
+// moment a Crystal Defense map is built, so it loads with the rest of the sim.
+require('../keep.js');
 require('../survival.js');
 require('../kids.js');
 require('../game.js');
@@ -158,6 +161,10 @@ while (cleared < 10 && !g.over && guard < 60000) {
     cleared = before2;
     continue;                      // choose() unpauses; loop round and keep ticking
   }
+  // Build Day is untimed and ends on a Ready vote, so the least-skilful-player
+  // model has to press it. A harness that never does would sit out a full DAY_MAX
+  // per night and "prove" the mode stalls — which is the phase working, not failing.
+  if (s.phase === 'build') K.setReady(g, 1, true);
   if (s.banner && s.banner.ic === '🔓') { sawUnlockBanner = true; }
   if (s.wave > maxWave) {
     maxWave = s.wave;
@@ -282,13 +289,17 @@ head('CO-OP — two defenders, two economies, two reward cards');
   const r1 = K.roster(gc, 1), r3 = K.roster(gc, 3);
   ok(r1[0].t !== r3[0].t, 'the two players get their own faction kits (' + r1[0].t + ' vs ' + r3[0].t + ')');
 
-  // Buying is private: player 3's purchase must not spend player 1's shards.
-  const sh1 = gc.res[1].shard, sh3 = gc.res[3].shard;
+  // Buying is SHARED now, and that is the point of the rework: two children
+  // building one castle should not be running two banks. The first thing separate
+  // wallets produce is that neither can afford the Steel Wall and both are certain
+  // the other should pay for it. What stays private is the base a fighter comes
+  // out of and the reward card you are dealt — the decisions, not the money.
+  const pile = K.per && RC.Keep.shards(gc);
   ok(K.buy(gc, r3[0].t, 3) === true, 'player 3 can buy from their own base');
-  ok(gc.res[1].shard === sh1, "player 3's purchase did not touch player 1's shards");
-  ok(gc.res[3].shard < sh3, "player 3's purchase did spend player 3's shards");
+  ok(RC.Keep.shards(gc) < pile, "player 3's purchase came out of the shared pile");
+  ok(gc.res[RC.Keep.bank(gc)].shard === RC.Keep.purse(gc).shard, 'there is exactly one pile');
   ok(gc.kidsBases[3].queue.length === 1 && gc.kidsBases[1].queue.length === 0,
-     "the fighter queued at player 3's own base");
+     "the fighter still queued at player 3's OWN base — the army stays yours")
   ok(K.buy(gc, r1[0].t, 3) === false, "player 3 cannot buy from player 1's faction kit");
 
   // Co-op must never pause: the server's loop cannot stop for one player's card screen.
@@ -309,7 +320,7 @@ head('CO-OP — two defenders, two economies, two reward cards');
   ok(K.hud(gc, 3).waitingFor === 0 && K.hud(gc, 1).waitingFor === 1,
      'the HUD says who is still deciding');
   ok(K.choose(gc, K.per(gc, 3).offer[0].id, 3) === true, 'player 3 takes a card');
-  ok(sc.phase === 'gap', 'the run resumes once BOTH have chosen');
+  ok(sc.phase === 'build', 'the run hands back a Build Day once BOTH have chosen');
 
   // Nobody chooses: the timer must pick for them rather than stalling the room forever.
   const gd = new RC.Game(RC.MAPS[0], RC.MODES['1v1']);
@@ -319,7 +330,7 @@ head('CO-OP — two defenders, two economies, two reward cards');
   gd.update(DT);
   ok(sd.phase === 'reward', 'reward phase opened for the AFK test');
   for (let i = 0; i < Math.ceil(K.CFG.PICK / DT) + 4; i++) gd.update(DT);
-  ok(sd.phase === 'gap', 'an unanswered card screen times out instead of stalling the room');
+  ok(sd.phase === 'build', 'an unanswered card screen times out instead of stalling the room');
   ok(Object.keys(K.per(gd, 1).taken || {}).length === 1, 'player 1 was given a card anyway');
   ok(Object.keys(K.per(gd, 3).taken || {}).length === 1, 'player 3 was given a card anyway');
 
@@ -358,18 +369,20 @@ head('NETCODE — an online client that never ticks the sim');
   ok(K.hud(cli, 1).offer !== null, "the other player's cards travel too (the HUD picks by owner)");
 
   // And the two player actions are authoritative commands, not local calls.
-  const before = host.res[3].shard;
+  const before = RC.Keep.shards(host);
   RC.Net.applyCommand(host, 3, { t: 'kbuy', ut: K.roster(host, 3)[0].t });
-  ok(host.res[3].shard < before, "a kbuy command spends the commanding owner's shards");
+  ok(RC.Keep.shards(host) < before, 'a kbuy command spends from the shared pile');
   ok(host.kidsBases[3].queue.length === 1, 'and queues at their own base');
   const card = K.per(host, 1).offer[0].id;
   RC.Net.applyCommand(host, 1, { t: 'kcard', id: card });
   ok(K.per(host, 1).picked === true, "a kcard command takes that owner's card");
   ok(K.per(host, 3).picked === false, "and does not take the other player's");
-  // A client cannot buy for someone else: the command carries the owner, not the client.
-  const other = host.res[1].shard;
+  // A client still cannot ACT for someone else even though the money is shared: the
+  // command carries the owner, so owner 3's purchase queues at owner 3's base and
+  // nowhere else. Shared money, separate hands.
+  const q1 = host.kidsBases[1].queue.length;
   RC.Net.applyCommand(host, 3, { t: 'kbuy', ut: K.roster(host, 3)[0].t });
-  ok(host.res[1].shard === other, "owner 3's commands can never spend owner 1's shards");
+  ok(host.kidsBases[1].queue.length === q1, "owner 3's commands can never queue at owner 1's base");
 }
 
 // ── 7. Every faction has a working kit ─────────────────────────────────────
@@ -406,9 +419,12 @@ head('NO RTS — the simplifications hold');
   ok(gk.nodes.length === 0, 'there are no shard nodes to mine, has ' + gk.nodes.length);
   // There is exactly ONE worker, and it is a builder: no mining, no dropoff, no economy
   // to forget. That distinction is the whole reason a worker was allowed back in.
+  // A CREW of builders, not one. Once a gesture can lay a whole row, the cost of
+  // building stops being the build time and becomes the walk between pieces — one
+  // builder spends most of a Build Day on its feet.
   const workers = gk.units.filter(u => u.def.worker);
-  ok(workers.length === 1, 'exactly one worker, got ' + workers.length);
-  ok(workers[0].free === true, 'the builder costs no supply — it is a tool, not an army slot');
+  ok(workers.length === K.CFG.BUILDERS, 'a crew of ' + K.CFG.BUILDERS + ' builders, got ' + workers.length);
+  ok(workers.every(w => w.free === true), 'the builders cost no supply — tools, not army slots');
   ok(gk.nodes.length === 0, 'and there is nothing for it to mine, so it cannot be mismanaged');
   ok(gk.supply(1).max === K.CFG.POP, 'population is a flat cap, not a supply-building game');
   // Income arrives on its own, with nothing to click.
@@ -417,8 +433,10 @@ head('NO RTS — the simplifications hold');
   ok(gk.res[1].shard > before, 'shards come in automatically');
   ok(Math.abs((gk.res[1].shard - before) - K.CFG.INCOME) < K.CFG.INCOME * 0.25,
      'income is about INCOME per second');
-  // Only the two starter buildings exist: the crystal and the one base.
-  ok(gk.buildings.length === 2, 'a solo run starts with exactly the crystal and one base, has ' + gk.buildings.length);
+  // Only the two starter buildings exist: the crystal and the one base. (A returning
+  // player's saved keep is restored on top of this — see keep_test — but a run with
+  // no save starts bare.)
+  ok(gk.buildings.length === 2, 'a solo run with no saved keep starts with the crystal and one base, has ' + gk.buildings.length);
   // The build list is defence only, and it follows the RACE — a Gloop kid puts up Venom
   // Spires. The entry with no `t` is the tower placeholder that kidBuildFor() fills in.
   const kb = RC.kidBuildFor('forge');
@@ -501,17 +519,30 @@ head('BUILDING — a fort around the crystal');
      'it cost the KID price (' + kidCost + '), not the Versus price (' + RC.BUILDINGS.stonethrower.cost + ')');
   ok(RC.BUILDINGS.stonethrower.cost !== kidCost, 'and those two really are different');
 
-  // The slot cap holds, and it grows as waves are cleared.
+  // The cap is a TOWER cap now. It used to count every piece and stop at fourteen,
+  // which meant a keep could never be bigger than a shed — and the point of the mode
+  // is that the thing you built last time gets bigger. Walls are limited by what
+  // they cost; towers are the mode's damage and still need a ceiling.
   const capNow = K.buildCap(gb);
-  gb.res[1].shard = 99999;
-  let n = 0;
-  for (let i = 0; i < 30 && K.buildUsed(gb, 1) < capNow + 3; i++) {
-    if (K.build(gb, 'rampart', c.x - 300 + (i % 6) * 60, c.y - 240 + Math.floor(i / 6) * 60, 1)) n++;
+  gb.res[RC.Keep.bank(gb)].shard = 99999;
+  const tower = RC.Keep.menuFor('forge').find(m => m.group === 'tower').t;
+  const G = RC.Keep.GRID;
+  for (let i = 0; i < 30 && RC.Keep.towerUsed(gb) < capNow + 3; i++) {
+    const p = RC.Keep.snap(c.x - 300 + (i % 6) * G * 2, c.y - 240 + Math.floor(i / 6) * G * 2);
+    K.build(gb, tower, p.x, p.y, 1, [p]);
   }
-  ok(K.buildUsed(gb, 1) === capNow, 'the cap holds at ' + capNow + ' however many times you tap');
+  ok(RC.Keep.towerUsed(gb) === capNow, 'the tower cap holds at ' + capNow + ' however many times you tap');
+  // ...and the walls are not capped with them, which is the whole change.
+  const wallsBefore = RC.Keep.pieceCount(gb);
+  for (let i = 0; i < 20; i++) {
+    const p = RC.Keep.snap(c.x + 200 + i * G, c.y + 300);
+    K.build(gb, 'logwall', p.x, p.y, 1, [p]);
+  }
+  ok(RC.Keep.pieceCount(gb) > wallsBefore + 10,
+     'but walls keep going up past it (' + wallsBefore + ' -> ' + RC.Keep.pieceCount(gb) + ')');
   const s2 = K.st(gb);
   s2.wave = 10;
-  ok(K.buildCap(gb) > capNow, 'clearing waves earns more slots (' + capNow + ' -> ' + K.buildCap(gb) + ')');
+  ok(K.buildCap(gb) > capNow, 'and surviving nights earns more towers (' + capNow + ' -> ' + K.buildCap(gb) + ')');
 
   // A wall is a wall: it blocks, it does not shoot.
   const walls = RC.kidBuildFor('forge').filter(b => RC.BUILDINGS[b.t].wall);
@@ -531,10 +562,9 @@ head('BUILDING — a fort around the crystal');
   ok(byCost[0].cost < RC.kidBuildFor('forge').find(b => RC.BUILDINGS[b.t].tower).cost, 'and walls start cheaper than a tower');
 
   // The builder walks back out free if it dies — losing it is a pause, not a run-ender.
-  const w = K.workerOf(gb, 1);
-  w.dead = true;
+  K.workersOf(gb, 1).forEach(w => { w.dead = true; });
   gb.units = gb.units.filter(u => !u.dead);
-  ok(!K.workerOf(gb, 1), 'the builder is gone');
+  ok(!K.workerOf(gb, 1), 'the whole crew is gone');
   for (let i = 0; i < 30 * (K.CFG.WORKER_RESPAWN + 2); i++) gb.update(DT);
   ok(!!K.workerOf(gb, 1), 'and a replacement arrives on its own within ' + K.CFG.WORKER_RESPAWN + 's');
 }

@@ -38,6 +38,28 @@ RC.KidsUI = (function () {
            font-family:inherit; display:none; }
 #kids-ui.on { display:block; }
 
+/* ── Build Day ────────────────────────────────────────────────────────────
+   Top-centre, under the chips, because it is the most important thing on the
+   screen while it is there and irrelevant the rest of the time. Warm colours on
+   purpose: this bar only ever appears when nothing is attacking, and it should
+   feel like the opposite of the red the raid brings. */
+#kid-day { position:absolute; top:64px; left:50%; transform:translateX(-50%);
+           display:none; flex-direction:column; align-items:center; gap:7px;
+           pointer-events:auto; }
+#kid-day.on { display:flex; }
+#kid-dayname { color:#ffe6b0; font-size:15px; font-weight:800; letter-spacing:.06em;
+               text-shadow:0 2px 10px rgba(0,0,0,.7); }
+#kid-daybtn { background:linear-gradient(180deg,#ffc861,#f0912a); color:#241202;
+              border:0; border-radius:16px; padding:15px 30px; font-size:19px;
+              font-weight:800; font-family:inherit; cursor:pointer;
+              box-shadow:0 6px 0 #a85c12, 0 10px 26px rgba(0,0,0,.45); }
+#kid-daybtn:active { transform:translateY(3px); box-shadow:0 3px 0 #a85c12; }
+#kid-daybtn:disabled { filter:grayscale(.6); opacity:.6; cursor:default; }
+#kid-daybtn.waiting { background:linear-gradient(180deg,#9fe8a8,#4fae63); color:#0d2412;
+                      box-shadow:0 6px 0 #2c6b3a, 0 10px 26px rgba(0,0,0,.45); }
+#kid-dayclock { color:#ffb0b0; font-size:12px; font-weight:700; display:none; }
+#kid-dayclock.on { display:block; }
+
 /* Top strip — crystal health, wave name, timer. The only three numbers in the mode. */
 #kid-top { position:absolute; top:10px; left:50%; transform:translateX(-50%);
            display:flex; gap:10px; align-items:center; pointer-events:none; }
@@ -336,6 +358,11 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
           <div class="kid-tab" data-focus="builder"><span class="ic">🔨</span>Build</div>
         </div>
       </div>
+      <div id="kid-day">
+        <div id="kid-dayname" title="Tap your Signpost to rename the keep">My Keep</div>
+        <button id="kid-daybtn" type="button">🌙 Start the night</button>
+        <div id="kid-dayclock"></div>
+      </div>
       <div id="kid-placing">Tap where you want it!</div>
       <div id="kid-qe"></div>
       <div id="kid-sig">
@@ -362,6 +389,10 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     stage.appendChild(root);
 
     els = {
+      day: root.querySelector('#kid-day'),
+      dayName: root.querySelector('#kid-dayname'),
+      dayBtn: root.querySelector('#kid-daybtn'),
+      dayClock: root.querySelector('#kid-dayclock'),
       chp: root.querySelector('#kid-chp'),
       cfill: root.querySelector('#kid-cfill'),
       wave: root.querySelector('#kid-wave'),
@@ -394,6 +425,28 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     // the same thing tapping the builder or the base on the map does. One source of truth
     // for "what am I looking at", so the two routes can never disagree — and tapping empty
     // ground closes whichever panel was open, for free, because it clears the selection.
+    // Ready. Sent as a command rather than set locally, because in co-op the vote is
+    // unanimous and the server is the only place that can know both halves of it.
+    els.dayBtn.addEventListener('pointerdown', ev => {
+      ev.preventDefault();
+      if (!g || !RC.Kids || els.dayBtn.disabled) return;
+      const h = RC.Kids.hud(g, g.playerOwner);
+      RC.cmd(g, { t: 'kready', on: !(h.day && h.day.ready) });
+      if (RC.Audio) RC.Audio.play('select');
+    });
+
+    // Naming the keep. The prompt is deliberately the browser's own: it is the one
+    // text-entry control that already works with a tablet keyboard, and this is the
+    // only place in the mode a child types anything.
+    els.dayName.addEventListener('pointerdown', ev => {
+      ev.preventDefault();
+      if (!g || !RC.Keep) return;
+      const cur = (g._keepSave && g._keepSave.name) || 'My Keep';
+      const next = window.prompt('What is your keep called?', cur);
+      if (next == null) return;
+      g._keepSave = RC.Keep.rename(next);
+    });
+
     els.tabs.forEach(tab => {
       tab.addEventListener('pointerdown', ev => {
         ev.preventDefault();
@@ -522,6 +575,34 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       els.busyNm.textContent = busy.name + '…';
       els.busyFill.style.width = Math.round(busy.pct * 100) + '%';
     }
+    renderDay(h);
+  }
+
+  // ── Build Day ─────────────────────────────────────────────────────────────
+  //
+  // The whole phase hangs off one button, so that button has to carry three
+  // things at once: that there is no timer, that the night starts when YOU say so,
+  // and — in co-op — that your friend has to agree. It says all three in one line
+  // rather than in a tooltip nobody will open.
+  function renderDay(h) {
+    const d = h.day;
+    if (!els.day) return;
+    els.day.classList.toggle('on', !!d && d.on);
+    if (!d || !d.on) return;
+    els.dayName.textContent = d.name;
+    const solo = d.need <= 1;
+    if (d.ready && !solo) {
+      els.dayBtn.textContent = '✓ Ready — waiting for your friend (' + d.readyCount + '/' + d.need + ')';
+      els.dayBtn.classList.add('waiting');
+    } else {
+      els.dayBtn.textContent = solo ? '🌙 Start the night' : '🌙 Ready for night (' + d.readyCount + '/' + d.need + ')';
+      els.dayBtn.classList.remove('waiting');
+    }
+    els.dayBtn.disabled = !d.canStart;
+    // The backstop clock is shown only once it is close enough to matter. Showing it
+    // from the first second would put back the timer this phase exists to remove.
+    els.dayClock.classList.toggle('on', d.remain < 60);
+    els.dayClock.textContent = d.remain < 60 ? 'night falls in ' + Math.ceil(d.remain) + 's' : '';
   }
 
   function renderBuild(h) {
@@ -551,27 +632,36 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       slots.id = 'kid-slots';
       els.build.appendChild(slots);
     }
-    // Affordability, armed state, and the slot count. `busy` greys everything: one
-    // builder means one building at a time, and the pill above says which one.
+    // Affordability and armed state. Nothing greys out because a build is in
+    // progress any more — you can plan as much as you can pay for, and the builders
+    // work the plan. Only the tower cap still turns its own buttons off, and only
+    // its own: the old code greyed the WHOLE bar, so a child who could not afford a
+    // tower was told they could not afford a flag either.
     const nodes = els.build.querySelectorAll('.kid-bb');
     for (let i = 0; i < nodes.length; i++) {
       const it = b.items[i];
       if (!it) continue;
-      const blocked = b.used >= b.cap || !!h.busy;
-      nodes[i].classList.toggle('poor', h.shard < it.cost || blocked);
+      const capped = it.group === 'tower' && b.used >= b.cap;
+      nodes[i].classList.toggle('poor', h.shard < it.cost || capped);
       nodes[i].classList.toggle('on', g.placing === it.t);
+      nodes[i].title = capped ? 'That is all the towers for now — survive a night for another'
+                              : (it.kid || '');
     }
     const slots = els.build.querySelector('#kid-slots');
     if (slots) {
-      slots.textContent = '🧰 ' + b.used + ' / ' + b.cap;
+      slots.textContent = '🗼 ' + b.used + '/' + b.cap + '   🧱 ' + (b.pieces || 0);
       slots.classList.toggle('full', b.used >= b.cap);
-      slots.title = 'Buildings you have room for. Clear waves to earn more slots.';
+      slots.title = 'Towers you have room for, and how many pieces your keep is made of.';
     }
     const armed = !!g.placing;
     els.placing.classList.toggle('on', armed);
     if (armed) {
       const it = b.items.find(i => i.t === g.placing);
-      els.placing.textContent = (it ? it.ic + ' ' + it.role + ' — ' : '') + 'tap near the crystal to place it';
+      // The instruction changed with the mechanic, and it has to: a child told to
+      // "tap to place it" will tap, and never discover the gesture the whole mode
+      // is now built around.
+      els.placing.textContent = (it ? it.ic + ' ' + it.role + ' — ' : '') +
+        'tap to place, or DRAG to build a whole row';
     }
   }
 

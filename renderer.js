@@ -162,12 +162,14 @@ RC.Renderer = (function () {
     (g.obstacles || []).forEach(o => drawObstacle(o));
     g.nodes.forEach(n => drawNode(n));
     g.buildings.forEach(b => drawBuilding(g, b));
+    drawKeepTrim(g);                  // battlements, corner posts, open gates
     g.fx.forEach(f => drawShot(f));
     g.units.forEach(u => drawUnit(g, u));
+    drawKeepNight(g, VW, VH);         // 밤 — Build Day is bright, the raid is not
     drawFog(g, VW, VH);               // 전장의 안개 — 적/지형을 덮는다
     drawSelection(g);
     drawMarks(g);                     // 명령 표식 + 데미지 숫자
-    if (g.placing) { drawBuildRing(g); drawGhost(g, input); }
+    if (g.placing) { drawBuildRing(g); drawKeepGrid(g, input); drawGhost(g, input); }
 
     ctx.restore();
 
@@ -770,6 +772,57 @@ RC.Renderer = (function () {
     return g.areEnemies(e.owner, g.playerOwner) && !g.visibleAt(e.x, e.y);
   }
 
+  // ── A block of the keep ────────────────────────────────────────────────────
+  //
+  // The generic building body is a rounded box with a four-pixel ink outline and a
+  // trim rectangle inside it. That is right for a factory, which is one object a
+  // player looks at; it is badly wrong for a wall, which is twenty objects a player
+  // is supposed to see as ONE. Rounded corners plus an outline per block is the
+  // exact recipe for "a row of bubbles", and that is what it looked like.
+  //
+  // So a keep piece draws square, extends itself half a cell into every occupied
+  // neighbour, and — the part that actually does the work — outlines only the edges
+  // with nothing beyond them. No inner edges are ever stroked, so a run of twelve
+  // reads as one continuous stretch of wall with a single line around the outside,
+  // which is what a castle wall is.
+  function keepBody(g, b, p, x, y) {
+    const m = RC.Keep.joinMask(g, b);
+    const G = RC.Keep.GRID, half = G / 2;
+    const ink = shade(p.body, -0.72), light = shade(p.body, 0.30), dk = shade(p.body, -0.4);
+    // The footprint, grown into each neighbour so the two halves meet in the middle
+    // of the cell boundary and the seam disappears.
+    const L = (m & 8) ? b.x - half : x, R = (m & 2) ? b.x + half : x + b.w;
+    const T = (m & 1) ? b.y - half : y, B = (m & 4) ? b.y + half : y + b.h;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.fillRect(L + 3, T + 6, R - L, B - T);
+    ctx.fillStyle = dk;
+    ctx.fillRect(L, T, R - L, B - T);
+    ctx.fillStyle = p.body;
+    ctx.fillRect(L, T, R - L, (B - T) * 0.78);
+    ctx.fillStyle = light; ctx.globalAlpha = 0.5;
+    ctx.fillRect(L + 2, T + 2, R - L - 4, (B - T) * 0.22);
+    ctx.globalAlpha = 1;
+    // Courses of stone. Two lines per block, offset by the cell so the joints stagger
+    // along a run the way brickwork does instead of lining up into one long seam.
+    ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(L, b.y - b.h * 0.16); ctx.lineTo(R, b.y - b.h * 0.16);
+    ctx.moveTo(L, b.y + b.h * 0.2); ctx.lineTo(R, b.y + b.h * 0.2);
+    const odd = (RC.Keep.cellX(b.x) + RC.Keep.cellY(b.y)) % 2 ? 0.3 : -0.3;
+    ctx.moveTo(b.x + b.w * odd, b.y - b.h * 0.16); ctx.lineTo(b.x + b.w * odd, b.y + b.h * 0.2);
+    ctx.stroke();
+    // Outer edges only. This is the whole trick.
+    ctx.strokeStyle = ink; ctx.lineWidth = 3; ctx.lineCap = 'square';
+    ctx.beginPath();
+    if (!(m & 1)) { ctx.moveTo(L, T); ctx.lineTo(R, T); }
+    if (!(m & 4)) { ctx.moveTo(L, B); ctx.lineTo(R, B); }
+    if (!(m & 8)) { ctx.moveTo(L, T); ctx.lineTo(L, B); }
+    if (!(m & 2)) { ctx.moveTo(R, T); ctx.lineTo(R, B); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawBuilding(g, b) {
     if (fogged(g, b)) return;
     const p = pal(b.owner);
@@ -826,7 +879,21 @@ RC.Renderer = (function () {
         blitGlow(softGlow(glowCol), b.x, gy, b.w * 0.85, b.h * 0.42, 0.10 + 0.06 * pp);
         ctx.restore();
       }
-      if (b.def.race === 'gloop') {
+      if (g.kids && b.def.decor) {
+        // A decoration is a prop, not a structure. Wrapping a flowerbox in the full
+        // building body — rounded shell, ink outline, rivets, power glow — made a
+        // planter look like a bunker with a plant painted on it, which is the
+        // opposite of the point. It gets a flagstone to stand on and nothing else.
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,.26)';
+        ctx.beginPath(); ctx.ellipse(b.x, b.y + b.h * 0.28, b.w * 0.34, b.h * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = shade(p.dark, -0.15);
+        rrect(b.x - b.w * 0.32, b.y + b.h * 0.06, b.w * 0.64, b.h * 0.26, 4); ctx.fill();
+        ctx.restore();
+      } else if (g.kids && RC.Keep && RC.Keep.joins(b)) {
+        // A keep piece is masonry, not a machine — see keepBody.
+        keepBody(g, b, p, x, y);
+      } else if (b.def.race === 'gloop') {
         // 글룹 — 유기적 점액 덩어리 본체 (둥글둥글, 초록빛)
         gloopBody(b, p, x, y);
       } else if (b.def.race === 'aether') {
@@ -1145,6 +1212,88 @@ RC.Renderer = (function () {
         ctx.fillStyle = '#a25cff';
         ctx.beginPath(); ctx.arc(b.x, b.y - 1, 4.5, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
+      } else if (b.def.decor) {
+        // ── Decorations ──
+        // None of these fight, and that is exactly why they are here. A keep a
+        // child wants to come back to is one that looks like theirs, and the
+        // cheapest way to buy that is four things that cost almost nothing, do
+        // nothing, and are unmistakably a choice somebody made.
+        const tt = performance.now() / 1000;
+        const col = pal(b.owner);
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        if (b.type === 'banner') {
+          ctx.strokeStyle = '#8a7f70'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(-4, 14); ctx.lineTo(-4, -16); ctx.stroke();
+          const wv = Math.sin(tt * 2.4) * 3;
+          ctx.fillStyle = col.body;
+          ctx.beginPath();
+          ctx.moveTo(-3, -15);
+          ctx.quadraticCurveTo(7 + wv, -11, 15, -14 + wv);
+          ctx.lineTo(15, -2 + wv);
+          ctx.quadraticCurveTo(7 - wv, -5, -3, -1);
+          ctx.closePath(); ctx.fill();
+          ctx.fillStyle = col.trim;
+          ctx.fillRect(-3, -10, 12, 2.4);
+        } else if (b.type === 'torch') {
+          ctx.fillStyle = '#6b5442'; ctx.fillRect(-3, -2, 6, 16);
+          const f = 0.75 + 0.25 * Math.sin(tt * 9 + b.id);
+          ctx.fillStyle = '#ff9a3a';
+          ctx.beginPath(); ctx.ellipse(0, -9, 6 * f, 10 * f, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#ffe9a0';
+          ctx.beginPath(); ctx.ellipse(0, -10, 2.8 * f, 5.4 * f, 0, 0, Math.PI * 2); ctx.fill();
+        } else if (b.type === 'planter') {
+          ctx.fillStyle = '#7a5a3c'; ctx.fillRect(-13, 2, 26, 11);
+          ctx.fillStyle = '#5c4229'; ctx.fillRect(-13, 2, 26, 3);
+          const petals = ['#ff8ab0', '#ffd45e', '#9ae86a', '#8fc6ff'];
+          for (let i = 0; i < 4; i++) {
+            const px = -9 + i * 6, sway = Math.sin(tt * 1.6 + i) * 1.4;
+            ctx.strokeStyle = '#3f8a46'; ctx.lineWidth = 1.6;
+            ctx.beginPath(); ctx.moveTo(px, 2); ctx.lineTo(px + sway, -7); ctx.stroke();
+            ctx.fillStyle = petals[(i + b.id) % 4];
+            ctx.beginPath(); ctx.arc(px + sway, -9, 3.2, 0, Math.PI * 2); ctx.fill();
+          }
+        } else if (b.type === 'signpost') {
+          ctx.fillStyle = '#6b5442'; ctx.fillRect(-2.5, -4, 5, 18);
+          ctx.fillStyle = '#c8a97a'; rrect(-17, -16, 34, 14, 3); ctx.fill();
+          ctx.strokeStyle = '#8a6c47'; ctx.lineWidth = 1.6; ctx.stroke();
+          // The keep's name, on the sign, in the world. A name in a menu is a
+          // setting; a name on a post in the middle of your castle is a place.
+          const nm = (g._keepSave && g._keepSave.name) || 'My Keep';
+          ctx.fillStyle = '#4a3521';
+          ctx.font = 'bold 8px system-ui, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(nm.length > 13 ? nm.slice(0, 12) + '…' : nm, 0, -9);
+          ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        }
+        ctx.restore();
+      } else if (b.def.gate) {
+        // ── Gate ──
+        // Two leaves that actually swing. A gate that changed colour to say it was
+        // open would be a status light; a gate that opens is a thing a child can
+        // point at and understand from the far side of the map.
+        const open = RC.Keep && RC.Keep.gateOpen(g, b);
+        const col = pal(b.owner);
+        const hw = b.w / 2, hh = b.h / 2;
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.fillStyle = col.dark;
+        ctx.fillRect(-hw, -hh, 5, b.h);
+        ctx.fillRect(hw - 5, -hh, 5, b.h);
+        const swing = open ? 0.95 : 0;
+        [-1, 1].forEach(s => {
+          ctx.save();
+          ctx.translate(s * (hw - 3), 0);
+          ctx.rotate(s * swing);
+          ctx.fillStyle = '#7a5a3c';
+          ctx.fillRect(s > 0 ? -hw + 3 : -3, -hh + 3, hw - 4, b.h - 6);
+          ctx.fillStyle = 'rgba(0,0,0,.22)';
+          for (let i = 0; i < 3; i++) ctx.fillRect(s > 0 ? -hw + 3 : -3, -hh + 6 + i * 10, hw - 4, 1.8);
+          ctx.restore();
+        });
+        ctx.fillStyle = col.trim;
+        ctx.beginPath(); ctx.arc(0, -hh + 3, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
       } else if (b.def.wall) {
         // ── 벽 ──
         // The body underneath is already drawn and already race-tinted, so each wall only
@@ -3881,22 +4030,171 @@ RC.Renderer = (function () {
     });
   }
 
+  // The ghost shows the WHOLE plan, not one block. A child dragging out a wall has
+  // to see the row they are about to get before they let go — otherwise "drag to
+  // build" is just a click with extra steps, and the first thing they learn is that
+  // it does something they did not predict.
+  //
+  // Every cell is coloured independently, because the interesting case is the row
+  // that is fine for nine blocks and runs into a rock on the tenth: greying that one
+  // cell teaches the rule, where refusing the whole line teaches nothing.
   function drawGhost(g, input) {
     const d = RC.BUILDINGS[g.placing];
-    const x = input.world.x, y = input.world.y;
-    // Crystal Guard asks RC.Kids, which knows about the ring, the slot cap and the kid
-    // price — otherwise the ghost would show green on a spot the build would then refuse.
-    const ok = (g.kids && RC.Kids && RC.Kids.canBuild)
-      ? !RC.Kids.canBuild(g, g.placing, x, y, g.playerOwner)
-      : (g.canPlace(g.placing, x, y, 1) && g.canAfford(1, d.cost));
+    const snap = RC.Input && RC.Input.snapMode && RC.Input.snapMode();
+    const cells = snap && RC.Input.planCells ? RC.Input.planCells()
+                                            : [{ x: input.world.x, y: input.world.y }];
+    const owner = g.playerOwner;
+    const price = (g.kids && RC.Keep) ? ((RC.Keep.itemOf(g.raceOf ? g.raceOf(owner) : 'forge', g.placing) || {}).cost || d.cost) : d.cost;
+    let purse = (g.kids && RC.Keep) ? RC.Keep.shards(g) : Math.floor((g.res[owner] || {}).shard || 0);
+    let spent = 0, okCount = 0;
+
     ctx.save();
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = ok ? C.p1_body : C.hpBad;
-    ctx.fillRect(x - d.w / 2, y - d.h / 2, d.w, d.h);
+    for (const c of cells) {
+      // Each cell is tested against the money that would be LEFT by the time the
+      // plan reaches it, so a row you cannot finish shows you exactly where it stops
+      // rather than promising twelve blocks and building seven.
+      const afford = purse - spent >= price;
+      const ok = afford && ((g.kids && RC.Kids && RC.Kids.canBuild)
+        ? !RC.Keep.why(g, g.placing, c.x, c.y)
+        : (g.canPlace(g.placing, c.x, c.y, owner) && g.canAfford(owner, d.cost)));
+      if (ok) { spent += price; okCount++; }
+      ctx.globalAlpha = ok ? 0.45 : 0.28;
+      ctx.fillStyle = ok ? C.p1_body : C.hpBad;
+      ctx.fillRect(c.x - d.w / 2, c.y - d.h / 2, d.w, d.h);
+      ctx.globalAlpha = ok ? 0.95 : 0.6;
+      ctx.strokeStyle = ok ? C.select : C.hpBad;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(c.x - d.w / 2, c.y - d.h / 2, d.w, d.h);
+    }
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = ok ? C.select : C.hpBad;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x - d.w / 2, y - d.h / 2, d.w, d.h);
+
+    // The tally, on the line itself. A price you have to look away to read is a
+    // price nobody reads.
+    if (snap && cells.length > 1) {
+      const a = cells[0], z = cells[cells.length - 1];
+      const mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2 - d.h / 2 - 16;
+      const label = okCount + ' × ' + price + '💎  =  ' + (okCount * price);
+      ctx.font = 'bold 15px system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const w = ctx.measureText(label).width + 18;
+      ctx.fillStyle = 'rgba(8,14,22,.82)';
+      rrect(mx - w / 2, my - 12, w, 24, 8); ctx.fill();
+      ctx.fillStyle = okCount ? '#bff0ff' : '#ff9aa8';
+      ctx.fillText(label, mx, my);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
+    ctx.restore();
+  }
+
+  // The grid, drawn only while something is armed. Permanent grid lines would turn
+  // a warm hand-drawn map into a spreadsheet; a grid that appears the moment you
+  // pick up a wall and vanishes when you put it down is a tool rather than décor,
+  // and it is what makes "one line" something you can see before you commit to it.
+  function drawKeepGrid(g, input) {
+    if (!RC.Keep || !RC.Input || !RC.Input.snapMode || !RC.Input.snapMode()) return;
+    const G = RC.Keep.GRID;
+    const cx = input.world.x, cy = input.world.y;
+    const R = 5;                                   // cells of grid drawn around the cursor
+    const c = RC.Keep.cellOf(cx, cy);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(180,232,255,.20)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = -R; i <= R + 1; i++) {
+      const x = (c.cx + i) * G, y = (c.cy + i) * G;
+      ctx.moveTo(x, (c.cy - R) * G); ctx.lineTo(x, (c.cy + R + 1) * G);
+      ctx.moveTo((c.cx - R) * G, y); ctx.lineTo((c.cx + R + 1) * G, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Night. The reason this exists is not atmosphere, it is legibility of STATE: a
+  // child needs to know at a glance whether it is safe to be building or whether
+  // something is coming, and a clock cannot tell them that from across a room.
+  // Bright means build, dark means fight — which is also why the torches are worth
+  // buying, because they are the only thing that pushes the dark back.
+  function drawKeepNight(g, VW, VH) {
+    if (!RC.Keep || !g.kids) return;
+    const n = RC.Keep.nightAmt(g);
+    if (n <= 0.01) return;
+    const cam = g.camera;
+    ctx.save();
+    ctx.globalAlpha = n * 0.42;
+    ctx.fillStyle = '#0b1430';
+    ctx.fillRect(cam.x - 40, cam.y - 40, VW + 80, VH + 80);
+    // ...and then carve the light back out of it. Additive, so a torch beside a
+    // wall lights the wall rather than painting a disc on top of it.
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of g.buildings) {
+      if (b.dead || !b.done) continue;
+      const R = b.def.light || (b === g.crystal ? 260 : 0);
+      if (!R) continue;
+      const f = 0.85 + 0.15 * Math.sin(performance.now() / 320 + b.id);
+      blitGlow(softGlow(b === g.crystal ? '150,230,255' : '255,180,90'),
+               b.x, b.y, R * f, R * f, n * (b === g.crystal ? 0.30 : 0.42));
+    }
+    ctx.restore();
+  }
+
+  // ── Joining the keep together ──────────────────────────────────────────────
+  //
+  // This is the single change that turns a row of blocks into a castle wall, and it
+  // is worth being explicit about why it is a RENDERING problem rather than a
+  // gameplay one. Twelve walls in a line already behaved like a wall: they blocked,
+  // they had health, the pathfinder respected them. They just did not LOOK like one,
+  // because there was 14px of grass between each pair, and a child looking at twelve
+  // separate squares does not think "I built a wall", they think "I put down twelve
+  // things". Nothing about the simulation had to change — only whether the game
+  // draws what the player meant.
+  //
+  // Drawn UNDER the buildings, so each piece's own art (the rivets, the spikes, the
+  // logs) still reads on top of the masonry that joins it to its neighbours.
+  function drawKeepTrim(g) {
+    if (!RC.Keep || !g.kids) return;
+    const t = performance.now() / 1000;
+    ctx.save();
+    for (const b of g.buildings) {
+      if (b.dead || !b.done || !RC.Keep.joins(b) || fogged(g, b)) continue;
+      const m = RC.Keep.joinMask(g, b);
+      const col = pal(b.owner);
+      const hw = b.w / 2, hh = b.h / 2;
+      // Crenellations go on the edges with NOTHING beyond them — which is exactly the
+      // outside of the castle. The teeth therefore trace the perimeter of whatever
+      // shape the player actually built, and nobody had to decide what "outside" is.
+      const ink = shade(col.body, -0.72);
+      const teeth = (ax, ay, horiz) => {
+        for (let i = -1; i <= 1; i++) {
+          const px = b.x + (horiz ? i * hw * 0.58 : ax);
+          const py = b.y + (horiz ? ay : i * hh * 0.58);
+          ctx.fillStyle = col.body; ctx.fillRect(px - 4, py - 4, 8, 8);
+          ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.strokeRect(px - 4, py - 4, 8, 8);
+        }
+      };
+      if (!(m & 1)) teeth(0, -hh, true);
+      if (!(m & 4)) teeth(0, hh, true);
+      if (!(m & 8)) teeth(-hw, 0, false);
+      if (!(m & 2)) teeth(hw, 0, false);
+      // A turret post wherever the wall turns. Corners are where a wall looks most
+      // like a fence and least like a castle, and the mask already knows where they
+      // are, so this costs one test and buys the whole silhouette.
+      if (m === 3 || m === 6 || m === 12 || m === 9 || m === 15) {
+        ctx.fillStyle = col.dark;
+        ctx.beginPath(); ctx.arc(b.x, b.y, hw * 0.62, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = col.trim;
+        ctx.beginPath(); ctx.arc(b.x, b.y - 1.5, hw * 0.44, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = ink; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(b.x, b.y, hw * 0.62, 0, Math.PI * 2); ctx.stroke();
+      }
+      // An open gate should read as a doorway from across the map.
+      if (b.def.gate && RC.Keep.gateOpen(g, b)) {
+        ctx.globalAlpha = 0.45 + 0.2 * Math.sin(t * 2);
+        ctx.strokeStyle = '#ffe0a0'; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(b.x, b.y, hw * 0.9, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
     ctx.restore();
   }
 

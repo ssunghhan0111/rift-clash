@@ -4,7 +4,7 @@
 // process, connects two raw WebSocket clients, plays a room from creation through to a
 // live match, and checks the things that only break once a socket is involved:
 //
-//   · the room caps at 2 and a third player is turned away
+//   · the room caps at 3 and a fourth player is turned away
 //   · a lone host cannot start — solo Crystal Guard is the offline mode, not this one
 //   · both players get a seat, an owner id and their own base
 //   · the snapshot carries the wave director, so a client that never ticks the sim has a
@@ -113,7 +113,10 @@ function frame(str) {
     const joined = await A.wait('joined');
     const lob0 = await A.wait('lobby');
     ok(lob0.gameMode === 'kids', 'the room is a kids room, got ' + lob0.gameMode);
-    ok(lob0.cap === 2, 'the cap is 2, got ' + lob0.cap);
+    // Three, not two. Owner 2 is the horde, so seats 1/3/4 are what is left — and a
+    // third child changes the mode qualitatively rather than quantitatively: two
+    // players divide a castle in half, three have to agree on what it is.
+    ok(lob0.cap === 3, 'the cap is 3, got ' + lob0.cap);
     console.log('  room created: gameMode=' + lob0.gameMode + ' cap=' + lob0.cap + ' ✓');
 
     // A lone host must NOT be able to start.
@@ -129,15 +132,24 @@ function frame(str) {
     await sleep(200);
     ok(A.last('lobby').players.length === 2, 'both players are in the lobby');
 
-    // And a third is turned away.
+    // A third is welcome; a fourth is not.
     const C = await client('C'); await C.wait('welcome');
     C.send({ t: 'setName', name: 'Third' });
     await sleep(100);
     C.send({ t: 'join', code: joined.code });
-    const jerr = await C.wait('joinError');
-    ok(/full/i.test(jerr.msg), 'a third player got the wrong refusal: ' + jerr.msg);
-    console.log('  third player refused: "' + jerr.msg + '" ✓');
+    await C.wait('joined');
+    await sleep(200);
+    ok(A.last('lobby').players.length === 3, 'a third player is welcome now');
+    const D = await client('D'); await D.wait('welcome');
+    D.send({ t: 'setName', name: 'Fourth' });
+    await sleep(100);
+    D.send({ t: 'join', code: joined.code });
+    const jerr = await D.wait('joinError');
+    ok(/full/i.test(jerr.msg), 'a fourth player got the wrong refusal: ' + jerr.msg);
+    console.log('  fourth player refused: "' + jerr.msg + '" ✓');
+    D.close();
     C.close();
+    await sleep(250);
 
     head('the match starts');
     B.send({ t: 'race', race: 'gloop' });
@@ -160,7 +172,9 @@ function frame(str) {
     ok(!!snap, 'no snapshot arrived');
     const s = snap.s;
     ok(!!s.kd, 'the snapshot has no Crystal Guard block');
-    ok(s.kd.ph === 'prep' || s.kd.ph === 'spawning', 'the run is in a real phase, got ' + s.kd.ph);
+    // A match now opens on Build Day and stays there until the players say night can
+    // come, so 'build' is the expected opening phase rather than a stall.
+    ok(s.kd.ph === 'build' || s.kd.ph === 'spawning', 'the run is in a real phase, got ' + s.kd.ph);
     ok(s.kd.co === true, 'the snapshot says it is a co-op run');
     ok(!!s.kd.pl && Object.keys(s.kd.pl).length === 2, 'the snapshot carries a slice per defender');
     ok(!!s.kd.pl['1'] && !!s.kd.pl['3'], 'both owners are in the snapshot, got ' + Object.keys(s.kd.pl).join(','));
@@ -172,13 +186,15 @@ function frame(str) {
                 ' defenders=[' + Object.keys(s.kd.pl).join(',') + '] buildings=' + cores.length + ' ✓');
 
     head('buying travels as a command');
-    const before = s.res['3'];
+    // Money is shared now — one keep, one pile — so a purchase by B comes out of the
+    // pile the server holds on seat 1. What stays private is which base it queues at,
+    // which is checked below.
+    const before = s.res['1'];
     // 'globling' is a Gloop starter, and B picked Gloop.
     B.send({ t: 'cmd', c: { t: 'kbuy', ut: 'globling' } });
     await sleep(500);
     const s2 = B.last('snap').s;
-    ok(s2.res['3'] < before, "player B's shards were spent (" + before + ' -> ' + s2.res['3'] + ')');
-    ok(s2.res['1'] >= s.res['1'] - 1, "player A's shards were not touched");
+    ok(s2.res['1'] < before, "player B's purchase came out of the shared pile (" + before + ' -> ' + s2.res['1'] + ')');
     const bQueues = s2.B.filter(b => b.o === 3 && b.q && b.q.length);
     ok(bQueues.length === 1, "the fighter queued at B's own base, saw " + bQueues.length + ' queues');
     console.log('  B bought a Globling: ' + before + ' -> ' + s2.res['3'] + ' shards, queued at own base ✓');

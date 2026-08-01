@@ -26,6 +26,14 @@ Works in any modern browser and is touch-friendly for iPad and tablets.
 - **Fog of war** — per-player vision; enemy units and buildings are hidden in the dark.
 - **Modes & maps** — 1v1 and 2v2 across six planets, co-op Survival against endless waves, and a
   **Daily Challenge** that is the same seed and twist for everybody.
+- **Crystal Defense — build a keep, together.** A castle-building mode rather than a
+  tower-defence one. Everything snaps to a grid and **drag lays a whole row of wall in one
+  gesture**; neighbouring pieces draw joined, with corner turrets and battlements along
+  whatever outline you actually built. Between raids it is **Build Day** — nothing attacks,
+  there is no clock, and night falls when the players press Ready. Up to three of you share
+  **one keep and one pile of shards**: anyone can build anywhere, anyone can repair anything,
+  and the builders work the plan on their own. **Your keep is saved**, and when the crystal
+  falls it cracks rather than ending the run — the castle is patched up, not lost.
 - **An introduction film** — a wordless ~2:45 3D short that plays once, the first time a player
   names themselves, and is replayable any time from the start screen. It opens on why the Rift
   Crystal matters and what came through the tear, then gives each of the five heroes a chapter
@@ -123,6 +131,7 @@ Keys typed into a text box are never treated as game commands.
 |---|---|
 | `index.html` | DOM shell, CSS, start screen, lobby, script includes |
 | `intro.js` | The introduction film — a ~2:45 real-time 3D short played once on first launch |
+| `keep.js` | Crystal Defense's build grid, piece catalogue, day/night state and save file |
 | `vendor/three.min.js` | three.js r149, vendored and loaded lazily by `intro.js` only |
 | `config.js` | All balance numbers, colors, unit/building/race/upgrade definitions |
 | `maps.js` | Map and game-mode definitions |

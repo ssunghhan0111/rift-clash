@@ -18,7 +18,7 @@ RC.Path = (function () {
   // The grid is rebuilt whenever the set of standing buildings changes.
   function signature(game) {
     let s = (game.obstacles || []).length * 7919;
-    for (const b of (game.buildings || [])) if (!b.dead) s = (s * 31 + b.id) | 0;
+    for (const b of (game.buildings || [])) if (!b.dead) s = (s * 31 + b.id + (b.passable ? 3 : 0) + (b.done ? 11 : 0)) | 0;
     return s;
   }
 
@@ -34,7 +34,22 @@ RC.Path = (function () {
           blocked[cy * cols + cx] = 1;
     };
     for (const o of (game.obstacles || [])) stamp(o.x, o.y, o.w, o.h, PAD);
-    for (const b of (game.buildings || [])) if (!b.dead) stamp(b.x, b.y, b.w, b.h, PAD_B);
+    // Two things are standing but not in the way:
+    //
+    //  · `passable` — an open gate. It still stands, still has hp, still gets
+    //    attacked; it just is not blocking, so units walk through the doorway
+    //    instead of pathing all the way around a door that is open.
+    //
+    //  · An unfinished keep piece. This one is load-bearing for the whole
+    //    drag-to-build idea and was a genuine deadlock: a planned wall enters the
+    //    world as a site immediately, the site blocks the nav grid, and the grid
+    //    blocks the only cells from which a builder could reach it — so a builder
+    //    sent to build a wall could not get to the wall because of the wall. One
+    //    piece at a time hid it (you can always squeeze alongside a single block);
+    //    a twelve-block row cannot be squeezed alongside. A foundation is not a
+    //    wall yet, so it does not block until it is one.
+    const site = b => b.def && b.def.snap && !b.done;
+    for (const b of (game.buildings || [])) if (!b.dead && !b.passable && !site(b)) stamp(b.x, b.y, b.w, b.h, PAD_B);
     game._nav = { cols, rows, blocked, tile: TILE, sig: signature(game) };
     return game._nav;
   }

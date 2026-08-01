@@ -25,7 +25,7 @@ global.localStorage = {
   setItem: (k, v) => { store[k] = String(v); },
   removeItem: k => { delete store[k]; },
 };
-['config', 'maps', 'pathfind', 'entities', 'game', 'ai', 'daily', 'survival', 'kids', 'net_core', 'progress', 'profile']
+['config', 'maps', 'pathfind', 'entities', 'game', 'ai', 'daily', 'keep', 'survival', 'kids', 'net_core', 'progress', 'profile']
   .forEach(m => require('../' + m + '.js'));
 
 let pass = 0, fail = 0;

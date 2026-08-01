@@ -60,6 +60,10 @@ window.RC = window.RC || {};
   const cv = document.getElementById('screen');
   const mini = document.getElementById('minimap');
   const game = new RC.Game();
+  // The one live match, reachable from the console and from tests. Everything that
+  // needs it is already handed it explicitly at init; this is a handle, not a
+  // dependency — nothing in the codebase reads RC.game to do its job.
+  RC.game = game;
 
   // Keep the canvas backing store the same size as the box it is displayed in. If the two
   // drift apart, every click is off by the ratio between them — an error that grows with
@@ -745,11 +749,81 @@ window.RC = window.RC || {};
     show('ss-onlinehint', m === 'vs', 'block');
     show('ss-survivalhint', full, 'block');
     show('ss-kidshint', simple, 'block');
+    renderKeepCard(simple);
     // Daily now lives in the always-visible front-page banner (rendered in buildStartScreen).
     const rh = document.getElementById('race-h');
     if (rh) rh.textContent = defend ? 'Choose Your Army' : 'Choose Your Army (the computer takes another)';
     buildDepths();
   }
+
+  // ── Your keep, on the front page ──────────────────────
+  // The save file is the point of the mode; a button that says "Play" does not
+  // convey that anything survived. So the card draws the actual plan — every piece
+  // where you left it — and the first thing a returning player sees is the castle
+  // they made, not a menu entry.
+  function renderKeepCard(show) {
+    const card = document.getElementById('keep-card');
+    if (!card) return;
+    card.classList.toggle('on', !!show);
+    if (!show || !RC.Keep) return;
+    const k = RC.Keep.load();
+    document.getElementById('keep-name').textContent = k.name;
+    const stats = document.getElementById('keep-stats');
+    stats.innerHTML = k.pieces.length
+      ? '🧱 <b>' + k.pieces.length + '</b> pieces standing<br>🌙 best night: <b>' + (k.best || 0) + '</b>'
+      : 'Nothing built yet — your first Build Day is waiting.';
+    drawKeepMini(k);
+  }
+
+  // A top-down plan of the keep, drawn straight from the saved cells. Colour by
+  // what the piece IS — wall, gate, tower, decoration — because at this size the
+  // shape of the castle and the fact that it has towers on the corners are the only
+  // two things that can survive the scale.
+  function drawKeepMini(k) {
+    const cv = document.getElementById('keep-mini');
+    if (!cv) return;
+    const c = cv.getContext('2d');
+    c.clearRect(0, 0, cv.width, cv.height);
+    c.fillStyle = '#101a24'; c.fillRect(0, 0, cv.width, cv.height);
+    if (!k.pieces.length) {
+      c.fillStyle = 'rgba(255,255,255,.28)';
+      c.font = '13px system-ui, sans-serif'; c.textAlign = 'center';
+      c.fillText('no keep yet', cv.width / 2, cv.height / 2);
+      return;
+    }
+    let x0 = 0, x1 = 0, y0 = 0, y1 = 0;              // the crystal is always cell 0,0
+    for (const p of k.pieces) {
+      x0 = Math.min(x0, p[1]); x1 = Math.max(x1, p[1]);
+      y0 = Math.min(y0, p[2]); y1 = Math.max(y1, p[2]);
+    }
+    const pad = 1.5;
+    const s = Math.min(cv.width / (x1 - x0 + 1 + pad * 2), cv.height / (y1 - y0 + 1 + pad * 2));
+    const ox = (cv.width - (x1 - x0 + 1) * s) / 2 - x0 * s;
+    const oy = (cv.height - (y1 - y0 + 1) * s) / 2 - y0 * s;
+    // The crystal first, so the castle is drawn around something.
+    c.fillStyle = 'rgba(127,233,255,.22)';
+    c.beginPath(); c.arc(ox + 0.5 * s, oy + 0.5 * s, Math.max(4, s * 1.6), 0, Math.PI * 2); c.fill();
+    for (const p of k.pieces) {
+      const d = RC.BUILDINGS[p[0]] || {};
+      c.fillStyle = d.gate ? '#ffcf6b' : d.keepTower ? '#ff8a3a' : d.decor ? '#7fe06a' : '#9fb4c8';
+      c.fillRect(ox + p[1] * s + s * 0.06, oy + p[2] * s + s * 0.06, s * 0.88, s * 0.88);
+    }
+    c.fillStyle = '#7fe9ff';
+    c.beginPath(); c.arc(ox + 0.5 * s, oy + 0.5 * s, Math.max(2, s * 0.34), 0, Math.PI * 2); c.fill();
+  }
+
+  (function initKeepCard() {
+    const b = document.getElementById('keep-rename');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      if (!RC.Keep) return;
+      const cur = RC.Keep.load().name;
+      const next = window.prompt('What is your keep called?', cur);
+      if (next == null) return;
+      RC.Keep.rename(next);
+      renderKeepCard(true);
+    });
+  })();
 
   // ── Campaign (scripted missions) ──────────────────────
   function buildCampaign() {

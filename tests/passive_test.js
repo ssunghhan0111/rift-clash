@@ -13,7 +13,7 @@
 //   · a cosmetic drawn with Math.random() silently reshuffles the seeded sim
 const path = require('path');
 global.window = global;
-['config', 'maps', 'pathfind', 'entities', 'game', 'ai', 'daily', 'survival', 'kids', 'net_core']
+['config', 'maps', 'pathfind', 'entities', 'game', 'ai', 'daily', 'keep', 'survival', 'kids', 'net_core']
   .forEach(m => require('../' + m + '.js'));
 
 let pass = 0, fail = 0;

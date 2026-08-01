@@ -71,10 +71,19 @@ RC.Kids = (function () {
     // One worker per defender that ONLY builds. Income stays automatic, so there is still
     // no economy to forget — the thing this mode has always refused to make a kid manage —
     // but the build-your-fort loop that makes it worth replaying is now there.
-    BUILD_RING: 620,        // how far from the crystal you may build
-    BUILD_BASE: 3,          // slots at wave 0
-    BUILD_PER_WAVE: 0.5,    // +1 slot every two waves
-    BUILD_MAX: 14,          // ceiling, so a turtle cannot wall the whole map
+    // The grid, the catalogue, the caps and the save file live in keep.js now; what
+    // is left here is the clock. Note DAY_MAX is not the LENGTH of a Build Day — a
+    // Build Day is untimed and ends when the players press Ready. It is the backstop
+    // that stops an abandoned co-op run sitting on a build screen until the tab shuts.
+    DAY_MAX: 300,           // seconds before night falls whether anyone is ready or not
+    DAY_MIN: 6,             // ...and the earliest it may end, so a stray tap cannot skip it
+    DAWN: 2.2,              // seconds the sky takes to come back up after a night
+    // Two builders per player, not one. With a whole dragged row in flight the cost
+    // of building stopped being the build TIME and became the walk between pieces —
+    // one builder laying a twelve-block wall spends most of a Build Day on its feet.
+    // Two halves that, and `advanceBuild` already speeds up when they work the same
+    // piece, so a crew is worth more than the sum of its walking.
+    BUILDERS: 2,
     WORKER_RESPAWN: 8,      // seconds before a lost builder walks back out, free
   };
 
@@ -138,34 +147,25 @@ RC.Kids = (function () {
   // never understands why none of them ever shoot. Around the crystal, everything built
   // is doing something, and "build your fort around the crystal" is a rule you can say
   // in one sentence.
-  function buildRing(g) { return CFG.BUILD_RING; }
-  function inBuildRing(g, x, y) {
-    if (!g.crystal) return false;
-    return RC.dist(g.crystal.x, g.crystal.y, x, y) <= buildRing(g);
-  }
-  // Slots grow with the waves, so the fort visibly gets bigger as a reward for surviving.
-  // A flat cap stops the fort growing, and growth is most of why building is fun; no cap
-  // at all lets a patient kid turtle behind twenty towers and remove the tension entirely.
-  function buildCap(g) {
-    const s = st(g);
-    return Math.min(CFG.BUILD_MAX, Math.floor(CFG.BUILD_BASE + CFG.BUILD_PER_WAVE * (s.wave || 0)));
-  }
-  function buildUsed(g, owner) {
-    if (owner == null) owner = g.playerOwner;
-    let n = 0;
-    for (const b of g.buildings) {
-      if (b.dead || b.owner !== owner) continue;
-      if (b.def.isCore || b === g.crystal) continue;     // the base and the crystal are free
-      n++;
-    }
-    return n;
-  }
+  function buildRing(g) { return RC.Keep.ring(g); }
+  function inBuildRing(g, x, y) { return RC.Keep.inRing(g, x, y); }
+  // Only TOWERS are capped now. The old cap counted every piece and topped out at
+  // fourteen, which meant a keep could never be bigger than a shed — and the whole
+  // reason to come back to this mode is that the thing you built last time gets
+  // bigger. Walls and decorations are limited by what they cost, which is a real
+  // limit and a legible one. Towers are the mode's damage and still need a ceiling,
+  // or a patient player puts up twenty and removes the tension the walls create.
+  function buildCap(g) { return RC.Keep.towerCap(g); }
+  function buildUsed(g) { return RC.Keep.towerUsed(g); }
   // The build list depends on the race, because the tower does: a Gloop kid should be
   // putting up Venom Spires, not somebody else's Stonethrower. The walls are shared —
   // they are the mode's own toys rather than faction equipment.
+  // The catalogue lives in keep.js now — walls, the gate, the race's own tower and
+  // the decorations, in the order a castle actually gets made. RC.KID_BUILD stays in
+  // config.js untouched for anything still asking the old question.
   function kitBuild(g, owner) {
     const race = (g && g.raceOf) ? g.raceOf(owner == null ? g.playerOwner : owner) : 'forge';
-    return RC.kidBuildFor ? RC.kidBuildFor(race) : (RC.KID_BUILD || []);
+    return RC.Keep.menuFor(race);
   }
   function buildDefOf(g, t, owner) { return kitBuild(g, owner).find(b => b.t === t) || null; }
 
@@ -174,45 +174,57 @@ RC.Kids = (function () {
   // instead of leaving a kid tapping a spot that will never work.
   // The one thing under construction, or null. There is a single builder per defender, so
   // "is it busy" is a property of the RUN, not of the button that was pressed.
-  function buildingNow(g, owner) {
-    if (owner == null) owner = g.playerOwner;
-    for (const b of (g.buildings || [])) if (b.owner === owner && !b.done && !b.dead) return b;
-    return null;
+  // The piece closest to finishing, and how many are still going up. With a shared
+  // keep and a whole dragged row in flight, "what is being built" is a property of
+  // the plan rather than of a player — and an owner test would have left the second
+  // player watching an empty progress pill while their own builder worked.
+  function buildingNow(g) {
+    let best = null;
+    for (const b of (g.buildings || [])) {
+      if (b.dead || b.done || !RC.Keep.isPiece(b)) continue;
+      if (!best || b.buildProgress > best.buildProgress) best = b;
+    }
+    return best;
+  }
+  function buildingCount(g) {
+    let n = 0;
+    for (const b of (g.buildings || [])) if (!b.dead && !b.done && RC.Keep.isPiece(b)) n++;
+    return n;
   }
 
+  // The old "Finish the X first!" rule is gone. It existed because one builder
+  // trudging between five foundations finished none of them — but the fix for that
+  // was never to forbid the plan, it was to make builders finish what they start and
+  // walk to the next thing unprompted (RC.Keep.tickBuilders). With that in place
+  // there is nothing to wait for, and so nothing to refuse on those grounds.
   function canBuild(g, t, x, y, owner) {
-    if (owner == null) owner = g.playerOwner;
     const bd = buildDefOf(g, t, owner);
     if (!bd) return 'You cannot build that';
-    // One at a time. A kid with shards to spend would otherwise queue five walls the
-    // single builder then trudges between, spending everything and finishing nothing —
-    // and the wave arrives with five foundations and no wall. Waiting for the one you
-    // started is also what makes the choice of WHICH wall matter.
-    const busy = buildingNow(g, owner);
-    if (busy) return 'Finish the ' + (busy.def.name || 'building') + ' first!';
-    if (!inBuildRing(g, x, y)) return 'Build closer to the crystal!';
-    if (buildUsed(g, owner) >= buildCap(g)) return 'No room for more — clear a wave to get another slot';
-    if (!g.res[owner] || g.res[owner].shard < bd.cost) return 'Not enough shards yet';
-    if (!g.canPlace(t, x, y, owner)) return 'Something is in the way';
-    return null;
+    if (!RC.Keep.afford(g, bd.cost)) return 'Not enough shards yet';
+    return RC.Keep.why(g, t, x, y);
   }
 
-  function build(g, t, x, y, owner) {
-    if (owner == null) owner = g.playerOwner;
-    const mine = owner === g.playerOwner;
-    const why = canBuild(g, t, x, y, owner);
-    if (why) { if (mine) g.notify(why); return false; }
+  // A tap and a dragged row come through the same door: a tap is a plan one cell
+  // long. `cells` arrives already snapped from the client and is re-snapped here,
+  // because the server must never trust a coordinate it was handed.
+  function build(g, t, x, y, owner, cells) {
+    const mine = owner == null || owner === g.playerOwner;
+    const list = ((cells && cells.length) ? cells : [{ x: x, y: y }])
+      .slice(0, 40)
+      .map(c => RC.Keep.snap(+c.x || 0, +c.y || 0));
     const bd = buildDefOf(g, t, owner);
-    const worker = workerOf(g, owner);
-    // Kid prices and kid build times, exactly like the fighters — placeBuilding would
-    // otherwise charge the Versus cost, which is more than a whole fighter.
-    const d = RC.BUILDINGS[t];
-    const realCost = d.cost, realTime = d.time;
-    d.cost = bd.cost; d.time = bd.time;
-    let b = null;
-    try { b = g.placeBuilding(t, x, y, owner, worker ? [worker] : []); }
-    finally { d.cost = realCost; d.time = realTime; }
-    if (!b) return false;
+    if (!bd) return false;
+    if (!RC.Keep.afford(g, bd.cost)) { if (mine) g.notify('Not enough shards yet'); return false; }
+    // The plan is judged as a WHOLE, and this matters more than it sounds. Validating
+    // the first cell and refusing the row on it looks reasonable until you watch a
+    // child draw a rectangle: the second wall starts on the corner the first one
+    // already occupies, so every side after the first was silently refused in full.
+    // A row that runs into something should build up to it, not evaporate.
+    const n = RC.Keep.plan(g, t, list);
+    if (!n) {
+      if (mine) g.notify(RC.Keep.why(g, t, list[0].x, list[0].y) || 'No room there');
+      return false;
+    }
     if (mine && RC.Audio) RC.Audio.play('build');
     return true;
   }
@@ -226,8 +238,17 @@ RC.Kids = (function () {
     for (const u of (g.units || [])) if (u.owner === owner && u.def.worker && !u.dead) return u;
     return null;
   }
+  function workersOf(g, owner) {
+    if (owner == null) owner = g.playerOwner;
+    const out = [];
+    for (const u of (g.units || [])) if (u.owner === owner && u.def.worker && !u.dead) out.push(u);
+    return out;
+  }
   function spawnWorker(g, owner) {
-    const home = baseOf(g, owner) || g.crystal;
+    // From the crystal, not from the base. The builders' job is the keep, the keep is
+    // built around the crystal, and starting them at a base off on one flank meant
+    // every first piece of every wall began with a long diagonal walk.
+    const home = g.crystal || baseOf(g, owner);
     if (!home) return null;
     const race = g.raceOf ? g.raceOf(owner) : 'forge';
     const type = (RC.RACES[race] || RC.RACES.forge).worker;
@@ -586,8 +607,7 @@ RC.Kids = (function () {
     const s = st(g);
     if (s.phase !== 'reward') return;
     if (!defenders(g).every(o => per(g, o).picked)) return;
-    s.phase = 'gap';
-    s.timer = CFG.GAP;
+    dayBreaks(g);
     if (g.paused && s.autoPaused) { g.paused = false; s.autoPaused = false; }
     // Tell the kid what is coming BEFORE it arrives. A tip that appears at the same
     // moment as the wave is a caption, not a warning — no time to act on it.
@@ -630,11 +650,11 @@ RC.Kids = (function () {
     if (!b || b.dead || !b.done) return false;
     if (b.queue.length >= CFG.QUEUE_MAX) { say('Too many on the way — wait a moment'); return false; }
     const cost = costOf(type);
-    if (!g.res[owner] || g.res[owner].shard < cost) { say('Not enough shards yet'); return false; }
+    if (!RC.Keep.afford(g, cost)) { say('Not enough shards yet'); return false; }
     const sup = g.supply(owner);
     const d = RC.UNITS[type];
     if (sup.used + d.supply > sup.max) { say('Your army is full!'); return false; }
-    g.res[owner].shard -= cost;
+    RC.Keep.purse(g).shard -= cost;                 // one pile pays for walls AND fighters
     const t = timeOf(type);
     b.queue.push({ type, timeLeft: t, total: t });
     if (RC.Audio && mine) RC.Audio.play('build');
@@ -650,7 +670,8 @@ RC.Kids = (function () {
   function st(g) {
     if (!g._kd) {
       g._kd = {
-        wave: 0, phase: 'prep', timer: CFG.PREP, queue: [], spawnT: 0,
+        wave: 0, phase: 'build', timer: CFG.DAY_MAX, dayT: 0, ready: {}, cracks: 0,
+        queue: [], spawnT: 0, dawnT: 0,
         preview: null, celebT: 0, banner: null, bought: 0, best: 0, autoPaused: false,
         lanes: 1, pl: {},
         // Two or more humans defending. Set here from the roster rather than read off
@@ -765,6 +786,95 @@ RC.Kids = (function () {
     u.attackMoveTo(g.crystal.x, g.crystal.y);
   }
 
+  // ── Build Day ↔ Raid Night ────────────────────────────────────────────────
+  //
+  // Ready is per player and unanimous. A single "start" button in co-op means the
+  // faster child ends the slower one's turn, which is the specific unfairness that
+  // makes two kids stop playing together; and an auto-start timer would put the
+  // clock back that this whole phase exists to remove.
+  function allReady(g) {
+    const d = defenders(g);
+    if (!d.length) return false;
+    return d.every(o => !!st(g).ready[o]);
+  }
+  function setReady(g, owner, on) {
+    const s = st(g);
+    if (s.phase !== 'build') return false;
+    if (owner == null) owner = g.playerOwner;
+    s.ready[owner] = on == null ? !s.ready[owner] : !!on;
+    return true;
+  }
+  function dayBreaks(g) {
+    const s = st(g);
+    s.phase = 'build';
+    s.dayT = 0;
+    s.dawnT = 0;
+    s.timer = CFG.DAY_MAX;
+    s.ready = {};
+    if (RC.Keep) RC.Keep.syncGates(g);
+    const nf = flavourFor(s.wave + 1);
+    s.preview = nf.id === 'normal' ? null : { ic: nf.ic, name: nf.name, tip: nf.tip, col: nf.col };
+    banner(g, '🌅', 'BUILD DAY', 'Build as long as you like — press Ready when you are', '#ffd68a', 3.0);
+  }
+  function nightFalls(g) {
+    const s = st(g);
+    s.ready = {};
+    banner(g, '🌙', 'NIGHT ' + (s.wave + 1), 'Here they come!', '#8fb6ff', 2.2);
+    startWave(g);
+    // AFTER startWave, not before: the gate reads the phase to decide whether it is
+    // open, and startWave is what moves the phase off 'build'. Shutting the gates
+    // first left them standing open into the first tick of the raid — and out of the
+    // nav grid, which is a hole in the wall exactly where the wall has a door.
+    if (RC.Keep) RC.Keep.syncGates(g);
+  }
+
+  // ── The crack ─────────────────────────────────────────────────────────────
+  //
+  // The old rule ended the run when the crystal fell. For a mode whose point is
+  // that you build something over weeks, that is the one outcome you cannot have:
+  // a child who loses an hour of building to one bad night does not build again.
+  //
+  // So the crystal cracks instead. The night ends there and then, the raid is
+  // swept away, the crystal comes back at under half, anything the raid knocked
+  // down is put back from the save at a fraction of its health, and the SAME
+  // night has to be faced again. It still costs something — the night, the
+  // repair, and the shard cost of doing better — but never the castle.
+  function crack(g) {
+    const s = st(g);
+    const c = g.crystal;
+    if (!c) return;
+    c.dead = false;
+    c.hp = Math.max(1, c.maxHp * 0.45);
+    c.shield = c.maxShield || 0;
+    RC.initStatus && RC.initStatus(c);
+    s.cracks = (s.cracks || 0) + 1;
+
+    for (const u of (g.units || [])) if (u.owner === ENEMY && !u.dead) u.dead = true;
+    s.queue = [];
+    s.spawnT = 0;
+
+    const back = (RC.Keep && RC.Keep.rebuild) ? RC.Keep.rebuild(g, 0.4) : 0;
+    for (const b of (g.buildings || [])) {
+      if (b.dead || !RC.Keep.isPiece(b) || !b.done) continue;
+      b.hp = Math.max(b.hp, b.maxHp * 0.4);     // scarred, not ruined
+    }
+    g.fx.push({ abil: 'nova', ax: c.x, ay: c.y, t: 0.7, radius: 260, owner: c.owner });
+    g.shake(0.5);
+    if (RC.Audio) RC.Audio.play('lose');
+    dayBreaks(g);
+    banner(g, '💔', 'THE CRYSTAL CRACKED',
+           back ? 'The keep is patched up — try that night again' : 'Patch it up and try that night again',
+           '#ff8a9a', 3.6);
+  }
+
+  // "Stop for today" — the deliberate end of a session. Saves and hands the run to
+  // the normal end screen. A mode with no losing still needs a way to STOP.
+  function stopForToday(g) {
+    if (RC.Keep && RC.Keep.capture) RC.Keep.capture(g);
+    g.over = 'lose';                   // the end screen's kid branch reads waves, not outcome
+    return true;
+  }
+
   function clearedWave(g) {
     const s = st(g);
     s.phase = 'celebrate';
@@ -776,7 +886,13 @@ RC.Kids = (function () {
     const c = g.crystal;
     if (c && !c.dead) c.hp = Math.min(c.maxHp, c.hp + c.maxHp * CFG.WAVE_HEAL);
 
-    banner(g, '🎉', 'WAVE ' + s.wave + ' CLEARED!', 'Nice work — pick your reward', '#ffd24a', CFG.CELEB);
+    // Save the keep the moment a night is survived, never mid-raid: a snapshot
+    // taken while the walls are coming down would record the rubble instead of
+    // the castle, and the whole promise is that what you built is still there
+    // tomorrow.
+    if (RC.Keep && RC.Keep.capture) RC.Keep.capture(g);
+
+    banner(g, '🎉', 'NIGHT ' + s.wave + ' SURVIVED!', 'The keep held — pick your reward', '#ffd24a', CFG.CELEB);
     party(g);
     if (RC.Audio) RC.Audio.play('win');
     g.shake(0.12);
@@ -808,27 +924,63 @@ RC.Kids = (function () {
     const s = st(g);
     if (g.over) return;
 
-    // Automatic income. The single biggest thing that makes this mode playable by
-    // a kid: there is no economy to forget about. Each defender earns on their own
-    // Shard Rush multiplier, so one player's card never funds the other.
+    // Automatic income, into ONE pile. Two children building one castle should not
+    // be running two banks: the first thing that happens with separate wallets is
+    // that neither can afford the Steel Wall and both are certain the other should
+    // pay for it. Each defender still contributes their own Shard Rush multiplier,
+    // so a card either of them picks makes the shared pile fill faster for both.
+    const keepBank = RC.Keep.bank(g);
+    let mul = 0;
+    for (const o of defenders(g)) mul += (per(g, o).incomeMul || 1);
+    if (g.res[keepBank]) g.res[keepBank].shard += CFG.INCOME * mul * dt;
+
+    const crew = [];
     for (const o of defenders(g)) {
-      if (g.res[o]) g.res[o].shard += CFG.INCOME * (per(g, o).incomeMul || 1) * dt;
       // Replace a lost builder. Free, and after a pause long enough that losing it still
       // stings without ending the kid's ability to build for the rest of the run.
       const p = per(g, o);
-      if (!workerOf(g, o)) {
+      const ws = workersOf(g, o);
+      if (ws.length < CFG.BUILDERS) {
         p.workerT = (p.workerT || 0) + dt;
         if (p.workerT >= CFG.WORKER_RESPAWN) { p.workerT = 0; spawnWorker(g, o); }
       } else p.workerT = 0;
+      for (const w of ws) crew.push(w);
     }
+    // Every builder on the map works the same plan, nearest piece first. This is what
+    // pays for dropping the one-at-a-time rule: you draw a whole wall and both
+    // builders walk it and put it up, without anyone deciding which bit is theirs.
+    RC.Keep.tickBuilders(g, crew);
+    RC.Keep.syncGates(g);
 
     if (s.banner) { s.banner.t -= dt; if (s.banner.t <= 0) s.banner = null; }
-    if (!g.crystal || g.crystal.dead) return;
+    // Checked HERE, ahead of everything, because game.update() tests the crystal a
+    // few lines later and would end the run. In Crystal Defense the crystal does not
+    // die — it cracks. See crack().
+    if (g.crystal && g.crystal.dead) { crack(g); return; }
+    if (!g.crystal) return;
 
     switch (s.phase) {
-      case 'prep':
-        s.timer -= dt;
-        if (s.timer <= 0) startWave(g);
+      // ── BUILD DAY ────────────────────────────────────────────────────────
+      // The change that makes this a building game. It used to be 22 seconds
+      // before the first wave and 4 between them, which is not enough time to
+      // build anything and is exactly enough time to feel harried — so the
+      // building always lost to the fighting, every single wave. Now the day
+      // simply does not end until the players say it does. Nothing attacks,
+      // nothing is on a clock a child can see, and the only thing to do is
+      // build. The night is something you CHOOSE to start.
+      case 'build':
+        if (!s.said) {
+          s.said = 1;
+          banner(g, '🏰', 'BUILD YOUR KEEP', 'Drag to lay a wall. Press Ready when night can come.', '#ffd68a', 4.0);
+        }
+        s.dayT += dt;
+        s.dawnT = Math.min(CFG.DAWN, (s.dawnT || 0) + dt);
+        s.timer = Math.max(0, CFG.DAY_MAX - s.dayT);
+        // DAY_MIN stops a mis-tap on the Ready button skipping the day entirely.
+        if (s.dayT >= CFG.DAY_MIN && allReady(g)) { nightFalls(g); break; }
+        // The backstop exists for the abandoned co-op run, not for the player in
+        // front of the screen — five minutes is far past any honest build.
+        if (s.timer <= 0) nightFalls(g);
         break;
 
       case 'spawning':
@@ -852,7 +1004,7 @@ RC.Kids = (function () {
             p.picked = !p.offer.length;                                  // pool exhausted for them
             if (!p.picked) any = true;
           }
-          if (!any) { s.phase = 'gap'; s.timer = CFG.GAP; }
+          if (!any) { dayBreaks(g); }
           else {
             s.phase = 'reward';
             s.timer = CFG.PICK;
@@ -877,10 +1029,6 @@ RC.Kids = (function () {
         finishReward(g);
         break;
 
-      case 'gap':
-        s.timer -= dt;
-        if (s.timer <= 0) startWave(g);
-        break;
     }
 
     steer(g);
@@ -908,7 +1056,10 @@ RC.Kids = (function () {
       waitingFor: (s.phase === 'reward' && s.coop) ? others.filter(o => !per(g, o).picked).length : 0,
       banner: s.banner,
       roster: roster(g, owner),
-      shard: Math.floor((g.res[owner] || {}).shard || 0),
+      // One number, because there is one pile. Both players watch the same total
+      // go up and the same total go down, which is most of what makes it feel
+      // like one castle rather than two adjacent ones.
+      shard: RC.Keep.shards(g),
       queue: (b && b.queue) || [],
       lanes: s.lanes || 1, laneMax: lanesOf(g).length,
       sig: sigHud(g, owner),
@@ -921,15 +1072,29 @@ RC.Kids = (function () {
       busy: busyHud(g, owner),
       build: {
         items: kitBuild(g, owner).map(b => ({
-          t: b.t, ic: b.ic, cost: b.cost, kid: b.kid,
+          t: b.t, ic: b.ic, cost: b.cost, kid: b.kid, group: b.group || 'wall',
           // The real building name, for the same reason the shop shows the real unit
           // name: a kid who learns "Venom Spire" here knows what it is in Versus too.
           role: (RC.BUILDINGS[b.t] || {}).name || b.role,
         })),
-        used: buildUsed(g, owner), cap: buildCap(g),
+        used: buildUsed(g), cap: buildCap(g),
         ring: buildRing(g),
         ringAt: g.crystal ? { x: g.crystal.x, y: g.crystal.y } : null,
         worker: !!workerOf(g, owner),
+        pieces: RC.Keep.pieceCount(g), max: RC.Keep.PIECE_MAX,
+      },
+      // Build Day, the ready vote, and the name over the gate.
+      day: {
+        on: s.phase === 'build',
+        remain: s.phase === 'build' ? Math.max(0, s.timer) : 0,
+        elapsed: s.dayT || 0,
+        canStart: (s.dayT || 0) >= CFG.DAY_MIN,
+        ready: !!s.ready[owner],
+        readyCount: defenders(g).filter(o => s.ready[o]).length,
+        need: defenders(g).length,
+        night: RC.Keep.nightAmt(g),
+        cracks: s.cracks || 0,
+        name: (g._keepSave && g._keepSave.name) || 'My Keep',
       },
       coop: !!s.coop,
       crystal: g.crystal ? { hp: Math.max(0, Math.round(g.crystal.hp)), max: Math.round(g.crystal.maxHp) } : null,
@@ -953,6 +1118,7 @@ RC.Kids = (function () {
       pl[o] = { i: p.incomeMul, u: p.unlocked, k: p.taken, of: p.offer, fu: p.freshUnlock, pk: !!p.picked };
     }
     return { w: s.wave, ph: s.phase, tm: s.timer, ln: s.lanes, co: !!s.coop,
+             dt: s.dayT || 0, rd: s.ready || {}, ck: s.cracks || 0, dw: s.dawnT || 0,
              pv: s.preview, bn: s.banner, pl };
   }
   // Which sound a freshly arrived banner should make. The server has no RC.Audio, so the
@@ -965,6 +1131,7 @@ RC.Kids = (function () {
     const s = st(g);
     const wasBanner = s.banner && s.banner.title;
     s.wave = n.w; s.phase = n.ph; s.timer = n.tm;
+    s.dayT = n.dt || 0; s.ready = n.rd || {}; s.cracks = n.ck || 0; s.dawnT = n.dw || 0;
     s.lanes = n.ln || 1; s.coop = !!n.co; s.preview = n.pv || null; s.banner = n.bn || null;
     s.pl = s.pl || {};
     for (const o in (n.pl || {})) {
@@ -993,9 +1160,11 @@ RC.Kids = (function () {
   // The building currently going up, as a progress pill. This is the whole explanation for
   // why the build buttons are greyed out, so it has to be visible whenever they are.
   function busyHud(g, owner) {
-    const b = buildingNow(g, owner);
+    const b = buildingNow(g);
     if (!b) return null;
-    return { name: b.def.name || 'Building', ic: (kitBuild(g, owner).find(i => i.t === b.type) || {}).ic || '🧱',
+    const n = buildingCount(g);
+    return { name: (b.def.name || 'Building') + (n > 1 ? '  (+' + (n - 1) + ' more)' : ''),
+             ic: (kitBuild(g, owner).find(i => i.t === b.type) || {}).ic || '🧱',
              pct: Math.max(0, Math.min(1, b.buildProgress || 0)) };
   }
 
@@ -1025,11 +1194,12 @@ RC.Kids = (function () {
     CFG, CARDS, KITS, ROSTER, UNLOCK_WAVES, FLAVOURS, LANE_AT,
     heroCards, sigHud,
     buildRing, inBuildRing, buildCap, buildUsed, canBuild, build, kitBuild,
-    workerOf, spawnWorker,
+    workerOf, workersOf, spawnWorker,
     netState, applyNetState,
     kitOf, costOf, timeOf, roster, waveSize, hpMul, weightAt, compose,
     flavourFor, waveLabel, offer, choose, autoPick, buy, freeSquad,
     laneCount, lanesOf, openLanes, laneName, defenders, per, baseOf, buildingNow,
+    allReady, setReady, dayBreaks, nightFalls, crack, stopForToday,
     update, hud, banner, st,
   };
 })();

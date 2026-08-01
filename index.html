@@ -651,6 +651,25 @@
      read as three different modes rather than three shades of the same one. */
   #ss-kids { background: var(--good); color: #08210f; }
 
+  /* ── The keep card ──────────────────────────────────────────────────────
+     A picture of the thing you made, drawn from the save file. Words about a
+     castle are a description; the plan of it is the castle. */
+  #keep-card { display: none; gap: 16px; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, rgba(127,233,255,.07), rgba(127,233,255,.02));
+    border: 1px solid rgba(127,233,255,.22); border-radius: 14px;
+    padding: 14px 18px; margin: 4px auto 12px; max-width: 620px; }
+  #keep-card.on { display: flex; }
+  #keep-mini { width: 240px; height: 133px; border-radius: 10px;
+    background: #101a24; border: 1px solid var(--line); flex: none; }
+  #keep-info { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  #keep-name { font-size: 19px; font-weight: 800; color: #fff; letter-spacing: .02em; }
+  #keep-stats { font-size: 12.5px; color: var(--dim); line-height: 1.6; }
+  #keep-rename { background: none; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; padding: 4px 12px; font-size: 11.5px; cursor: pointer;
+    font-family: var(--sans); margin-top: 4px; }
+  #keep-rename:hover { color: var(--text); border-color: var(--cyan); }
+  @media (max-width: 620px) { #keep-card { flex-direction: column; } }
+
   /* The Daily Challenge banner used to sit here, between the hero and the game
      modes. Removed from the front page; daily.js and the daily leaderboard board are
      untouched, so re-adding the banner markup is all it would take to bring it back. */
@@ -1495,13 +1514,25 @@
     <button id="ss-start" class="ss-act">🤖 Play vs Computer</button>
     <button id="ss-online" class="ss-act2">👥 Play vs a Friend</button>
   </div>
+  <!-- Your keep, as it stood when you stopped last time. This is the whole reason
+       the layout is saved: a card that says "this is yours and it is still there"
+       is a much better invitation than a button that says Play. -->
+  <div id="keep-card">
+    <canvas id="keep-mini" width="360" height="200"></canvas>
+    <div id="keep-info">
+      <div id="keep-name">My Keep</div>
+      <div id="keep-stats">—</div>
+      <button id="keep-rename" type="button">✏️ Rename</button>
+    </div>
+  </div>
   <div id="act-kids" class="mode-sec row" style="display:none">
-    <button id="ss-kids" class="ss-act">🤖 Play vs Computer</button>
-    <button id="ss-kids-online" class="ss-act2">👥 With a Friend — 2 vs Computer</button>
+    <button id="ss-kids" class="ss-act">🏰 Build &amp; Defend — vs Computer</button>
+    <button id="ss-kids-online" class="ss-act2">👥 Build with a Friend — 3 vs Computer</button>
   </div>
   <div id="ss-kidshint" class="ss-note" style="display:none">
-Made for younger players. <b>No base building, no mining</b> — shards arrive on their own. Three big buttons buy a <b>Tank</b>, an <b>Archer</b> and a <b>Support</b>, and more unlock as you go. Clear a wave and <b>pick one of three rewards</b>. Waves start from one side and open up until they come from <b>every direction</b>.<br>
-    <b>Play vs Computer</b> — just you against the waves. <b>With a Friend</b> — two of you online around one shared crystal, each with your own base, your own fighters and your own reward card.
+Build a castle around the crystal and hold it through the night. <b>Shards arrive on their own</b> — there is no mining. <b>Drag</b> to lay a whole row of wall at once; everything snaps to a grid, so a row is a row. Your builders work the plan on their own.<br>
+    Between nights it is <b>Build Day</b>: nothing attacks and there is no clock. Build for as long as you like and press <b>Ready</b> when night can come. <b>Your keep is saved</b> — and if the crystal cracks, the keep is patched up rather than lost, so nothing you build ever disappears.<br>
+    <b>With Friends</b> — up to three of you online, one castle, one pile of shards. Anyone can build anywhere and anyone can repair anything.
   </div>
   <div id="act-survival" class="mode-sec row">
     <button id="ss-survival" class="ss-act">🤖 Play vs Computer</button>
@@ -1777,6 +1808,10 @@ Made for younger players. <b>No base building, no mining</b> — shards arrive o
 <script src="share.js"></script>
 <script src="fullscreen.js"></script>
 <script src="survival.js"></script>
+<!-- The Keep: the Crystal Defense build grid, piece catalogue and save file.
+     Loads after config.js because it adds building defs, and before kids.js
+     because the wave director asks it about the grid. -->
+<script src="keep.js"></script>
 <script src="kids.js"></script>
 <script src="leaderboard.js"></script>
 <script src="progress.js"></script>

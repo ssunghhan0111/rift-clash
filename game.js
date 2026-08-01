@@ -148,6 +148,7 @@ window.RC = window.RC || {};
       this.hazards = [];      // 지속 지형 효과 — _tickHazards 참조
       this.selection = [];
       this.placing = null;
+      this._keepBank = null; this._keepIx = null; this._keepSave = null;
       // z = zoom. Client-side only, exactly like x/y — the server never reads the
       // camera, so it can never desync a match. Kept across reset() so a player's
       // chosen zoom survives starting the next game.
@@ -834,7 +835,11 @@ window.RC = window.RC || {};
       // The crystal — the thing to defend, and the visual centre of the mode. It belongs
       // to the first defender but every defender is protecting the same one: there is no
       // version of this mode where one player's crystal falls and the other plays on.
-      this.crystal = new RC.Building('crystal', map.crystal.x, map.crystal.y, me.owner, true);
+      // Owned by the keep's seat rather than by "the first defender", so the crystal
+      // and every wall around it answer to the same owner. That is what lets the
+      // second player's builder repair it — an owner test would otherwise leave one
+      // child unable to mend the thing they are both defending.
+      this.crystal = new RC.Building('crystal', map.crystal.x, map.crystal.y, RC.Keep.bank(this), true);
       if (K.CRYSTAL_HP) { this.crystal.maxHp = K.CRYSTAL_HP; this.crystal.hp = K.CRYSTAL_HP; }
       this.buildings.push(this.crystal);
 
@@ -868,11 +873,18 @@ window.RC = window.RC || {};
           this.units.push(h);
           this.heroOf[p.owner] = h;
         }
-        if (K.START_SHARD != null && this.res[p.owner]) this.res[p.owner].shard = K.START_SHARD;
+        // The starting shards land in the shared pile, not in each player's pocket.
+        // Handed out per player they would double in co-op, which is both an economy
+        // bug and the wrong idea: there is one pile.
+        if (K.START_SHARD != null && i === 0 && this.res[RC.Keep.bank(this)]) {
+          this.res[RC.Keep.bank(this)].shard = K.START_SHARD;
+        }
         // One builder each. It does not mine — income stays automatic — it exists purely so
         // the kid can put towers and walls on the map, which is the loop that makes the mode
         // worth replaying. Free of supply: it is a tool, not an army slot.
-        if (RC.Kids && RC.Kids.spawnWorker) RC.Kids.spawnWorker(this, p.owner);
+        if (RC.Kids && RC.Kids.spawnWorker) {
+          for (let k = 0; k < ((RC.Kids.CFG && RC.Kids.CFG.BUILDERS) || 1); k++) RC.Kids.spawnWorker(this, p.owner);
+        }
         // Crystal Guard hands hero upgrades out as reward cards, so the level route is off.
         const hero = this.heroOf[p.owner];
         if (hero && hero.useCardUpgrades) hero.useCardUpgrades();
@@ -886,6 +898,20 @@ window.RC = window.RC || {};
       this.spawn1 = { x: base.x, y: base.y };
       this.camera.x = this.crystal.x - 560;
       this.camera.y = this.crystal.y - 380;
+
+      // Put last session's keep back, finished and paid for. Offline only: the save
+      // lives in the player's own browser, and the server that runs an online match
+      // has no localStorage and no business choosing whose castle everyone plays in.
+      // Co-op therefore starts a fresh keep, which is also the honest answer to
+      // "whose castle is this" — in co-op it is the one you build together tonight.
+      if (RC.Keep) {
+        this._keepSave = RC.Keep.load();
+        if (!RC.online) {
+          const n = RC.Keep.restore(this);
+          if (n) this.notify('Welcome back to ' + this._keepSave.name + ' — ' + n + ' pieces still standing');
+        }
+        RC.Keep.syncGates(this);
+      }
 
       this._initVision();
     }
@@ -1119,8 +1145,15 @@ window.RC = window.RC || {};
       if (y - d.h / 2 < 0 || y + d.h / 2 > CFG.WORLD_H) return false;
       for (const b of this.buildings) {
         if (b.dead) continue;
-        if (Math.abs(b.x - x) < (b.w + d.w) / 2 + pad &&
-            Math.abs(b.y - y) < (b.h + d.h) / 2 + pad) return false;
+        // The 8px breathing room exists so a base does not read as one welded lump.
+        // Two keep pieces are the exact opposite case: they are on a shared grid and
+        // they are SUPPOSED to touch — a castle wall with a gap every block is a
+        // fence. The grid (RC.Keep.GRID) already guarantees they cannot overlap, so
+        // between two snapped pieces the pad is not just unnecessary, it is what
+        // would stop a wall from being a wall.
+        const p = (this.kids && d.snap && b.def.snap) ? 0 : pad;
+        if (Math.abs(b.x - x) < (b.w + d.w) / 2 + p &&
+            Math.abs(b.y - y) < (b.h + d.h) / 2 + p) return false;
       }
       for (const o of this.obstacles) {
         if (Math.abs(o.x - x) < (o.w + d.w) / 2 + pad &&

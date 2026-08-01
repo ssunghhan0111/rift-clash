@@ -93,8 +93,25 @@ window.RC = window.RC || {};
       // the kid price, the ring, the slot cap and the "why not" message are all applied on
       // the authoritative side — a hand-rolled client cannot build outside the ring or
       // past its slots any more than it can buy a fighter it cannot afford.
-      case 'kbuild': { if (game.kids && RC.Kids) RC.Kids.build(game, c.bt, c.x, c.y, owner); break; }
+      // `cells` is a dragged row: the client sends the whole plan in one command
+      // rather than one per block, so a twelve-block wall is one message instead of
+      // twelve independently-rejectable ones. The list is re-snapped and capped
+      // server-side — a hand-rolled client cannot smuggle in off-grid coordinates
+      // or a five-hundred-block plan.
+      case 'kbuild': { if (game.kids && RC.Kids) RC.Kids.build(game, c.bt, c.x, c.y, owner, c.cells); break; }
       case 'kcard': { if (game.kids && RC.Kids) RC.Kids.choose(game, c.id, owner); break; }
+      // The ready vote. Unanimous and authoritative: one client cannot start the
+      // night on the other's behalf, and cannot un-ready once night has fallen.
+      case 'kready': { if (game.kids && RC.Kids) RC.Kids.setReady(game, owner, c.on); break; }
+      // Opening and shutting the gate by hand. Ownership is not checked because the
+      // keep belongs to everyone defending it — that is the whole point of it.
+      case 'kgate': {
+        if (game.kids && RC.Keep) {
+          const b = (game.buildings || []).find(x => x.id === c.id && !x.dead && x.def.gate);
+          if (b) RC.Keep.toggleGate(game, b);
+        }
+        break;
+      }
     }
   }
 

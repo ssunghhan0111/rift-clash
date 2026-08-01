@@ -31,6 +31,7 @@ require('./entities.js');
 require('./game.js');
 require('./ai.js');
 require('./daily.js');          // Daily Challenge seed + twist table (shared with the client)
+require('./keep.js');           // the Crystal Defense grid, catalogue and day/night
 require('./survival.js');       // online co-op Survival wave director
 require('./kids.js');           // online co-op Crystal Guard wave director
 require('./net_core.js');
@@ -566,8 +567,13 @@ const SURVIVAL_SEATS = [1, 3, 4, 5];       // owner 2 is reserved for the wave h
 // and the map gives each defender their own base ringed around the one crystal; four
 // bases around it leaves no room to fight in. Two also keeps the wave curve honest —
 // the whole appeal is a gentle ramp, and it is tuned for one or two armies, not four.
-const KIDS_CAP = 2;
-const KIDS_SEATS = [1, 3];
+// Three, not two. The map has four base rings and owner 2 is the horde, which
+// leaves seats 1, 3 and 4 — and a third child changes the mode qualitatively
+// rather than quantitatively: two players divide a castle in half, three have to
+// agree on what it is. The wave curve is unchanged; with a shared pile a third
+// builder adds hands and shards in the same proportion.
+const KIDS_CAP = 3;
+const KIDS_SEATS = [1, 3, 4];
 const RESUME_GRACE_MS = 90000;             // how long a dropped seat is held open
 function roomCap(room) {
   if (room.lobby.gameMode === 'survival') return SURVIVAL_CAP;

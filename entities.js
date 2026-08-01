@@ -1283,7 +1283,13 @@ window.RC = window.RC || {};
           const want = p.targets || 1;
           const pool = [];
           const scan = (e) => {
-            if (e.dead || e === this || e.owner !== this.owner) return;
+            if (e.dead || e === this) return;
+            // Normally you only mend your own. In Crystal Defense the keep and the
+            // crystal belong to ONE seat, so an owner test would mean the second
+            // player's builder could not repair the castle they helped build — or
+            // the crystal they are both defending. Team is the right test there.
+            if (e.owner !== this.owner &&
+                !(game.kids && game.areEnemies && !game.areEnemies(e.owner, this.owner))) return;
             if (isHealer(e)) return;                       // 힐러끼리는 못 살린다 — HEAL_AURA 참조
             if (RC.dist(this.x, this.y, e.x, e.y) > R) return;
             const missing = (e.maxHp - e.hp) + (p.shield && e.maxShield ? (e.maxShield - e.shield) : 0);

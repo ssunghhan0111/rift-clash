@@ -25,6 +25,10 @@ RC.Input = (function () {
   const state = {
     screen: { x: 0, y: 0 },
     world: { x: 0, y: 0 },
+    // The anchor of a drag-to-build plan, in world coordinates, or null. Read by the
+    // renderer so the ghost row and the command that fires on release are computed
+    // from exactly one source.
+    planFrom: null, planShift: false,
     dragging: false,
     dragStart: { x: 0, y: 0 },
     dragTouch: false,       // the active selection box was started by a finger, not a mouse
@@ -267,7 +271,20 @@ RC.Input = (function () {
     state.screen.x = p.x; state.screen.y = p.y;
     const w = toWorld(p.x, p.y); state.world.x = w.x; state.world.y = w.y;
 
-    if (g.placing) { placeAt(e); return; }
+    // A build press used to commit on the way DOWN, which is why there was never a
+    // drag: the command had already fired before the finger moved. Now it opens a
+    // plan and commits on release, which buys three things at once — drag a whole
+    // row of wall in one gesture, see the ghost before you are committed to it, and
+    // a touch preview on a tablet where there is no hover to preview with.
+    if (g.placing) {
+      if (snapMode()) {
+        state.planFrom = { x: state.world.x, y: state.world.y };
+        state.planShift = !!(e.pointerType === 'mouse' && e.shiftKey);
+        return;
+      }
+      placeAt(e);
+      return;
+    }
 
     state.dragStart.x = p.x; state.dragStart.y = p.y;
 
@@ -362,6 +379,10 @@ RC.Input = (function () {
     primaryId = null;
     clearLongPress();
 
+    // Release ends the plan. Note this runs before the drag/tap split below,
+    // because a build gesture is neither a selection box nor a tap.
+    if (state.planFrom || (g.placing && snapMode())) { commitPlan(); return; }
+
     if (!state.dragging) return;
     const wasTouch = state.dragTouch;
     state.dragging = false; state.dragTouch = false; state.boxCount = 0;
@@ -396,6 +417,40 @@ RC.Input = (function () {
 
   function ME() { return g.playerOwner; }
 
+  // Crystal Defense only, and deliberately so. `snap` is on the rampart def, which
+  // Versus also builds — so keying purely off the def would have put Versus on the
+  // grid too, and worse, routed its placements through commitPlan, which sends the
+  // Crystal-Defense-only `kbuild` command. Versus would have silently stopped being
+  // able to build walls at all. The grid is a mode's feature, not a building's.
+  function snapMode() {
+    return !!(g.kids && g.placing && RC.Keep && (RC.BUILDINGS[g.placing] || {}).snap);
+  }
+  // The cells the current gesture would fill. Shared by the renderer, so the ghost
+  // and the command can never disagree about what is about to be built.
+  function planCells() {
+    if (!snapMode()) return null;
+    const a = state.planFrom;
+    if (!a) return [RC.Keep.snap(state.world.x, state.world.y)];
+    return RC.Keep.line(a.x, a.y, state.world.x, state.world.y);
+  }
+
+  function commitPlan() {
+    const type = g.placing;
+    const cells = planCells();
+    const shift = state.planShift;
+    state.planFrom = null; state.planShift = false;
+    if (!type || !cells || !cells.length) return;
+    RC.cmd(g, { t: 'kbuild', bt: type, x: cells[0].x, y: cells[0].y,
+                cells: cells.map(c => ({ x: c.x, y: c.y })) });
+    if (RC.Audio) RC.Audio.play('build');
+    // Keeping the tool armed after a placement is the difference between building a
+    // castle and pressing a button eighty times. On a tablet there is no Shift, and
+    // a child laying walls wants the next wall, so the tool stays up until they
+    // choose something else — that is what the highlighted button is telling them.
+    if (shift || g.kids) return;
+    g.placing = null;
+  }
+
   function placeAt(e) {
     const type = g.placing, me = ME();
     // Crystal Guard has its own build rules — kid prices, a ring around the crystal, a
@@ -416,6 +471,15 @@ RC.Input = (function () {
   function handleTap(e) {
     const me = ME();
     let ent = g.entityAt(state.world.x, state.world.y, null);
+    // Tapping your own gate works it. It is the only thing in the keep that DOES
+    // something when you touch it, and a child who discovers that once will open and
+    // shut it for the next ten minutes — which is exactly the point of putting a gate
+    // in a castle. Ownership is not checked: the keep belongs to everyone in it.
+    if (g.kids && ent && ent.kind === 'building' && ent.def.gate && !g.areEnemies(ent.owner, me)) {
+      RC.cmd(g, { t: 'kgate', id: ent.id });
+      if (RC.Audio) RC.Audio.play('build');
+      return;
+    }
     if (ent && ent.owner !== me && g.areEnemies(ent.owner, me) && !g.visibleAt(ent.x, ent.y)) ent = null;   // hidden enemies can't be selected
     // A busy builder cannot be given a new job, so in the grown-up game it is not worth
     // selecting. Crystal Guard is the opposite: tapping the builder is how you OPEN the
@@ -461,8 +525,10 @@ RC.Input = (function () {
     if (g.selection.length) vsnd('select');
   }
 
+  function cancelPlan() { state.planFrom = null; state.planShift = false; }
+
   function onRight() {
-    if (g.placing) { g.placing = null; return; }
+    if (g.placing) { g.placing = null; cancelPlan(); return; }
     const me = ME();
     const mine = g.selection.filter(s => s.owner === me);
     if (!mine.length) return;
@@ -525,7 +591,7 @@ RC.Input = (function () {
     if (k === 'escape') {
       const gm = document.getElementById('gamemenu');
       if (gm && !gm.classList.contains('hidden')) { if (RC.UI) RC.UI.closeGameMenu(true); return; }
-      g.placing = null; g.selection = [];
+      g.placing = null; cancelPlan(); g.selection = [];
       return;
     }
     // 확대/축소 — 휠이 없는 노트북용. 0 은 기본 배율로 복귀.
@@ -703,5 +769,8 @@ RC.Input = (function () {
     init, state, updateCamera, centerOn, centerOnGroup, clampCam,
     armAttackMove, getScheme, setScheme, toggleScheme,
     zoom, setZoom, zoomBy, resetZoom, minZoom, toWorld,
+    // The renderer draws the ghost from this, so what you see and what gets built
+    // are the same list rather than two implementations of the same idea.
+    planCells, snapMode,
   };
 })();

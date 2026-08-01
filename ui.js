@@ -52,6 +52,10 @@ RC.UI = (function () {
     syncPause();
   }
   function quitToMenu() {
+    // Leaving is how a Crystal Defense session ENDS — there is no losing — so the
+    // keep is written on the way out. Without this, stopping for the day would
+    // discard everything built since the last night was survived.
+    if (g.kids && RC.Keep && RC.Keep.capture) RC.Keep.capture(g);
     g.paused = false;
     syncPause();
     if (RC.openMenu) RC.openMenu();
@@ -67,6 +71,11 @@ RC.UI = (function () {
     if (!RC.online) g.paused = true;
     const sub = document.getElementById('gm-sub');
     const restartBtn = document.getElementById('gm-restart');
+    // The wording matters here more than anywhere else in the mode: a child reading
+    // "Quit" next to a castle they spent an hour on needs to be told, in the moment
+    // they are deciding, that leaving does not throw it away.
+    const quitBtn = document.getElementById('gm-quit');
+    if (quitBtn) quitBtn.textContent = g.kids ? '💾 Stop for today (your keep is saved)' : '⏏ Quit to Menu';
     if (RC.online) {
       // Online, only the host can send everyone back to the lobby; anyone can leave.
       const host = !!RC.isHost;

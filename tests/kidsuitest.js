@@ -72,7 +72,7 @@ function load(f) {
 }
 // net_core.js is in the list because the shop buttons issue COMMANDS now (RC.cmd) rather
 // than calling RC.Kids.buy directly — one path that works offline and online both.
-['config.js', 'maps.js', 'pathfind.js', 'entities.js', 'ai.js', 'survival.js',
+['config.js', 'maps.js', 'pathfind.js', 'entities.js', 'ai.js', 'keep.js', 'survival.js',
  'kids.js', 'game.js', 'net_core.js', 'kidsui.js'].forEach(load);
 
 const RC = window.RC;
@@ -172,7 +172,7 @@ const mine = K.per(g, 1);
 const takenBefore = JSON.stringify(mine.taken);
 const pickedId = mine.offer[0].id;
 press(cards[0]);
-ok(s.phase === 'gap', 'picking a card moves the run on');
+ok(s.phase === 'build', 'picking a card hands back a Build Day');
 ok((mine.taken[pickedId] || 0) === 1, 'the card was counted exactly once');
 press(cards[0]);
 press(cards[0]);
@@ -391,7 +391,7 @@ head('FROM THE MENU BUTTON');
     for (const id of ['ss-online', 'ss-kids-online', 'ss-survival-online']) {
       ok(/friend/i.test(txt(id)), id + ' says it involves a friend — "' + txt(id) + '"');
     }
-    ok(/2 vs computer/i.test(txt('ss-kids-online')), 'Crystal Guard co-op states it is 2 vs the computer');
+    ok(/3 vs computer/i.test(txt('ss-kids-online')), 'Crystal Defense co-op states it is 3 vs the computer');
   }
 
   // ── The explanatory paragraphs are prose, not flex columns ───────────────
@@ -445,11 +445,20 @@ head('FROM THE MENU BUTTON');
   ok(G && G.kids === true, 'a Kids run actually started');
   // ONE worker, and it only builds — the mode gained a fort-building loop without gaining
   // an economy to forget. See the BUILDING section in kidstest.js.
-  ok(G && G.units.filter(u => u.def.worker).length === 1, 'the started run has exactly one builder');
-  ok(G && G.nodes.length === 0, 'and nothing to mine, so it can only build');
+  ok(G && G.units.filter(u => u.def.worker).length === w2.RC.Kids.CFG.BUILDERS,
+     'the started run has a crew of ' + w2.RC.Kids.CFG.BUILDERS + ' builders');
+  ok(G && G.nodes.length === 0, 'and nothing to mine, so they can only build');
+  // The build panel is selection-driven: it opens when the BUILDER is the thing you
+  // are looking at, exactly as tapping the builder on the map does. Without this the
+  // panel renders empty and every assertion below it reads zero — which is what this
+  // test did for as long as jsdom was missing and nobody could see it fail.
+  G.selection = [w2.RC.Kids.workerOf(G, G.playerOwner)];
   w2.RC.KidsUI.update();          // one frame, so the build bar has been rendered
   ok(!!dd.getElementById('kid-build'), 'the build bar is on screen');
-  ok(dd.querySelectorAll('#kid-build .kid-bb').length === RC.KID_BUILD.length,
+  // The catalogue moved to keep.js when Crystal Guard became the keep — walls, the
+  // gate, the race's tower and the decorations. RC.KID_BUILD is still in config.js
+  // for anything asking the old question, but the panel is built from the new list.
+  ok(dd.querySelectorAll('#kid-build .kid-bb').length === RC.Keep.MENU.length,
      'with a button per buildable, got ' + dd.querySelectorAll('#kid-build .kid-bb').length);
   // Tapping one arms placement; tapping it again puts it back.
   {
