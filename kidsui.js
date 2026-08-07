@@ -83,6 +83,11 @@ RC.KidsUI = (function () {
             border-radius:14px; padding:7px 14px; color:#eaf2ff; font-size:15px;
             font-weight:700; white-space:nowrap; }
 .kid-chip b { font-size:19px; }
+/* The read-aloud chip is the one chip you can press, so it takes pointer events
+   back (the HUD layer is pass-through) and lights up when it is on. */
+#kid-say { pointer-events:auto; cursor:pointer; font-family:inherit; }
+#kid-say:hover { border-color:rgba(255,255,255,.34); }
+#kid-say.on { border-color:#7fe9ff; color:#dff7ff; box-shadow:0 0 0 3px rgba(127,233,255,.18); }
 #kid-crystal { min-width:210px; }
 #kid-cbar { height:12px; border-radius:7px; background:rgba(255,255,255,.14);
             overflow:hidden; margin-top:5px; }
@@ -175,7 +180,7 @@ RC.KidsUI = (function () {
                text-shadow:0 3px 0 rgba(0,0,0,.5); }
 #kid-rh .sub { font-size:17px; font-weight:700; color:#cfe0f5; margin-top:4px; }
 #kid-cards { display:flex; gap:18px; flex-wrap:wrap; justify-content:center; }
-.kid-card { width:206px; min-height:224px; border-radius:22px; cursor:pointer;
+.kid-card { position:relative; width:206px; min-height:224px; border-radius:22px; cursor:pointer;
             background:linear-gradient(180deg,#2b3a5e,#151e36);
             border:3px solid rgba(255,255,255,.22); color:#eaf2ff;
             display:flex; flex-direction:column; align-items:center;
@@ -185,10 +190,26 @@ RC.KidsUI = (function () {
 .kid-card:hover { transform:translateY(-7px) scale(1.03); border-color:#ffd24a;
                   box-shadow:0 14px 34px rgba(255,210,74,.28); }
 .kid-card:active { transform:scale(.96); }
-.kid-card .ic { font-size:52px; line-height:1; }
+/* Icon-first. The picture is what a child actually reads, so it is the biggest
+   thing on the card by a wide margin and the sentence underneath is support for
+   whoever can use it — not the other way round, which is how this started. */
+.kid-card .ic { font-size:68px; line-height:1; }
 .kid-card .nm { font-size:20px; font-weight:900; }
 .kid-card .ds { font-size:13.5px; color:#adc0dc; line-height:1.35; }
 .kid-card .tr { font-size:11px; font-weight:800; color:#ffd24a; letter-spacing:.6px; }
+/* Tier as dots rather than "LEVEL 2 of 3" — countable at a glance, no reading. */
+.kid-card .pips { display:flex; gap:5px; justify-content:center; }
+.kid-card .pip { width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.16);
+                 border:1px solid rgba(255,255,255,.22); }
+.kid-card .pip.on { background:#ffd24a; border-color:#ffd24a; box-shadow:0 0 7px rgba(255,210,74,.6); }
+/* Read-this-out-loud, per card. Sits in the corner, big enough to hit with a
+   thumb (36px) but visually quiet so it never competes with the card itself. */
+.kid-card .say { position:absolute; top:8px; right:8px; width:36px; height:36px;
+                 border-radius:50%; border:1px solid rgba(255,255,255,.2);
+                 background:rgba(8,14,22,.6); color:#cfe3ff; font-size:16px;
+                 cursor:pointer; line-height:1; padding:0; }
+.kid-card .say:hover { background:#1a2636; border-color:#7fe9ff; }
+.kid-card .say:active { transform:scale(.9); }
 
 /* Next-wave warning, shown under the cards while the game is still paused —
    a heads-up the kid can actually spend their reward on. */
@@ -362,6 +383,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
         </div>
         <div class="kid-chip" id="kid-wave">⚔️ <b>Get ready!</b></div>
         <div class="kid-chip" id="kid-timer">⏳ <b>0s</b></div>
+        <button class="kid-chip" id="kid-say" type="button" title="Read things out loud">🔇 <b>Read to me</b></button>
       </div>
       <div id="kid-dock">
         <div id="kid-queue"></div>
@@ -424,6 +446,7 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       reward: root.querySelector('#kid-reward'),
       rtitle: root.querySelector('#kid-rtitle'),
       cards: root.querySelector('#kid-cards'),
+      say: root.querySelector('#kid-say'),
       next: root.querySelector('#kid-next'),
       sig: root.querySelector('#kid-sig'),
       sigIc: root.querySelector('#kid-sig .ic'),
@@ -464,6 +487,26 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
       if (next == null) return;
       g._keepSave = RC.Keep.rename(next);
     });
+
+    // Read-aloud. Hidden entirely where the browser has no speech engine, rather
+    // than shown as a button that does nothing when a child presses it.
+    if (els.say) {
+      if (!(RC.KidVoice && RC.KidVoice.supported())) {
+        els.say.style.display = 'none';
+      } else {
+        els.say.addEventListener('pointerdown', ev => {
+          ev.preventDefault();
+          const nowOn = RC.KidVoice.toggle();
+          syncSayBtn();
+          // Say something the moment it is switched on: silence after pressing a
+          // speaker button reads as broken, and this is also the gesture that
+          // satisfies browsers which require one before any audio at all.
+          if (nowOn) RC.KidVoice.speak('Okay! I will read things out loud.');
+          if (RC.Audio) RC.Audio.play('select');
+        });
+        syncSayBtn();
+      }
+    }
 
     els.tabs.forEach(tab => {
       tab.addEventListener('pointerdown', ev => {
@@ -778,6 +821,13 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     }
   }
 
+  function syncSayBtn() {
+    if (!els.say || !RC.KidVoice) return;
+    const on = RC.KidVoice.enabled();
+    els.say.innerHTML = (on ? '🔊' : '🔇') + ' <b>Read to me</b>';
+    els.say.classList.toggle('on', on);
+  }
+
   // ── Reward cards ──────────────────────────────────────────────────────────
   let shownOffer = null;
   function renderReward(h) {
@@ -800,20 +850,52 @@ body.kids-mode #touchbar .tb-groups { display:none !important; }
     h.offer.forEach(c => {
       const card = document.createElement('div');
       card.className = 'kid-card' + (c.hero ? ' hero' : '');
+      // The tier pips moved ABOVE the description and became dots, because "LEVEL
+      // 2 of 3" is a sentence and ●●○ is a glance. Same information, no reading.
+      const pips = (c.max <= 5)
+        ? '<div class="pips">' +
+          Array.from({ length: c.max }, (_, i) =>
+            `<span class="pip${i < c.tier ? ' on' : ''}"></span>`).join('') +
+          '</div>'
+        : '';
       card.innerHTML =
         `<div class="ic">${esc(c.ic)}</div>` +
         `<div class="nm">${esc(c.name)}</div>` +
+        pips +
         `<div class="ds">${esc(c.desc)}</div>` +
-        (c.max <= 5 ? `<div class="tr">LEVEL ${c.tier} of ${c.max}</div>` : '');
+        `<button class="say" type="button" title="Read this out loud" aria-label="Read this out loud">🔊</button>`;
       let used = false;
       card.addEventListener('pointerdown', ev => {
+        // The speaker button is a control ON the card, not part of it: pressing it
+        // must read the card, never spend the pick. A misfire here costs a child
+        // their whole reward, so it is checked before anything else happens.
+        if (ev.target && ev.target.closest && ev.target.closest('.say')) {
+          ev.preventDefault(); ev.stopPropagation();
+          if (RC.KidVoice) { RC.KidVoice.set(true); RC.KidVoice.speakCard(c); syncSayBtn(); }
+          return;
+        }
         ev.preventDefault();
         if (used) return;                        // a double-tap must not spend two picks
         used = true;
+        if (RC.KidVoice) RC.KidVoice.cancel();   // stop mid-sentence once a choice is made
         RC.cmd(g, { t: 'kcard', id: c.id });
+      });
+      // Hovering with a mouse reads the card too, when read-aloud is already on.
+      // Not on touch — a finger "hovers" by pressing, which is the pick.
+      card.addEventListener('pointerenter', ev => {
+        if (ev.pointerType === 'touch') return;
+        if (RC.KidVoice && RC.KidVoice.enabled()) RC.KidVoice.speakCard(c);
       });
       els.cards.appendChild(card);
     });
+    // With read-aloud on, the three choices are announced in order as they appear,
+    // so a child who cannot read at all still learns what is on offer without
+    // touching anything. One utterance — speak() cancels, so a joined string is
+    // the only way to say three things in a row.
+    if (RC.KidVoice && RC.KidVoice.enabled()) {
+      const all = h.offer.map(c => c.name + '. ' + c.desc).join(' … ');
+      RC.KidVoice.speak('Wave ' + h.wave + ' cleared! Pick one. ' + all);
+    }
   }
 
   // ── Per-frame sync ────────────────────────────────────────────────────────

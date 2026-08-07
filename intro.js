@@ -333,11 +333,31 @@ RC.Intro = (function () {
   text-shadow: 0 0 60px rgba(127,233,255,.55); }
 #rc-intro .logo .lg b { color: var(--orange, #f08a2a); }
 
-#rc-intro .skip { position: absolute; right: 18px; bottom: calc(8.5vh + 16px); z-index: 6;
-  background: rgba(10,16,24,.55); color: rgba(255,255,255,.72); border: 1px solid rgba(255,255,255,.22);
-  border-radius: 999px; padding: 9px 20px; font-size: 13px; font-weight: 700; cursor: pointer;
-  font-family: inherit; letter-spacing: .06em; backdrop-filter: blur(6px); transition: all .18s ease; }
-#rc-intro .skip:hover { background: rgba(255,255,255,.92); color: #0a0e14; border-color: transparent; }
+/* Skip. Top-RIGHT and legible from the first frame, not tucked into the bottom
+   letterbox — a player who does not want the film must be able to leave without
+   hunting for the exit, and a child who cannot read still recognises an ✕ in the
+   corner where every ✕ lives. It used to sit at the bottom edge at 72% opacity,
+   which is where a skip goes when you would rather people did not press it. */
+#rc-intro .skip { position: absolute; right: 18px; top: calc(8.5vh + 16px); z-index: 6;
+  background: rgba(10,16,24,.72); color: #fff; border: 1px solid rgba(255,255,255,.42);
+  border-radius: 999px; padding: 11px 22px; font-size: 14px; font-weight: 800; cursor: pointer;
+  font-family: inherit; letter-spacing: .06em; backdrop-filter: blur(6px); transition: all .18s ease;
+  /* A short attention pulse on arrival, then it settles. Long enough to be seen,
+     over before it becomes something flashing in the corner of a film. */
+  animation: rc-skip-in .5s ease both, rc-skip-pulse 1.6s ease-in-out 1s 2; }
+#rc-intro .skip:hover { background: #fff; color: #0a0e14; border-color: transparent; }
+/* The keyboard route has always worked (Esc / Enter / Space) and was never
+   advertised. Said once, under the button, then faded out — it is help for the
+   first ten seconds, not a caption for the whole film. */
+#rc-intro .skiphint { position: absolute; right: 20px; top: calc(8.5vh + 62px); z-index: 6;
+  color: rgba(255,255,255,.55); font-size: 11.5px; letter-spacing: .04em; pointer-events: none;
+  animation: rc-hint 6s ease both; }
+@keyframes rc-hint { 0% { opacity: 0; } 12% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+@media (max-width: 640px) { #rc-intro .skiphint { display: none; } }
+@keyframes rc-skip-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+@keyframes rc-skip-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  50% { box-shadow: 0 0 0 7px rgba(255,255,255,.14); } }
+@media (prefers-reduced-motion: reduce) { #rc-intro .skip { animation: none; } }
 /* Progress hairline: a two-and-a-half minute film with no scrubber needs to say
    how much is left, or a restless player skips out of uncertainty rather than
    boredom. */
@@ -347,7 +367,7 @@ RC.Intro = (function () {
   color: rgba(255,255,255,.5); font-size: 13px; letter-spacing: .3em; z-index: 7; }
 #rc-intro .load.gone { display: none; }
 @media (max-width: 640px) { #rc-intro .bar { height: 6vh; } #rc-intro .prog { bottom: 6vh; }
-  #rc-intro .skip { bottom: calc(6vh + 12px); right: 12px; padding: 8px 16px; font-size: 12px; } }
+  #rc-intro .skip { top: calc(6vh + 12px); right: 12px; padding: 10px 18px; font-size: 13px; } }
 `;
 
   function buildScreen() {
@@ -368,6 +388,7 @@ RC.Intro = (function () {
       '<div class="bar top"></div><div class="bar bot"></div>' +
       '<div class="prog"></div>' +
       '<button class="skip" type="button">Skip ✕</button>' +
+      '<div class="skiphint">Press Esc or Space to skip</div>' +
       '<div class="fade"></div>' +
       '<div class="load">LOADING</div>';
     document.body.appendChild(root);

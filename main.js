@@ -120,12 +120,29 @@ window.RC = window.RC || {};
   }
   // afterFn runs once a name is committed — used to resume whatever the player was doing.
   let nickAfter = null;
-  function openNickname(after) {
+  // True once we know this player came in through a kids door (the ?kids link, or
+  // either Crystal Guard button). It changes what the naming screen ASKS FOR: a
+  // child is handed a generated name to accept rather than a blank box and an
+  // instruction to think of something the internet will see.
+  let kidsEntry = false;
+  function openNickname(after, opts) {
     nickAfter = after || null;
+    const kid = !!(opts && opts.kids) || kidsEntry;
     const input = document.getElementById('nick-input');
     const msg = document.getElementById('nick-msg');
+    const sub = document.getElementById('nick-sub');
     if (msg) { msg.textContent = ''; msg.className = ''; }
-    if (input) { input.value = myName(); }
+    if (input) {
+      // Pre-fill rather than merely offer. An empty box is a question; a filled one
+      // with a dice next to it is an answer you may change, and "press the big
+      // button" is a thing a six-year-old can do without help.
+      input.value = myName() || (kid ? RC.KidSafe.makeName() : '');
+    }
+    if (sub) sub.textContent = kid
+      ? "Here's your name! Press the dice for a different one, then press Go."
+      : "Pick a name. It's how other players see you online, and it's the name that goes on the world leaderboard.";
+    const go = document.getElementById('nick-go');
+    if (go) go.textContent = kid ? "Go!" : "Let's go";
     if (nickEl) nickEl.classList.remove('hidden');
     // focus after the element is actually visible, or mobile keyboards ignore it
     setTimeout(() => { if (input) { input.focus(); input.select(); } }, 30);
@@ -192,6 +209,15 @@ window.RC = window.RC || {};
     const input = document.getElementById('nick-input');
     if (go) go.addEventListener('click', commitNickname);
     if (input) input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commitNickname(); } });
+    const dice = document.getElementById('nick-dice');
+    if (dice) dice.addEventListener('click', () => {
+      const el = document.getElementById('nick-input');
+      if (!el) return;
+      el.value = RC.KidSafe.makeName();
+      const msg = document.getElementById('nick-msg');
+      if (msg) { msg.textContent = ''; msg.className = ''; }
+      el.focus();
+    });
     const edit = document.getElementById('who-edit');
     if (edit) edit.addEventListener('click', () => openNickname(null));
   })();
@@ -839,6 +865,9 @@ window.RC = window.RC || {};
     const gmDef = GAMEMODES.find(x => x.id === m);
     if (gmDef && gmDef.soon) m = 'defend';
     selGameMode = m;
+    // Remembered for the next visit. Written here rather than at Play, so a player
+    // who browsed to Crystal Guard and closed the tab still lands there next time.
+    if (typeof saveLastMode === 'function') saveLastMode(m);
     document.querySelectorAll('#ss-gamemodes .gmcard').forEach(c => c.classList.toggle('sel', c.dataset.m === m));
     const show = (id, on, disp) => { const e = document.getElementById(id); if (e) e.style.display = on ? (disp || 'flex') : 'none'; };
     // Inside Crystal Defense, the depth decides what the rest of the screen looks like.
@@ -1078,6 +1107,11 @@ window.RC = window.RC || {};
     ss.classList.add('hidden');
     overlay.classList.add('hidden');
     started = true;
+    // First Crystal Guard match ever: teach the drag gesture. Started a beat late
+    // so the HUD it points at has been laid out, and a no-op on every later run.
+    // Prep is 22 seconds and nothing attacks during it, so there is real room for
+    // this — the coach is over long before the first wave arrives.
+    if (RC.KidCoach) setTimeout(() => { try { RC.KidCoach.start(game); } catch (e) {} }, 900);
   }
 
   // Daily Challenge — same map, same seed, same twist for everyone today.
@@ -1451,6 +1485,14 @@ window.RC = window.RC || {};
   document.getElementById('ss-survival').addEventListener('click', startSurvival);
   const kidsBtn = document.getElementById('ss-kids');
   if (kidsBtn) kidsBtn.addEventListener('click', startKids);
+  // "Show me how" — starts the mode AND replays the coach, for a child who skipped
+  // it or a second child on the same tablet. `force` overrides the seen-once flag.
+  const howBtn = document.getElementById('kid-howto');
+  if (howBtn) howBtn.addEventListener('click', () => {
+    kidsEntry = true;
+    startKids();
+    if (RC.KidCoach) setTimeout(() => { try { RC.KidCoach.start(game, { force: true }); } catch (e) {} }, 900);
+  });
 
   // The Daily Challenge card that used to render here is gone with the front-page
   // banner. `startDaily` above is left in place with nothing calling it: the daily
@@ -1808,6 +1850,14 @@ window.RC = window.RC || {};
   function renderVoice() {
     const panel = document.getElementById('voice-panel');
     if (!panel || !RC.Voice) return;
+    // Crystal Guard has no voice chat and no host switch to turn it on, so the
+    // whole panel goes rather than showing a row of dead buttons and an
+    // explanation. The server refuses 'voiceJoin' from a kids room regardless.
+    const kidsRoom = RC.KidSafe.isKids(lobbyData ? lobbyData.gameMode : onlineKind);
+    panel.classList.toggle('hidden', kidsRoom);
+    const vh = document.getElementById('voice-head');
+    if (vh) vh.classList.toggle('hidden', kidsRoom);
+    if (kidsRoom) return;
     const st = RC.Voice.status();
     const show = (id, on) => { const e = document.getElementById(id); if (e) e.classList.toggle('hidden', !on); };
     show('voice-join', !st.joined);
@@ -2049,12 +2099,56 @@ window.RC = window.RC || {};
       btn.classList.toggle('unread', chatUnread);
     }
   }
+  // ── Quick chat ────────────────────────────────────────────────────────────
+  // The client sends an ID; the server looks the phrase up in RC.KidSafe and
+  // broadcasts that. Nothing typed here can reach another player, which is the
+  // entire point — it is what lets Crystal Guard be online at all.
+  function buildQuickChat(hostId) {
+    const host = document.getElementById(hostId);
+    if (!host || host.dataset.built) return;
+    host.dataset.built = '1';
+    RC.KidSafe.QUICKCHAT.forEach(q => {
+      const b = document.createElement('button');
+      b.className = 'qc-btn';
+      b.type = 'button';
+      b.title = q.msg;
+      b.innerHTML = '<span class="qi">' + esc(q.ic) + '</span><span>' + esc(q.msg) + '</span>';
+      b.addEventListener('click', () => {
+        if (!N.connected) return;
+        N.send({ t: 'quickchat', id: q.id });
+        // Local cooldown so a child mashing a button sees it respond rather than
+        // hitting the server's silent burst limit and concluding it is broken.
+        b.classList.add('cooling');
+        setTimeout(() => b.classList.remove('cooling'), 900);
+      });
+      host.appendChild(b);
+    });
+  }
+  // Free text is hidden — not just ignored — wherever the room forbids it, and the
+  // quick grid takes its place. Called whenever we learn what kind of room we're in.
+  function syncChatMode() {
+    const kids = RC.KidSafe.isKids(lobbyData ? lobbyData.gameMode : onlineKind);
+    buildQuickChat('quickchat');
+    buildQuickChat('gc-quick');
+    const set = (id, hide) => { const e = document.getElementById(id); if (e) e.classList.toggle('hidden', hide); };
+    set('chat-row', kids);
+    set('gc-row', kids);
+    set('quickchat', false);       // the grid is always available, in every mode
+    set('gc-quick', false);
+    const note = document.getElementById('chat-note');
+    if (note) note.textContent = kids
+      ? 'Tap a message to say it. Everyone in your game will see it.'
+      : 'Everyone in this game can read it. Keep it friendly.';
+  }
   function sendChat(inputId) {
     const el = document.getElementById(inputId);
     if (!el) return;
     const text = (el.value || '').trim().slice(0, 200);
     el.value = '';
     if (!text) return;
+    // Belt and braces with the server's own refusal: a kids room never carries
+    // free text, so we do not even send it.
+    if (RC.KidSafe.isKids(lobbyData ? lobbyData.gameMode : onlineKind)) return;
     // The socket being up is what matters, not RC.online — that flag only turns true
     // once a MATCH starts, and the lobby is exactly where people need to talk first.
     if (!N.connected) { chatPush({ system: true, msg: 'Chat needs a connection to the game server.' }); return; }
@@ -2109,7 +2203,15 @@ window.RC = window.RC || {};
       : kind === 'survival'
       ? 'RIFT<b>CLASH</b> · Online Co-op'
       : 'RIFT<b>CLASH</b> · Online';
-    showBrowser(); setBrowserTab('public', true); setBrowserStatus('Connecting…');
+    showBrowser();
+    setBrowserTab(kind === 'kids' ? 'private' : 'public', true);
+    setBrowserStatus('Connecting…');
+    // Crystal Guard's private pane says something different: the audience for this
+    // copy is a child reading it, or a parent reading it to them.
+    const lead = document.querySelector('#pane-private .pane-lead');
+    if (lead) lead.textContent = kind === 'kids'
+      ? 'Play with a friend you know. You get a secret 4-letter code — tell it to them, and they can join you.'
+      : 'Play with a friend. Private games are hidden from the list — you get a 4-letter code to share.';
     presence = []; renderPresence();
     RC.online = false;
     if (RC.Audio) { RC.Audio.init(); RC.Audio.resume(); }
@@ -2119,17 +2221,27 @@ window.RC = window.RC || {};
   const svOnlineBtn = document.getElementById('ss-survival-online');
   if (svOnlineBtn) svOnlineBtn.addEventListener('click', () => openBrowser('survival'));
   const kidsOnlineBtn = document.getElementById('ss-kids-online');
-  if (kidsOnlineBtn) kidsOnlineBtn.addEventListener('click', () => openBrowser('kids'));
+  if (kidsOnlineBtn) kidsOnlineBtn.addEventListener('click', () => { kidsEntry = true; openBrowser('kids'); });
 
   // ── Public / Private tabs ──────────────────────────────
   // Joining a stranger's game and setting up a game with one friend are different
   // errands; showing both sets of controls at once made the screen read as a single
   // confusing form. One tab is visible at a time.
   let browserTab = 'public';
+  // Crystal Guard has no public tab at all. The server refuses to list a kids room
+  // either way (RC.KidSafe), so this is presentation — but a greyed-out or missing
+  // tab is the honest presentation: there is no path here, rather than a path that
+  // silently does nothing. `kidsOnly` is read by setBrowserTab and by openBrowser.
+  function kidsOnly() { return RC.KidSafe.isKids(onlineKind); }
   function setBrowserTab(tab, quiet) {
+    if (kidsOnly()) tab = 'private';         // the only tab there is
     browserTab = (tab === 'private') ? 'private' : 'public';
     const on = (id, yes) => { const e = document.getElementById(id); if (e) e.classList.toggle('sel', yes); };
     const pane = (id, yes) => { const e = document.getElementById(id); if (e) e.classList.toggle('hidden', !yes); };
+    // Hide the tab strip outright in kids mode: one tab is not a choice, and a lone
+    // highlighted button reads as something you failed to find the other half of.
+    const tabs = document.getElementById('browser-tabs');
+    if (tabs) tabs.classList.toggle('hidden', kidsOnly());
     on('tab-public', browserTab === 'public');
     on('tab-private', browserTab === 'private');
     pane('pane-public', browserTab === 'public');
@@ -2140,7 +2252,10 @@ window.RC = window.RC || {};
   document.getElementById('tab-public').addEventListener('click', () => setBrowserTab('public'));
   document.getElementById('tab-private').addEventListener('click', () => setBrowserTab('private'));
 
-  document.getElementById('create-public').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: true, gameMode: onlineKind }));
+  document.getElementById('create-public').addEventListener('click', () => {
+    if (kidsOnly()) return;                  // unreachable — the pane is hidden — and refused anyway
+    N.send({ t: 'create', name: roomName(), public: true, gameMode: onlineKind });
+  });
   document.getElementById('create-private').addEventListener('click', () => N.send({ t: 'create', name: roomName(), public: false, gameMode: onlineKind }));
   document.getElementById('refresh-rooms').addEventListener('click', () => N.send({ t: 'list' }));
   document.getElementById('join-code-btn').addEventListener('click', () => {
@@ -2284,6 +2399,7 @@ window.RC = window.RC || {};
     roomCode = m.code; roomPublic = m.public; myRace = 'forge'; lobbyData = null; myReady = false;
     voiceAllowed = m.voiceAllowed !== false;
     chatClear();
+    syncChatMode();
     showLobby();
     if (RC.Voice) RC.Voice.resetAuto();
     maybeAutoVoice();
@@ -2300,6 +2416,7 @@ window.RC = window.RC || {};
     if (m.code) roomCode = m.code;
     roomPublic = m.public;
     if (m.voiceAllowed != null) voiceAllowed = !!m.voiceAllowed;
+    syncChatMode();          // the room just told us whether free text is allowed
     renderLobby(); renderPresence(); renderVoice();
   });
   N.on('toLobby', () => { clearResume(); N.setRetry(false); started = false; game.over = null; overlayShown = false; overlay.classList.add('hidden'); showLobby(); });
@@ -2582,7 +2699,49 @@ window.RC = window.RC || {};
     return true;
   }
 
+  // ── ?kids — the child's front door ─────────────────────────────────────────
+  // The URL a parent bookmarks, a portal embeds and a teacher puts on the board.
+  // It lands on Crystal Guard with the pickers already set, so the distance from
+  // "opened the link" to "building a castle" is one green button rather than a
+  // map, a mode, a difficulty, a squad, a faction and a colour.
+  //
+  // It also marks this player as a KIDS ENTRY for the rest of the session, which
+  // is what makes the naming screen offer a generated name instead of a blank box.
+  const KIDS_LINK = (function () {
+    try { return /[?&]kids\b/.test(location.search || ''); } catch (e) { return false; }
+  })();
+  // The last mode played, so a returning child does not re-navigate the menu every
+  // time. Deliberately NOT the last map or faction — only the thing that decides
+  // which half of the game you are looking at.
+  const LAST_MODE_KEY = 'riftclash_lastmode';
+  function saveLastMode(m) { try { window.localStorage.setItem(LAST_MODE_KEY, String(m || '')); } catch (e) {} }
+  function loadLastMode() {
+    try {
+      const v = window.localStorage.getItem(LAST_MODE_KEY) || '';
+      return GAMEMODES.some(x => x.id === v && !x.soon) ? v : '';
+    } catch (e) { return ''; }
+  }
+
   buildStartScreen();
+  if (KIDS_LINK) {
+    kidsEntry = true;
+    selGameMode = 'defend';
+    selDepth = 'kids';
+    // Tidy the address bar: a refresh should land in the same place, but the flag
+    // has already been read into state and does not need to survive in the URL.
+    // (Unlike ?join, re-reading it would be harmless — it is removed for looks.)
+    try {
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, '', location.pathname + '?kids');
+      }
+    } catch (e) {}
+  } else {
+    const remembered = loadLastMode();
+    if (remembered) {
+      selGameMode = remembered;
+      if (remembered === 'defend') selDepth = 'kids';
+    }
+  }
   applyGameMode(selGameMode);
   renderWho();
   // Fullscreen by default — a browser will not grant it on load, so the first
@@ -2590,7 +2749,7 @@ window.RC = window.RC || {};
   if (RC.Fullscreen) RC.Fullscreen.armFirstGesture();
   // First launch — ask who they are before the menu. Anyone who already has a name
   // (including from posting a leaderboard score) walks straight past this.
-  if (!myName() && !pendingJoinCode && !loadResume()) openNickname(null);
+  if (!myName() && !pendingJoinCode && !loadResume()) openNickname(null, { kids: KIDS_LINK });
   // A match we were dropped out of outranks both the menu and an invite link.
   if (!tryResumeOnLoad()) followJoinLink();
 

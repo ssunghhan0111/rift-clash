@@ -6,6 +6,10 @@ army, and destroy the enemy. Play solo against AI or online against other people
 
 **▶ Play:** _paste your live link here after deploying, e.g._ `https://rift-clash.onrender.com`
 
+**▶ Play Crystal Guard (kids):** add `?kids` to the same link — it lands straight in the
+castle-building mode with the pickers already set. This is the URL to hand to a parent, a
+classroom, or a portal listing.
+
 Works in any modern browser and is touch-friendly for iPad and tablets.
 
 ---
@@ -54,7 +58,17 @@ Works in any modern browser and is touch-friendly for iPad and tablets.
   seats are filled by AI. **A dropped player's seat is held for 90 seconds** and their client
   rejoins on its own — a refresh mid-match rejoins too.
 - **Text chat** in the lobby and in the match, plus peer-to-peer **voice chat** with per-player
-  mute and a host switch to turn voice off for a whole game.
+  mute and a host switch to turn voice off for a whole game. **Quick chat** — sixteen fixed
+  phrases on one tap — is available in every mode and is the *only* chat in Crystal Guard.
+- **Crystal Guard is safe by construction.** Because children play it, its online games are
+  **private-code only** (never listed publicly), carry **no free text** (quick chat only) and open
+  **no microphone** — enforced on the server, not just hidden in the UI, so a modified client
+  cannot get around any of it. Kids are offered a **generated name** rather than asked to invent a
+  public one. See `kidsafe.js`; `tests/kidsafe_test.js` attacks all of it with a hostile client.
+- **Read-aloud and a first-run coach** — reward cards can read themselves out loud
+  (`speechSynthesis`, no assets, off by default), and the very first Crystal Guard run is taught by
+  a ghost hand that traces the drag-a-row-of-wall gesture over the live game. Both are skippable
+  and neither blocks input.
 - **World leaderboard** for Survival, per difficulty and for the daily. Runs are opened with the
   server and checked against the wave director's own pacing before they are accepted.
 - Energy/abilities, minimap, control groups, camera pan and zoom, construction cancel + refund,
@@ -142,6 +156,9 @@ Keys typed into a text box are never treated as game commands.
 | `index.html` | DOM shell, CSS, start screen, lobby, script includes |
 | `intro.js` | The introduction film — a ~2:45 real-time 3D short played once on first launch |
 | `keep.js` | Crystal Defense's build grid, piece catalogue, day/night state and save file |
+| `kidsafe.js` | Kids-room rules — no public listing, no free text, no mic, generated names — **shared by client and server**, so the rule and its enforcement are one file |
+| `kidvoice.js` | Read-aloud for Crystal Guard via `speechSynthesis`; best-effort, off by default |
+| `kidcoach.js` | The first-run ghost-hand tutorial; non-blocking, shown once, replayable |
 | `vendor/three.min.js` | three.js r149, vendored and loaded lazily by `intro.js` only |
 | `config.js` | All balance numbers, colors, unit/building/race/upgrade definitions |
 | `maps.js` | Map and game-mode definitions |

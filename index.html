@@ -671,6 +671,19 @@
   .ss-note { display: block; max-width: 560px; margin: 8px auto 0; text-align: center;
              color: var(--dim); font-size: 12px; line-height: 1.55; }
   .ss-note b { color: var(--text); }
+  /* Crystal Guard's hint, which talks to a child first and a parent second. */
+  .kid-lead { color: var(--text); font-size: 17px; font-weight: 800; line-height: 1.4;
+              margin-bottom: 10px; }
+  .kid-howto { background: var(--panel-2); color: var(--cyan); border: 1px solid var(--line);
+               border-radius: 999px; padding: 8px 18px; font-family: inherit; font-size: 13px;
+               font-weight: 700; cursor: pointer; }
+  .kid-howto:hover { border-color: var(--cyan); background: var(--panel); }
+  .kid-more { margin-top: 12px; text-align: left; }
+  .kid-more summary { cursor: pointer; text-align: center; color: var(--dim); font-size: 12px;
+                      padding: 6px; list-style: none; }
+  .kid-more summary::-webkit-details-marker { display: none; }
+  .kid-more summary:hover { color: var(--cyan); }
+  .kid-more > div { padding: 8px 4px 0; }
   /* The row owns the vertical margin, not the buttons in it. Each action button used to
      carry its own (24px here, 20px there, none on two of them), so whether a row lined
      up depended on three separate margins agreeing — and they had stopped agreeing. */
@@ -1132,6 +1145,13 @@
     font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer; font-family: var(--sans);
   }
   #nick-go:disabled { opacity: .45; cursor: not-allowed; }
+  #nick-dice {
+    margin-top: 12px; background: var(--panel-2); color: var(--cyan);
+    border: 1px solid var(--line); border-radius: 999px; padding: 9px 20px;
+    font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  #nick-dice:hover { border-color: var(--cyan); background: var(--panel); }
+  #nick-dice:active { transform: scale(.96); }
   #nick-msg { color: var(--dim); font-size: 12px; min-height: 16px; margin-top: 10px; }
   #nick-msg.warn { color: var(--bad); }
 
@@ -1181,6 +1201,16 @@
 
   /* ── Voice chat ── */
   #voice-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 92vw); }
+  /* There is no global .hidden rule in this file — every element states its own,
+     because most of them carry an inline display that would otherwise win. These
+     five are the ones Crystal Guard turns off: the mic UI, the free-text rows and
+     the public/private tab strip. `!important` is doing real work on the two that
+     have inline `display:flex` in the markup. */
+  #voice-panel.hidden { display: none; }
+  #voice-head.hidden { display: none !important; }
+  #chat-row.hidden { display: none; }
+  #gc-row.hidden { display: none; }
+  #browser-tabs.hidden { display: none !important; }
   #voice-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   #voice-controls button {
     background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
@@ -1277,6 +1307,39 @@
   #gc-row { display: flex; gap: 6px; }
   /* Unread marker on the touchbar button */
   #tb-chat.unread { background: var(--blue); color: #fff; }
+
+  /* ── Quick chat ──────────────────────────────────────────────────────────
+     Sixteen fixed phrases in a 4x4 grid — the ONLY way to talk in Crystal Guard,
+     and an option everywhere else. Buttons are 44px+ because these are pressed by
+     a finger, mid-raid, by someone who is not going to aim carefully. The icon is
+     what is actually recognised at a glance; the words underneath are for the
+     player who can read them and are allowed to be small. */
+  #quickchat, #gc-quick {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  }
+  #quickchat.hidden, #gc-quick.hidden { display: none; }
+  .qc-btn {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; min-height: 48px; padding: 6px 4px; cursor: pointer;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    font-family: inherit; font-size: 10.5px; font-weight: 700; line-height: 1.15;
+    text-align: center; transition: transform .06s, border-color .12s, background .12s;
+  }
+  .qc-btn .qi { font-size: 19px; line-height: 1; }
+  .qc-btn:hover { border-color: var(--cyan); background: var(--panel); }
+  .qc-btn:active { transform: scale(.94); }
+  /* Rate-limited: the server drops anything past 8 in 10s, so the button says so
+     rather than letting a child press it twenty times into silence. */
+  .qc-btn.cooling { opacity: .4; pointer-events: none; }
+  /* In Crystal Guard the grid is the whole chat UI and gets more room per target. */
+  body.kids-mode .qc-btn { min-height: 62px; font-size: 12px; }
+  body.kids-mode .qc-btn .qi { font-size: 26px; }
+  @media (max-width: 560px) {
+    #quickchat, #gc-quick { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .qc-btn { min-height: 44px; font-size: 9px; }
+    .qc-btn .qi { font-size: 17px; }
+  }
 
   /* ── Reconnect banner ── */
   #reconnect {
@@ -1406,6 +1469,7 @@
         <input id="gc-input" maxlength="200" placeholder="Message your game — Enter to send, Esc to close" autocomplete="off">
         <button id="gc-send">Send</button>
       </div>
+      <div id="gc-quick" class="hidden"></div>
     </div>
 
     <!-- Shown when the connection drops mid-match. The server holds the seat for
@@ -1593,10 +1657,28 @@
     <button id="ss-kids" class="ss-act">🏰 Build &amp; Defend — vs Computer</button>
     <button id="ss-kids-online" class="ss-act2">👥 Build with a Friend — 3 vs Computer</button>
   </div>
+  <!-- Two audiences, in this order. The first line is for the CHILD about to press
+       the green button and is one sentence long. The details underneath are for the
+       parent reading over their shoulder, and are folded away so they are not a wall
+       of text between a seven-year-old and the game. -->
   <div id="ss-kidshint" class="ss-note" style="display:none">
-Build a castle around the crystal and hold it through the night. <b>Shards arrive on their own</b> — there is no mining. <b>Drag</b> to lay a whole row of wall at once; everything snaps to a grid, so a row is a row. Your builders work the plan on their own.<br>
-    Between nights it is <b>Build Day</b>: nothing attacks and there is no clock. Build for as long as you like and press <b>Ready</b> when night can come. <b>Your keep is saved</b> — and if the crystal cracks, the keep is patched up rather than lost, so nothing you build ever disappears.<br>
-    <b>With Friends</b> — up to three of you online, one castle, one pile of shards. Anyone can build anywhere and anyone can repair anything.
+    <div class="kid-lead">🏰 Build a castle around your crystal. Keep it safe when night comes!</div>
+    <button id="kid-howto" type="button" class="kid-howto">👆 Show me how</button>
+    <details class="kid-more">
+      <summary>How it works (for grown-ups)</summary>
+      <div>
+        <b>Shards arrive on their own</b> — there is no mining, so a child cannot lose ten
+        minutes later for forgetting something in minute one. <b>Drag</b> to lay a whole row of
+        wall in one gesture; everything snaps to a grid. Builders work the plan on their own.<br>
+        Between nights it is <b>Build Day</b>: nothing attacks and there is no clock. Build for as
+        long as you like, then press <b>Ready</b>. <b>Your keep is saved</b> — if the crystal cracks
+        the castle is patched up rather than lost, so nothing built ever disappears.<br>
+        <b>Build with a Friend</b> — up to three players share one castle and one pile of shards.
+        These games are <b>private only</b>: you get a 4-letter code to share, they are never
+        listed publicly, there is <b>no typing to strangers</b> (players talk with a fixed set of
+        friendly phrases) and <b>voice chat is switched off</b>.
+      </div>
+    </details>
   </div>
   <div id="act-survival" class="mode-sec row">
     <button id="ss-survival" class="ss-act">🤖 Play vs Computer</button>
@@ -1789,7 +1871,7 @@ Build a castle around the crystal and hold it through the night. <b>Shards arriv
       <div id="lobby-diffs" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;"></div>
     </div>
   </div>
-  <div class="ss-h" style="display:flex; align-items:center; gap:10px;">🎤 Voice Chat
+  <div class="ss-h" id="voice-head" style="display:flex; align-items:center; gap:10px;">🎤 Voice Chat
     <span id="voice-note" style="font-size:11px; color:var(--dim); font-weight:400;"></span>
   </div>
   <div id="voice-panel">
@@ -1806,7 +1888,7 @@ Build a castle around the crystal and hold it through the night. <b>Shards arriv
   </div>
 
   <div class="ss-h" style="display:flex; align-items:center; gap:10px;">💬 Chat
-    <span style="font-size:11px; color:var(--dim); font-weight:400;">Everyone in this game can read it. Keep it friendly.</span>
+    <span id="chat-note" style="font-size:11px; color:var(--dim); font-weight:400;">Everyone in this game can read it. Keep it friendly.</span>
   </div>
   <div id="chat-panel">
     <div id="chat-log"></div>
@@ -1814,6 +1896,10 @@ Build a castle around the crystal and hold it through the night. <b>Shards arriv
       <input id="chat-input" maxlength="200" placeholder="Say something…" autocomplete="off">
       <button id="chat-send">Send</button>
     </div>
+    <!-- Filled from RC.KidSafe.QUICKCHAT by main.js. Replaces #chat-row entirely in
+         Crystal Guard; sits alongside it everywhere else, because a one-tap phrase
+         beats typing for grown-ups too. -->
+    <div id="quickchat" class="hidden"></div>
   </div>
 
   <div class="ss-h" style="display:flex; align-items:center; gap:10px;">Invite Players
@@ -1837,6 +1923,11 @@ Build a castle around the crystal and hold it through the night. <b>Shards arriv
     <input id="nick-input" placeholder="Your name" maxlength="14" autocomplete="off" spellcheck="false">
     <button id="nick-go">Let's go</button>
   </div>
+  <!-- The dice is always here, for everyone: a suggested name is a kindness to an
+       adult and the SAFE default for a child, who should never be asked to invent
+       something a stranger will read. main.js fills the box on first open when the
+       player arrived through a kids entry point. -->
+  <button id="nick-dice" type="button">🎲 Surprise me</button>
   <div id="nick-msg"></div>
 </div>
 
@@ -1877,6 +1968,14 @@ Build a castle around the crystal and hold it through the night. <b>Shards arriv
      because the wave director asks it about the grid. -->
 <script src="keep.js"></script>
 <script src="kids.js"></script>
+<!-- Kids-mode safety rules. Loaded BEFORE main.js and net.js because both read
+     RC.KidSafe on the way in — and required by server.js too, so the rule and its
+     enforcement are literally the same file on both sides. -->
+<script src="kidsafe.js"></script>
+<!-- Read-aloud and the first-run coach. Both are browser-only and both degrade to
+     doing nothing at all, so nothing downstream has to check for them. -->
+<script src="kidvoice.js"></script>
+<script src="kidcoach.js"></script>
 <script src="leaderboard.js"></script>
 <script src="progress.js"></script>
 <script src="profile.js"></script>

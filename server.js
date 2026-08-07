@@ -34,6 +34,7 @@ require('./daily.js');          // Daily Challenge seed + twist table (shared wi
 require('./keep.js');           // the Crystal Defense grid, catalogue and day/night
 require('./survival.js');       // online co-op Survival wave director
 require('./kids.js');           // online co-op Crystal Guard wave director
+require('./kidsafe.js');        // kids-room rules: no public listing, no free text, no mic
 require('./net_core.js');
 const RC = global.RC;
 RC.CFG.FOG_ENABLED = false;               // server is omniscient; clients compute their own fog
@@ -597,10 +598,16 @@ function sanitizeName(s, max) {
 }
 
 function createRoom(host, name, isPublic, gameMode) {
+  const gm = (gameMode === 'survival' || gameMode === 'kids') ? gameMode : 'vs';
+  // A kids room is PRIVATE, always, whatever the client asked for. This is the
+  // first of the two places it is forced (the other is the 'gamemode' switch, for
+  // a room that changes into a kids room after it was created); between them there
+  // is no sequence of messages that puts a child in a room strangers can find.
+  const kidSafe = RC.KidSafe.rules(gm);
   const room = {
     id: nextRoomId++, code: makeCode(),
     name: (sanitizeName(name, 20) || (host.name + "'s Game")),
-    public: !!isPublic,
+    public: kidSafe.allowPublic ? !!isPublic : false,
     clients: [],
     game: null, loop: null, tickN: 0, cmdQueue: [],
     ownerOf: new Map(), teamOf: {},
@@ -610,10 +617,12 @@ function createRoom(host, name, isPublic, gameMode) {
     //           instead of map) | 'kids' (Crystal Guard co-op, no pickers at all)
     lobby: {
       mapId: RC.MAPS[0].id, modeId: '1v1', started: false,
-      gameMode: (gameMode === 'survival' || gameMode === 'kids') ? gameMode : 'vs', diff: 'medium',
+      gameMode: gm, diff: 'medium',
       // Host switch. Voice is available in every room, but the host can turn it off
       // for everyone — which matters the moment a public room turns unpleasant.
-      voice: true,
+      // In a kids room it starts off and cannot be turned on at all: see case
+      // 'roomVoice' and case 'voiceJoin'.
+      voice: kidSafe.allowVoice,
     },
   };
   rooms.set(room.id, room);
@@ -760,7 +769,11 @@ function pushVoiceRoster(room) { if (room) roomBroadcast(room, voiceRoster(room)
 function roomListPayload() {
   const list = [];
   for (const room of rooms.values()) {
-    if (room.public && !room.lobby.started) {
+    // The `!isKids` term is redundant — createRoom and case 'gamemode' both force
+    // room.public false for a kids room — and it stays because this is the single
+    // function that decides what a stranger can see, and the guarantee is worth
+    // more here than the branch costs.
+    if (room.public && !room.lobby.started && !RC.KidSafe.isKids(room.lobby.gameMode)) {
       list.push({
         id: room.id, name: room.name, players: room.clients.length,
         cap: roomCap(room), mapId: room.lobby.mapId, modeId: room.lobby.modeId,
@@ -840,10 +853,32 @@ function onMsg(c, m) {
 
     case 'chat': {
       if (!c.room) break;
+      // A kids room carries no free text, and this is where that is true — the
+      // client not drawing an input box is a courtesy, not a control. A 'chat'
+      // message arriving from a kids room is either an old client or a tampered
+      // one; either way it is dropped, silently, rather than half-delivered.
+      if (RC.KidSafe.isKids(c.room.lobby.gameMode)) {
+        send(c, { t: 'chat', system: true, msg: 'Use the message buttons to talk in this game.' });
+        break;
+      }
       const text = cleanChat(m.msg);
       if (!text) break;
       if (!chatAllowed(c)) { send(c, { t: 'chat', system: true, msg: 'Slow down a moment.' }); break; }
       roomBroadcast(c.room, { t: 'chat', from: c.id, name: c.name, msg: text, at: Date.now() });
+      break;
+    }
+
+    // ── Quick chat ──
+    // The only way to say anything in a kids room, and available in grown-up rooms
+    // too because a fixed phrase is faster than typing for everybody. The client
+    // sends an ID and NEVER a string: the phrase that goes out is looked up here,
+    // so the set of things that can be said online is exactly RC.KidSafe.QUICKCHAT.
+    case 'quickchat': {
+      if (!c.room) break;
+      const phrase = RC.KidSafe.quickChat(m.id);
+      if (!phrase) break;
+      if (!chatAllowed(c)) break;      // same burst limit; no scolding message, kids spam buttons
+      roomBroadcast(c.room, { t: 'chat', from: c.id, name: c.name, msg: phrase, quick: m.id, at: Date.now() });
       break;
     }
 
@@ -874,6 +909,14 @@ function onMsg(c, m) {
       if (hasKind && isHost(c) && !room.lobby.started) {
         room.lobby.gameMode = gm;
         if (gm === 'vs') room.lobby.modeId = modeId;
+        // Third and last reshape path — an invite can retype an existing room the
+        // same way case 'gamemode' can, so it has to close the same hole.
+        if (!RC.KidSafe.rules(gm).allowPublic) room.public = false;
+        if (!RC.KidSafe.rules(gm).allowVoice) {
+          room.lobby.voice = false;
+          room.clients.forEach(x => { x.voice = false; });
+          pushVoiceRoster(room);
+        }
         pushLobby(room); broadcastRoomList();
       }
       if (room.clients.length >= roomCap(room)) { send(c, { t: 'inviteError', msg: 'Your game is already full.' }); break; }
@@ -905,6 +948,13 @@ function onMsg(c, m) {
     // peer-to-peer, so a call costs this process a handful of small messages.
     case 'voiceJoin':
       if (!c.room) break;
+      // No microphone in a kids room, ever, and not as a host preference that
+      // could be switched back on — a live mic between a child and anyone else is
+      // the one thing on this server that cannot be undone after the fact.
+      if (RC.KidSafe.isKids(c.room.lobby.gameMode)) {
+        send(c, { t: 'voiceDenied', msg: 'Voice chat is off in Crystal Guard. Use the message buttons.' });
+        break;
+      }
       if (!c.room.lobby.voice) { send(c, { t: 'voiceDenied', msg: 'The host has turned voice chat off for this game.' }); break; }
       c.voice = true;
       pushVoiceRoster(c.room);
@@ -918,6 +968,7 @@ function onMsg(c, m) {
     // Host switch for the whole room. Turning it off hangs everyone up.
     case 'roomVoice': {
       if (!isHost(c) || !c.room) break;
+      if (RC.KidSafe.isKids(c.room.lobby.gameMode)) break;   // not the host's to grant
       c.room.lobby.voice = !!m.on;
       if (!c.room.lobby.voice) c.room.clients.forEach(x => { x.voice = false; });
       pushVoiceRoster(c.room);
@@ -1022,6 +1073,17 @@ function onMsg(c, m) {
       if (!isHost(c) || c.room.lobby.started) break;
       const gm = (m.gameMode === 'survival' || m.gameMode === 'kids') ? m.gameMode : 'vs';
       c.room.lobby.gameMode = gm;
+      // The second place the kids rules are forced: a public grown-up room that
+      // is switched into Crystal Guard becomes private on the spot, and hangs up
+      // any call already in progress. Without this, "create public → switch mode"
+      // is a one-click hole straight through everything above.
+      const kidSafe = RC.KidSafe.rules(gm);
+      if (!kidSafe.allowPublic) c.room.public = false;
+      if (!kidSafe.allowVoice) {
+        c.room.lobby.voice = false;
+        c.room.clients.forEach(x => { x.voice = false; });
+        pushVoiceRoster(c.room);
+      }
       clearReady(c.room);
       // switching to a tighter cap could leave the room over-full — drop the newest joiners
       while (c.room.clients.length > roomCap(c.room)) {
